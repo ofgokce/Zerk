@@ -1,6 +1,12 @@
-public struct Zerk {
-    public private(set) var text = "Hello, World!"
+//
+//  Zerk.swift
+//
+//
+//  Created by Ömer Faruk Gökce on 14.06.2022.
+//
 
-    public init() {
-    }
+public class Zerk {
+    
+    public class var storage: DependencyStoring & DependencyRestoring { DependencyStorage.standard }
+    
 }
