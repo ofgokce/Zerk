@@ -5,7 +5,7 @@ Zerk
 [![Swift Package Manager compatible](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg?style=flat)](https://github.com/apple/swift-package-manager)
 [![License](https://img.shields.io/cocoapods/l/Zerk.svg?style=flat)](http://cocoapods.org/pods/Zerk)
 [![Platforms](https://img.shields.io/badge/platform-iOS-lightgrey.svg)](http://cocoapods.org/pods/Zerk)
-[![Swift Version](https://img.shields.io/badge/Swift-4.2--5.4-F16D39.svg?style=flat)](https://developer.apple.com/swift)
+[![Swift Version](https://img.shields.io/badge/Swift-5.0-F16D39.svg?style=flat)](https://developer.apple.com/swift)
 
 Zerk is a framework written for Swift which allows you to easily store and restore your dependencies following the [dependency injection pattern](https://en.wikipedia.org/wiki/Dependency_injection) and [clean coding principles](https://en.wikipedia.org/wiki/Robert_C._Martin). It removes the need for static methods and singletons and thus helps to create more managable and testable global or local dependencies.
 
@@ -15,14 +15,14 @@ Zerk is a framework written for Swift which allows you to easily store and resto
 
 - The stored dependencies can be restored easily and without any hussle so they can be injected via initializers, methods or properties.
 
-- With new @Injected keyword the injected dependencies are restored automatically, allowing an even more readable code.
+- With new `@Injected` keyword the injected dependencies are restored automatically, allowing an even more readable code.
 
 - Also there are other keywords for injecting only the properties or methods of your dependencies, using the cutting-edge key path feature of Swift.
 
 ## Requirements
 
 - iOS 9.0+
-- Xcode 10.2+
+- Xcode 13+
 - Swift 5.0+
 - CocoaPods 1.1.1+ (if used)
 
@@ -51,8 +51,7 @@ in `Package.swift` add the following:
 
 ```swift
 dependencies: [
-    // Dependencies declare other packages that this package depends on.
-    // .package(url: /* package url */, from: "1.0.0"),
+    ...
     .package(url: "https://github.com/ofgokce/Zerk.git", from: "0.1.1")
 ],
 targets: [
@@ -97,7 +96,7 @@ Zerk.storage
 ```swift
 Zerk.storage
     .store { storage in
-        DependenentClass(dependency: storage.restore()) as DependentProtocol
+        DependentClass(dependency: storage.restore()) as DependentProtocol
     }
 ```
 
@@ -134,6 +133,7 @@ class SomeClass {
 let someInstance = SomeClass(dependency: Zerk.storage.restore())
 ```
 
+
 - Method injection
 
 ```swift
@@ -147,6 +147,7 @@ class SomeClass {
 let someInstance = SomeClass()
 someInstance.set(dependency: Zerk.storage.restore())
 ```
+
 
 - Property injection
 
@@ -173,6 +174,7 @@ class SomeClass {
 }
 ```
 
+
 - @InjectedProperty
 
 Injects a read-only property of a dependency. Keypath syntax is to be used.
@@ -182,6 +184,7 @@ class SomeClass {
     @InjectedProperty(\DependencyProtocol.someProperty) var someProperty: SomeType
 }
 ```
+
 
 - @InjectedWritableProperty
 
@@ -193,6 +196,7 @@ class SomeClass {
 }
 ```
 
+
 - @InjectedUnwrappedProperty & @InjectedUnwrappedWritableProperty
 
 Unwraps and injects a read-only optional property of a dependency. If a default value has been given, the injected property will be unwrapped by the given default value. Else the property will be force-unwrapped.
@@ -202,6 +206,7 @@ class SomeClass {
     @InjectedUnwrappedProperty(\DependencyProtocol.someProperty, default: someValue) var someProperty: SomeType
 }
 ```
+
 
 - @InjectedMethod
 
@@ -244,7 +249,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 ## Notes
 
-I have written most of this as a DI solution for a project I was working on which is being used by millions of users on AppStore. This is the backbones of that app. I just wanted to share it with the world so I have changed it a bit and made into a framework. The documentation might be somewhat bad since there was none before but I will be bettering it as I find the time to do so. I will also check the requirements, I don't really know what are the minimums for this project. Feel free to contact me if you have some ideas to make this better. It will be appreciated. Most importantly, have fun!
+I have written most of this as a DI solution for a project I was working on which is being used by millions of users on AppStore. This is the backbones of that app. I just wanted to share it with the world so I have changed it a bit and made into a framework. The documentation might be somewhat bad since there was none before but I will be bettering it as I find the time to do so. I will also check and update the requirements and compatible platforms. 
+
+Feel free to contact me if you have some ideas to make this better. It will be appreciated. Most importantly, have fun!
 
 ## Credits
 
