@@ -11,9 +11,11 @@ Zerk is a framework written for Swift which allows you to easily store and resto
 
 ## Features
 
-- Zerk provides a way to store dependencies' initialization logic. The dependencies are not initialized when stored. When the dependency is being called, if it hasn't been initialized before it will be initialized and only then the instance will be cached to be used by upcoming calls.
+- Zerk provides a way to store dependencies' initialization logic. The dependencies may be stored as short-, middle- or long-time living objects and are not initialized when stored. When a dependency is being called, if it hasn't been initialized before it will be initialized and only then the instance will be cached if it should to be used by upcoming calls.
 
 - The stored dependencies can be restored easily and without any hussle so they can be injected via initializers, methods or properties.
+
+- The dependencies may depend on other stored dependencies. They even can have argumentations to give when being initialized.
 
 - With new `@Injected` keyword the injected dependencies are restored automatically, allowing an even more readable code.
 
@@ -52,7 +54,7 @@ in `Package.swift` add the following:
 ```swift
 dependencies: [
     ...
-    .package(url: "https://github.com/ofgokce/Zerk.git", from: "0.1.1")
+    .package(url: "https://github.com/ofgokce/Zerk.git", from: "1.0.0")
 ],
 targets: [
     .target(
@@ -67,52 +69,108 @@ targets: [
 
 ### Storing
 
-Firstly the dependencies should be stored in a storage, for most cases `Zerk.storage` will be the one.
+Firstly the dependencies' initiation logic should be stored in a storage. For the most cases `Zerk.store` may be used to store all the dependencies.
 
-The stored dependencies can only be restored by the types they have been stored as. It is recommended to store them as protocols for better testability.
+The stored dependencies can only be restored by the types they have been stored as. The dependencies may be stored as multiple types which they conform but for any type given there should be one dependency. It is recommended to store them as protocols for better testability.
 
-- For dependencies which doesn't depend on others:
+The dependencies can be stored with three life-time choices: 
+ 
+ - Transient:
+These dependencies are initialized every time they are being called.
+ 
+ - Scoped:
+These dependencies are initialized every time they are being restored by restore functions. This type is used by Zerk's property wrappers to ensure the instances live as long as their dependent object lives.
+ 
+ - Singleton:
+These dependencies are initialized only once when they are first called, then they are stored as instances in the storage and can be used globally.
+
+
+The dependencies will be stored as a wrapper-class `Dependency` which is responsible for identification, creation, typecasting and instance holding of said dependencies. This class has a `getInstance(with:)` method which creates the instances if not yet created or returns the stored instances for singletons if already been instantiated.
+
+- Storing dependencies which don't depend on others:
 
 ```swift
-Zerk.storage
-    .store(dependencyInstance as DependencyProtocol)
+Zerk.store
+    .transient(TransientDependencyClass() as TransientDependencyProtocol)
+    .scoped(ScopedDependencyClass() as ScopedDependencyProtocol)
+    .singleton(SingletonDependencyClass() as SingletonDependencyProtocol)
 ```
 
-- For dependencies which depend on other dependencies:
+- Storing dependencies which depend on other dependencies:
 
 ```swift
-Zerk.storage
-    .store { dependency in
+Zerk.store
+    .transient { dependency in
         DependentClassA(dependency: dependency) as DependentProtocolA
     }
-    .store { dependency0, dependency1, dependency2, dependency3, dependency4 in
+    .scoped { dependency0, dependency1, dependency2, dependency3, dependency4 in
         DependentClassB(dependency0: dependency0, dependency1: dependency1, dependency2: dependency2, dependency3: dependency3, dependency4: dependency4)
+        as DependentProtocolB
+    }
+    .singleton {
+        DependentClassC(dependency0: $0, dependency1: $1, dependency2: $2, dependency3: $3, dependency4: $4)
+        as DependentProtocolC
+    }
+```
+
+- Storing dependencies which depend on other dependencies (restoring by storage):
+
+```swift
+Zerk.store
+    .transient { storage in
+        DependentClassA(dependency: storage.restore()) 
+        as DependentProtocolA
+    }
+    .scoped { storage in
+        DependentClassB(dependency0: storage.restore(), dependency1: storage.restore()) 
         as DependentProtocolB
     }
 ```
 
-- For dependencies which depend on other dependencies (restoring by storage):
+- Storing dependencies with argumentative init:
 
 ```swift
-Zerk.storage
-    .store { storage in
-        DependentClass(dependency: storage.restore()) as DependentProtocol
+Zerk.store
+    .transient { storage, arguments in
+        ArgumentativeClassA(parameterName: arguments.parameterName) 
+        as ArgumentativeProtocolA
+    }
+    .singleton { storage, arguments in
+        ArgumentativeClassB(dependency: storage.restore(), parameterName0: arguments.parameterName0, parameterName1: arguments.customName) 
+        as ArgumentativeProtocolB
     }
 ```
+
+The argument names are not name-safe and not type-safe. Swift's [dynamicCallable](https://github.com/apple/swift-evolution/blob/main/proposals/0216-dynamic-callable.md) and [dynamicMemberLookup](https://github.com/apple/swift-evolution/blob/main/proposals/0195-dynamic-member-lookup.md) annotations have been used to provide this functionality. The namings and types used to store the dependencies should match those used to restore them. Otherwise there will be fatal errors thrown. For more information please check the documentations.
+
+- For dependencies with multiple types (aliases):
+
+```swift
+Zerk.store
+    .scoped({ _, _ in
+        MultitypeClass()
+    }, as: ProtocolA.self, ProtocolB.self, ProtocolC.self)
+    .singleton({ storage, arguments in
+        MultitypeClass(dependency: storage.restore(), parameterName0: arguments.parameterName0, parameterName1: arguments.customName)
+    }, as: ProtocolA.self, ProtocolB.self, ProtocolC.self)
+```
+
+The dependency should be able to be typecasted to the types given here. Otherwise there will be fatal errors thrown.
 
 And that's it! 
 
 ### Restoring
 
-Now the `restore()` or `restore(_:)` methods of the same storage can restore the stored dependencies.
+Now the `restore()`, `restore(with:)` and `restore(_:)` methods of the same storage can restore the stored dependencies. While the first two methods will return the typecasted instance of the dependency itself the latter one will return the wrapper instance of type `Dependency`.
 
 ```swift
-let dependency: DependencyProtocol = Zerk.storage.restore()
+let instanceA: DependencyProtocolA = Zerk.standardStorage.restore() // Returns the typecasted dependency instance
+let instanceB: DependencyProtocolB = Zerk.standardStorage.restore(with: .arguments(argument0: value0, argument1: value1) // Returns the typecasted dependency instance, instantiated with the given arguments
 ```
 OR
 
 ```swift
-let dependency = Zerk.storage.restore(DependencyProtocol.self)
+let dependency = Zerk.standardStorage.restore(DependencyProtocol) // Returns the wrapper instance
 ```
 
 ### Basic Injection
@@ -130,7 +188,7 @@ class SomeClass {
     }
 }
 
-let someInstance = SomeClass(dependency: Zerk.storage.restore())
+let someInstance = SomeClass(dependency: Zerk.standardStorage.restore())
 ```
 
 
@@ -145,7 +203,7 @@ class SomeClass {
 }
 
 let someInstance = SomeClass()
-someInstance.set(dependency: Zerk.storage.restore())
+someInstance.set(dependency: Zerk.standardStorage.restore())
 ```
 
 
@@ -157,7 +215,7 @@ class SomeClass {
 }
 
 let someInstance = SomeClass()
-someInstance.dependency = Zerk.storage.restore()
+someInstance.dependency = Zerk.standardStorage.restore()
 ```
 
 ### Keyword Injection
@@ -166,11 +224,20 @@ Zerk provides new keywords to make the injection even easier and more readable.
 
 - @Injected
 
-Injects the dependency.
+Injects the whole dependency.
 
 ```swift
 class SomeClass {
     @Injected var dependency: DependencyProtocol
+}
+```
+
+To inject a dependency with argumentation:
+
+```swift
+class SomeClass {
+    @Injected(with: .arguments(argument0: value0, argument1: value1)
+    var dependency: DependencyProtocol
 }
 ```
 
@@ -186,20 +253,20 @@ class SomeClass {
 ```
 
 
-- @InjectedWritableProperty
+- @InjectedMutableProperty
 
-Injects a read-write property of a dependency.
+Injects a mutable property of a dependency.
 
 ```swift
 class SomeClass {
-    @InjectedWritableProperty(\DependencyProtocol.someProperty) var someProperty: SomeType
+    @InjectedMutableProperty(\DependencyProtocol.someProperty) var someProperty: SomeType
 }
 ```
 
 
-- @InjectedUnwrappedProperty & @InjectedUnwrappedWritableProperty
+- @InjectedUnwrappedProperty & @InjectedUnwrappedMutableProperty
 
-Unwraps and injects a read-only optional property of a dependency. If a default value has been given, the injected property will be unwrapped by the given default value. Else the property will be force-unwrapped.
+Unwraps and injects an optional property of a dependency. If a default value has been given, the injected property will be unwrapped by the given default value. Else the property will be force-unwrapped.
 
 ```swift
 class SomeClass {
@@ -228,7 +295,9 @@ class SomeClass {
 
 ## Where to Store Dependencies
 
-The dependencies must be stored before they are used. The typical approach would be to store them in `AppDelegate`, better before exiting the `application:didFinishLaunchingWithOptions:` method.
+The dependencies must be stored before they are used.
+
+The typical approach would be to store them in `AppDelegate`, better before exiting the `application:didFinishLaunchingWithOptions:` method.
 
 ```swift
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -237,12 +306,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey : Any]? = nil) -> Bool {
         ...
         
-        Zerk.storage
-            .store( ... )
-            .store { ... }
+        Zerk.store
+            .transient( ... )
+            .singleton { ... }
             ...
             
         ...
+    }
+}
+```
+
+In order to automatize the storing process without cluttering the AppDelegate, you may conform `Zerk` to `AutoStoring` protocol in an empty file. This protocol only has a `store()` function which will be called only once when the very first time any dependency restoration is needed. 
+
+```swift
+extension Zerk: AutoStoring {
+
+    func store() {
+    
+        Zerk.store
+            .transient( ... )
+            .singleton { ... }
+            ...
     }
 }
 ```
@@ -255,9 +339,13 @@ Feel free to contact me if you have some ideas to make this better. It will be a
 
 ## Credits
 
-The storage approach and storing methods have been inspired by:
+The storage approach have been inspired by:
 
-- [Swinject](https://cocoapods.org/pods/Swinject)
+- [Swinject](https://github.com/Swinject/Swinject)
+
+The multitypes (aliases) have been inspired by:
+
+- [DependencyInjection](https://github.com/sebastianpixel/DependencyInjection)
 
 ## License
 

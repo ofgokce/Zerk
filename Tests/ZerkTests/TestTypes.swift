@@ -8,61 +8,118 @@
 import Foundation
 import Zerk
 
-protocol DependencyProtocolA {
-    var readOnlyProperty: Bool? { get }
-    var readWriteProperty: Bool? { get set }
-    func simpleMethod() -> Bool
-    func parameterMethod(param: Int, _: Bool) -> Bool
+protocol TransientTestProtocol: AnyObject {
+    
 }
 
-class DependencyClassA: DependencyProtocolA {
+class TransientTestClass: TransientTestProtocol {
+    
+}
+
+protocol ScopedTestProtocol: AnyObject {
+    
+}
+
+class ScopedTestClass: ScopedTestProtocol {
+    
+}
+
+protocol SingletonTestProtocol: AnyObject {
+    
+}
+
+class SingletonTestClass: SingletonTestProtocol {
+    
+}
+
+protocol BasicTestProtocol: AnyObject {
+    var readOnlyProperty: Bool? { get }
+    var readWriteProperty: Bool? { get set }
+}
+
+class BasicTestClass: BasicTestProtocol {
     var readOnlyProperty: Bool? = true
-    
     var readWriteProperty: Bool? = true
+}
+
+protocol DependentTestProtocol {
+    var dependency: BasicTestProtocol { get }
+}
+
+class DependentTestClass: DependentTestProtocol {
+    let dependency: BasicTestProtocol
     
-    func simpleMethod() -> Bool {
-        return true
-    }
-    
-    func parameterMethod(param: Int, _: Bool) -> Bool {
-        return true
+    init(dependency: BasicTestProtocol) {
+        self.dependency = dependency
     }
 }
 
-protocol DependencyProtocolB {
-    var readOnlyProperty: Bool? { get }
-    var readWriteProperty: Bool? { get set }
+protocol ArgumentativeTestProtocol {
+    var booleanArgument: Bool { get }
+    var stringArgument: String { get }
+    var intArgument: Int { get }
 }
 
-class DependencyClassB: DependencyProtocolB {
+class ArgumentativeTestClass: ArgumentativeTestProtocol {
+    var booleanArgument: Bool
+    var stringArgument: String
+    var intArgument: Int
+    
+    init(booleanArgument: Bool, stringArgument: String, intArgument: Int) {
+        self.booleanArgument = booleanArgument
+        self.stringArgument = stringArgument
+        self.intArgument = intArgument
+    }
+}
+
+protocol MultitypeTestProtocolA {
+    var propertyA: String { get }
+}
+
+protocol MultitypeTestProtocolB {
+    var propertyB: String { get }
+}
+
+class MultitypeTestClass: MultitypeTestProtocolA, MultitypeTestProtocolB {
+    var propertyA: String = "A"
+    var propertyB: String = "B"
+}
+
+class MainTestClass {
+    
+    @Injected
+    var transientDependency: TransientTestProtocol
+    
+    @Injected
+    var scopedDependency: ScopedTestProtocol
+    
+    @Injected
+    var singletonDependency: SingletonTestProtocol
+    
+    @Injected
+    var basicDependency: BasicTestProtocol
+    
+    @Injected
+    var dependentDependency: DependentTestProtocol
+    
+    @Injected(with: .arguments(booleanArgument: true, stringArgument: "string", intArgument: 1))
+    var argumentativeDependency: ArgumentativeTestProtocol
+    
+    @Injected
+    var multitypeDependencyProtocolA: MultitypeTestProtocolA
+    
+    @Injected
+    var multitypeDependencyProtocolB: MultitypeTestProtocolB
+    
+    @InjectedProperty(\BasicTestProtocol.readOnlyProperty)
     var readOnlyProperty: Bool?
     
+    @InjectedMutableProperty(\BasicTestProtocol.readWriteProperty)
     var readWriteProperty: Bool?
     
-    init(dependency: DependencyProtocolA) {
-        readOnlyProperty = dependency.readOnlyProperty
-        readWriteProperty = dependency.readWriteProperty
-    }
-}
-
-class DependentClass {
-    @Injected var dependency: DependencyProtocolA
-    
-    @InjectedProperty(\DependencyProtocolA.readOnlyProperty)
-    var readOnlyProperty: Bool?
-    
-    @InjectedWritableProperty(\DependencyProtocolA.readWriteProperty)
-    var readWriteProperty: Bool?
-    
-    @InjectedUnwrappedProperty(\DependencyProtocolA.readOnlyProperty)
+    @InjectedUnwrappedProperty(\BasicTestProtocol.readOnlyProperty)
     var unwrappedReadOnlyProperty: Bool
     
-    @InjectedUnwrappedWritableProperty(\DependencyProtocolA.readWriteProperty)
+    @InjectedUnwrappedMutableProperty(\BasicTestProtocol.readWriteProperty)
     var unwrappedReadWriteProperty: Bool
-    
-    @InjectedMethod(DependencyProtocolA.simpleMethod)
-    var simpleMethod: () -> Bool
-    
-    @InjectedMethod(DependencyProtocolA.parameterMethod)
-    var parameterMethod: (Int, Bool) -> Bool
 }

@@ -3,35 +3,67 @@ import XCTest
 
 final class ZerkTests: XCTestCase {
     func testStandardStorage() throws {
-        Zerk.storage
-            .store(DependencyClassA() as DependencyProtocolA)
-            .store { dependency in
-                return DependencyClassB(dependency: dependency) as DependencyProtocolB
+        Zerk.store
+            .transient(TransientTestClass() as TransientTestProtocol)
+            .scoped(ScopedTestClass() as ScopedTestProtocol)
+            .singleton(SingletonTestClass() as SingletonTestProtocol)
+            .singleton(BasicTestClass() as BasicTestProtocol)
+            .singleton {
+                DependentTestClass(dependency: $0)
+                as DependentTestProtocol
             }
+            .singleton { storage, arguments in
+                ArgumentativeTestClass(booleanArgument: arguments.booleanArgument,
+                                       stringArgument: arguments.stringArgument,
+                                       intArgument: arguments.intArgument)
+                as ArgumentativeTestProtocol
+            }
+            .singleton({ storage, arguments in MultitypeTestClass() },
+                       as: MultitypeTestProtocolA.self, MultitypeTestProtocolB.self)
         
-        let dependent = DependentClass()
+        let test = MainTestClass()
         
-        XCTAssertNotNil(dependent.readOnlyProperty)
-        XCTAssertTrue(dependent.unwrappedReadOnlyProperty)
+        //MARK: - Test transient, scoped and singleton dependencies
         
-        XCTAssertNotNil(dependent.readWriteProperty)
-        XCTAssertTrue(dependent.unwrappedReadWriteProperty)
+        XCTAssertFalse(test.transientDependency === test.transientDependency)
         
-        dependent.readWriteProperty = false
+        XCTAssertTrue(test.scopedDependency === test.scopedDependency)
+        XCTAssertFalse(test.scopedDependency === MainTestClass().scopedDependency)
         
-        XCTAssertFalse(dependent.unwrappedReadWriteProperty)
+        XCTAssertTrue(test.singletonDependency === test.singletonDependency)
+        XCTAssertTrue(test.singletonDependency === MainTestClass().singletonDependency)
         
-        XCTAssertTrue(dependent.simpleMethod())
-        XCTAssertTrue(dependent.parameterMethod(1, true))
-    }
-    
-    func testCustomStorage() throws {
-        let storage = DependencyStorage()
         
-        storage.store(DependencyClassA() as DependencyProtocolA)
+        //MARK: Test dependent dependency
+        XCTAssertTrue(test.dependentDependency.dependency === test.basicDependency)
         
-        let dependency: DependencyProtocolA = storage.restore()
         
-        XCTAssertTrue(dependency.readOnlyProperty ?? false)
+        //MARK: - Test argumentative dependency
+        
+        XCTAssertTrue(test.argumentativeDependency.booleanArgument)
+        XCTAssertEqual(test.argumentativeDependency.stringArgument, "string")
+        XCTAssertEqual(test.argumentativeDependency.intArgument, 1)
+        
+        
+        //MARK: - Multitype dependency
+        
+        XCTAssertEqual(test.multitypeDependencyProtocolA.propertyA, "A")
+        XCTAssertEqual(test.multitypeDependencyProtocolB.propertyB, "B")
+        
+        
+        //MARK: - Test read-only and read-write properties
+        
+        XCTAssertTrue(test.basicDependency.readOnlyProperty ?? false)
+        
+        XCTAssertNotNil(test.readOnlyProperty)
+        XCTAssertTrue(test.unwrappedReadOnlyProperty)
+        
+        XCTAssertNotNil(test.readWriteProperty)
+        XCTAssertTrue(test.unwrappedReadWriteProperty)
+        
+        test.readWriteProperty = false
+        
+        XCTAssertFalse(test.unwrappedReadWriteProperty)
+        
     }
 }
