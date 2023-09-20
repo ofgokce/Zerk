@@ -7,6 +7,6 @@
 
 import Foundation
 
-protocol AutoStoring {
+public protocol AutoStoring {
     static func store()
 }
