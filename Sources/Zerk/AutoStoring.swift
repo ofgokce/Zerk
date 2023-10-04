@@ -8,5 +8,5 @@
 import Foundation
 
 public protocol AutoStoring {
-    static func store()
+    static func autoStore()
 }

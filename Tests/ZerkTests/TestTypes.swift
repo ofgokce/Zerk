@@ -9,7 +9,7 @@ import Foundation
 import Zerk
 
 extension Zerk: AutoStoring {
-    public static func store() {
+    public static func autoStore() {
         Zerk.store
             .transient(TransientTestClass() as TransientTestProtocol)
             .scoped(ScopedTestClass() as ScopedTestProtocol)

@@ -36,7 +36,7 @@ extension DependencyStorage {
     
     private static func checkAutoStoring() {
         if let zerk = Zerk.self as? AutoStoring.Type, !didAutoStore {
-            zerk.store()
+            zerk.autoStore()
             didAutoStore = true
         }
     }
