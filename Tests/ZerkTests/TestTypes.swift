@@ -8,6 +8,29 @@
 import Foundation
 import Zerk
 
+extension Zerk: AutoStoring {
+    public static func store() {
+        Zerk.store
+            .transient(TransientTestClass() as TransientTestProtocol)
+            .scoped(ScopedTestClass() as ScopedTestProtocol)
+            .singleton(SingletonTestClass() as SingletonTestProtocol)
+            .singleton(BasicTestClass() as BasicTestProtocol)
+            .singleton {
+                DependentTestClass(dependency: $0)
+                as DependentTestProtocol
+            }
+            .singleton { storage, arguments in
+                ArgumentativeTestClass(booleanArgument: arguments.booleanArgument,
+                                       stringArgument: arguments.stringArgument,
+                                       intArgument: arguments.intArgument)
+                as ArgumentativeTestProtocol
+            }
+            .singleton(MultitypeTestProtocolA.self, MultitypeTestProtocolB.self) { storage, arguments in
+                MultitypeTestClass()
+            }
+    }
+}
+
 protocol TransientTestProtocol: AnyObject {
     
 }

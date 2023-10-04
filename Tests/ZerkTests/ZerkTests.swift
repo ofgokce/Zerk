@@ -3,23 +3,6 @@ import XCTest
 
 final class ZerkTests: XCTestCase {
     func testStandardStorage() throws {
-        Zerk.store
-            .transient(TransientTestClass() as TransientTestProtocol)
-            .scoped(ScopedTestClass() as ScopedTestProtocol)
-            .singleton(SingletonTestClass() as SingletonTestProtocol)
-            .singleton(BasicTestClass() as BasicTestProtocol)
-            .singleton {
-                DependentTestClass(dependency: $0)
-                as DependentTestProtocol
-            }
-            .singleton { storage, arguments in
-                ArgumentativeTestClass(booleanArgument: arguments.booleanArgument,
-                                       stringArgument: arguments.stringArgument,
-                                       intArgument: arguments.intArgument)
-                as ArgumentativeTestProtocol
-            }
-            .singleton({ storage, arguments in MultitypeTestClass() },
-                       as: MultitypeTestProtocolA.self, MultitypeTestProtocolB.self)
         
         let test = MainTestClass()
         

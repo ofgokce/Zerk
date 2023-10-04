@@ -191,7 +191,34 @@ public protocol DependencyStoring {
     ///        as DependencyProtocol
     ///     }
     ///
-    @discardableResult func transient<D>(_ builder: @escaping (_ storage: DependencyRestoring, _ arguments: DependencyArguments) -> D, as types: Any.Type...) -> DependencyStoring
+    @discardableResult func transient<D>(_ types: Any.Type..., builder: @escaping @autoclosure () -> D) -> DependencyStoring
+    
+    /// This function allows storing dependencies which are dependent to other stored dependencies with additional arguments that can be passed when being initialized.
+    /// The dependencies needed by this dependency should be stored also.
+    /// In order to remove any possibility of circular dependency, dependencies should only be one-way dependent to eachother. Otherwise there will definitely be an infinite loop.
+    /// The argumentation naming is dynamic but required and will be checked in run-time.
+    ///
+    /// Usage:
+    ///
+    ///     .store { storage, arguments -> DependentProtocol in
+    ///        return DependenentClass(dependency: storage.restore(), argument: arguments.argument)
+    ///     }
+    ///
+    @discardableResult func transient<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring) -> D) -> DependencyStoring
+    
+    /// This function allows storing dependencies which are dependent to other stored dependencies with additional arguments that can be passed when being initialized.
+    /// The dependencies needed by this dependency should be stored also.
+    /// In order to remove any possibility of circular dependency, dependencies should only be one-way dependent to eachother. Otherwise there will definitely be an infinite loop.
+    /// The argumentation naming is dynamic but required and will be checked in run-time.
+    ///
+    /// Usage:
+    ///
+    ///     .store { storage, arguments -> DependentProtocol in
+    ///        return DependenentClass(dependency: storage.restore(), argument: arguments.argument)
+    ///        as DependencyProtocol
+    ///     }
+    ///
+    @discardableResult func transient<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring, _ arguments: DependencyArguments) -> D) -> DependencyStoring
     
     
     
@@ -392,7 +419,34 @@ public protocol DependencyStoring {
     ///        as DependencyProtocol
     ///     }
     ///
-    @discardableResult func scoped<D>(_ builder: @escaping (_ storage: DependencyRestoring, _ arguments: DependencyArguments) -> D, as types: Any.Type...) -> DependencyStoring
+    @discardableResult func scoped<D>(_ types: Any.Type..., builder: @escaping @autoclosure () -> D) -> DependencyStoring
+    
+    /// This function allows storing dependencies which are dependent to other stored dependencies with additional arguments that can be passed when being initialized.
+    /// The dependencies needed by this dependency should be stored also.
+    /// In order to remove any possibility of circular dependency, dependencies should only be one-way dependent to eachother. Otherwise there will definitely be an infinite loop.
+    /// The argumentation naming is dynamic but required and will be checked in run-time.
+    ///
+    /// Usage:
+    ///
+    ///     .store { storage, arguments -> DependentProtocol in
+    ///        return DependenentClass(dependency: storage.restore(), argument: arguments.argument)
+    ///     }
+    ///
+    @discardableResult func scoped<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring) -> D) -> DependencyStoring
+    
+    /// This function allows storing dependencies which are dependent to other stored dependencies with additional arguments that can be passed when being initialized.
+    /// The dependencies needed by this dependency should be stored also.
+    /// In order to remove any possibility of circular dependency, dependencies should only be one-way dependent to eachother. Otherwise there will definitely be an infinite loop.
+    /// The argumentation naming is dynamic but required and will be checked in run-time.
+    ///
+    /// Usage:
+    ///
+    ///     .store { storage, arguments -> DependentProtocol in
+    ///        return DependenentClass(dependency: storage.restore(), argument: arguments.argument)
+    ///        as DependencyProtocol
+    ///     }
+    ///
+    @discardableResult func scoped<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring, _ arguments: DependencyArguments) -> D) -> DependencyStoring
     
     
     
@@ -593,5 +647,32 @@ public protocol DependencyStoring {
     ///        as DependencyProtocol
     ///     }
     ///
-    @discardableResult func singleton<D>(_ builder: @escaping (_ storage: DependencyRestoring, _ arguments: DependencyArguments) -> D, as types: Any.Type...) -> DependencyStoring
+    @discardableResult func singleton<D>(_ types: Any.Type..., builder: @escaping @autoclosure () -> D) -> DependencyStoring
+    
+    /// This function allows storing dependencies which are dependent to other stored dependencies with additional arguments that can be passed when being initialized.
+    /// The dependencies needed by this dependency should be stored also.
+    /// In order to remove any possibility of circular dependency, dependencies should only be one-way dependent to eachother. Otherwise there will definitely be an infinite loop.
+    /// The argumentation naming is dynamic but required and will be checked in run-time.
+    ///
+    /// Usage:
+    ///
+    ///     .store { storage, arguments -> DependentProtocol in
+    ///        return DependenentClass(dependency: storage.restore(), argument: arguments.argument)
+    ///     }
+    ///
+    @discardableResult func singleton<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring) -> D) -> DependencyStoring
+    
+    /// This function allows storing dependencies which are dependent to other stored dependencies with additional arguments that can be passed when being initialized.
+    /// The dependencies needed by this dependency should be stored also.
+    /// In order to remove any possibility of circular dependency, dependencies should only be one-way dependent to eachother. Otherwise there will definitely be an infinite loop.
+    /// The argumentation naming is dynamic but required and will be checked in run-time.
+    ///
+    /// Usage:
+    ///
+    ///     .store { storage, arguments -> DependentProtocol in
+    ///        return DependenentClass(dependency: storage.restore(), argument: arguments.argument)
+    ///        as DependencyProtocol
+    ///     }
+    ///
+    @discardableResult func singleton<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring, _ arguments: DependencyArguments) -> D) -> DependencyStoring
 }
