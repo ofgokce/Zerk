@@ -57,9 +57,9 @@ extension DependencyStorage: DependencyRestoring {
     
     func restore<D>(_ dependency: D.Type) -> Dependency {
         
-        lock.lock(); defer { lock.unlock() }
-        
         DependencyStorage.checkAutoStoring()
+        
+        lock.lock(); defer { lock.unlock() }
         
         let identifier = ObjectIdentifier(D.self)
         if let dependency = dependencies[identifier] {
@@ -191,10 +191,22 @@ extension DependencyStorage: DependencyStoring {
     }
     
     func transient<D>(_ builder: @escaping (DependencyRestoring, DependencyArguments) -> D) -> DependencyStoring {
-        transient(builder, as: D.self)
+        transient(D.self, builder: builder)
     }
     
-    func transient<D>(_ builder: @escaping (DependencyRestoring, DependencyArguments) -> D, as types: Any.Type...) -> DependencyStoring {
+    func transient<D>(_ types: Any.Type..., builder: @escaping @autoclosure () -> D) -> DependencyStoring {
+        store(lifeTime: .transient, types: types) { _, _ in
+            builder()
+        }
+    }
+    
+    func transient<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring) -> D) -> DependencyStoring {
+        store(lifeTime: .transient, types: types) { storage, _ in
+            builder(storage)
+        }
+    }
+    
+    func transient<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring, _ arguments: DependencyArguments) -> D) -> DependencyStoring {
         store(lifeTime: .transient, types: types, builder: builder)
     }
     
@@ -317,10 +329,22 @@ extension DependencyStorage: DependencyStoring {
     }
     
     func scoped<D>(_ builder: @escaping (DependencyRestoring, DependencyArguments) -> D) -> DependencyStoring {
-        scoped(builder, as: D.self)
+        scoped(D.self, builder: builder)
     }
     
-    func scoped<D>(_ builder: @escaping (DependencyRestoring, DependencyArguments) -> D, as types: Any.Type...) -> DependencyStoring {
+    func scoped<D>(_ types: Any.Type..., builder: @escaping @autoclosure () -> D) -> DependencyStoring {
+        store(lifeTime: .scoped, types: types) { _, _ in
+            builder()
+        }
+    }
+    
+    func scoped<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring) -> D) -> DependencyStoring {
+        store(lifeTime: .scoped, types: types) { storage, _ in
+            builder(storage)
+        }
+    }
+    
+    func scoped<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring, _ arguments: DependencyArguments) -> D) -> DependencyStoring {
         store(lifeTime: .scoped, types: types, builder: builder)
     }
     
@@ -443,10 +467,22 @@ extension DependencyStorage: DependencyStoring {
     }
     
     func singleton<D>(_ builder: @escaping (DependencyRestoring, DependencyArguments) -> D) -> DependencyStoring {
-        singleton(builder, as: D.self)
+        singleton(D.self, builder: builder)
     }
     
-    func singleton<D>(_ builder: @escaping (DependencyRestoring, DependencyArguments) -> D, as types: Any.Type...) -> DependencyStoring {
+    func singleton<D>(_ types: Any.Type..., builder: @escaping @autoclosure () -> D) -> DependencyStoring {
+        store(lifeTime: .singleton, types: types) { _, _ in
+            builder()
+        }
+    }
+    
+    func singleton<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring) -> D) -> DependencyStoring {
+        store(lifeTime: .singleton, types: types) { storage, _ in
+            builder(storage)
+        }
+    }
+    
+    func singleton<D>(_ types: Any.Type..., builder: @escaping (_ storage: DependencyRestoring, _ arguments: DependencyArguments) -> D) -> DependencyStoring {
         store(lifeTime: .singleton, types: types, builder: builder)
     }
     

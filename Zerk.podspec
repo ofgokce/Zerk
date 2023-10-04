@@ -2,7 +2,7 @@ Pod::Spec.new do |spec|
 
   spec.name                     = 'Zerk'
   
-  spec.version                  = '1.0.0'
+  spec.version                  = '1.0.2'
   
   spec.summary                  = 'Easily store, restore and inject dependencies'
   
