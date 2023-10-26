@@ -24,7 +24,7 @@ import Foundation
  */
 class DependencyStorage {
     
-    internal var dependencies: [ObjectIdentifier: Dependency] = [:]
+    internal var dependencies: [String: Dependency] = [:]
     
     private let lock = NSLock()
     
@@ -61,8 +61,7 @@ extension DependencyStorage: DependencyRestoring {
         
         lock.lock(); defer { lock.unlock() }
         
-        let identifier = ObjectIdentifier(D.self)
-        if let dependency = dependencies[identifier] {
+        if let dependency = dependencies["\(D.self)"] {
             return dependency
         } else {
             fatalError("\(D.self) has not been stored as an injectable object.")
@@ -502,8 +501,7 @@ extension DependencyStorage: DependencyStoring {
         }
         
         for type in types {
-            let identifier = ObjectIdentifier(type)
-            dependencies[identifier] = dependency
+            dependencies["\(type)"] = dependency
         }
         
         return self
