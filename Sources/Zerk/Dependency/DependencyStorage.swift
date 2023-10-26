@@ -61,6 +61,26 @@ extension DependencyStorage: DependencyRestoring {
         
         lock.lock(); defer { lock.unlock() }
         
+        var indicator: String = "\(D.self)"
+        
+        if D.self is ExpressibleByNilLiteral.Type {
+            indicator.removeFirst("Optional<".count)
+            indicator.removeLast()
+        }
+        
+        if let dependency = dependencies[indicator] {
+            return dependency
+        } else {
+            fatalError("\(D.self) has not been stored as an injectable object.")
+        }
+    }
+    
+    func restore<D>(_ dependency: Optional<D>.Type) -> Dependency {
+        
+        DependencyStorage.checkAutoStoring()
+        
+        lock.lock(); defer { lock.unlock() }
+        
         if let dependency = dependencies["\(D.self)"] {
             return dependency
         } else {

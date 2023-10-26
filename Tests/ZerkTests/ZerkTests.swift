@@ -33,6 +33,12 @@ final class ZerkTests: XCTestCase {
         XCTAssertEqual(test.multitypeDependencyProtocolA.propertyA, "A")
         XCTAssertEqual(test.multitypeDependencyProtocolB.propertyB, "B")
         
+        //MARK: - Dependency without protocol conformance
+        XCTAssertEqual(test.dependencyWithoutProtocol.propertyA, "A")
+        
+        //MARK: - Dependency with optional init
+        XCTAssertNotNil(test.dependencyWithOptionalInitParameter.basicTestInstance)
+        
         
         //MARK: - Test read-only and read-write properties
         

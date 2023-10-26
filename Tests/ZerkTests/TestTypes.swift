@@ -28,6 +28,11 @@ extension Zerk: AutoStoring {
             .singleton(MultitypeTestProtocolA.self, MultitypeTestProtocolB.self) { storage, arguments in
                 MultitypeTestClass()
             }
+            .singleton(ClassWithoutProtocol())
+            .singleton {
+                ClassWithOptionalInitParameter(basicTestInstance: $0)
+                as ProtocolWithOptionalInitParameter
+            }
     }
 }
 
@@ -108,6 +113,22 @@ class MultitypeTestClass: MultitypeTestProtocolA, MultitypeTestProtocolB {
     var propertyB: String = "B"
 }
 
+class ClassWithoutProtocol {
+    var propertyA: String = "A"
+}
+
+protocol ProtocolWithOptionalInitParameter {
+    var basicTestInstance: BasicTestProtocol? { get }
+}
+
+class ClassWithOptionalInitParameter: ProtocolWithOptionalInitParameter {
+    var basicTestInstance: BasicTestProtocol?
+    
+    init(basicTestInstance: BasicTestProtocol?) {
+        self.basicTestInstance = basicTestInstance
+    }
+}
+
 class MainTestClass {
     
     @Injected
@@ -145,4 +166,10 @@ class MainTestClass {
     
     @InjectedUnwrappedMutableProperty(\BasicTestProtocol.readWriteProperty)
     var unwrappedReadWriteProperty: Bool
+    
+    @Injected
+    var dependencyWithoutProtocol: ClassWithoutProtocol
+    
+    @Injected
+    var dependencyWithOptionalInitParameter: ProtocolWithOptionalInitParameter
 }
