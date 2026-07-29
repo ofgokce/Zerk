@@ -1,0 +1,136 @@
+//
+//  CodeGenerator.swift
+//  Zerk
+//
+//  Created by Ömer Faruk Gökce on 27.07.2026.
+//
+
+import Foundation
+import SwiftParser
+
+/// Runs the whole pipeline for one module: parse every input file, resolve the
+/// dependency graph, and write the generated injection code.
+///
+/// The stages are `SourceCollector` (syntax → records), `ProviderResolver`
+/// (which provider serves which key), and `GeneratorOutputBuilder` (records →
+/// Swift source). Diagnostics accumulate across stages and are emitted
+/// together, so one build surfaces every problem rather than the first.
+public struct CodeGenerator {
+
+    /// Thrown after diagnostics have been emitted, to exit non-zero. Carries no
+    /// payload: the diagnostics are the error report.
+    struct Failure: Error {}
+
+    let inputPaths: [String]
+    let outputPath: String
+    var settingsPath: String? = nil
+
+    public init(inputPaths: [String], outputPath: String, settingsPath: String? = nil) {
+        self.inputPaths = inputPaths
+        self.outputPath = outputPath
+        self.settingsPath = settingsPath
+    }
+
+    public func run() throws {
+        let settings: ZerkSettings
+        do {
+            settings = try loadSettings()
+        } catch let failure as ZerkSettings.LoadFailure {
+            emitDiagnostics([
+                CodegenDiagnostic(
+                    severity: .error,
+                    message: failure.message,
+                    location: AttributeLocation(filePath: failure.path, line: 1, column: 1)
+                )
+            ])
+            throw Failure()
+        }
+
+        let collector = SourceCollector(settings: settings)
+
+        for path in inputPaths {
+            let source = try String(contentsOfFile: path, encoding: .utf8)
+            let tree = Parser.parse(source: source)
+            collector.walk(tree, path: path)
+        }
+
+        let resolution = ProviderResolver(types: collector.types).resolve()
+        var diagnostics = collector.diagnostics + resolution.diagnostics
+
+        if diagnostics.contains(where: { $0.severity == .error }) {
+            emitDiagnostics(diagnostics)
+            throw Failure()
+        }
+
+        let output = GeneratorOutputBuilder(
+            types: collector.types,
+            values: collector.values,
+            resolutions: resolution.resolutions,
+            moduleAccessLevels: collector.moduleAccessLevels,
+            injectedUses: collector.injectedUses,
+            markedMembers: collector.markedMembers
+        ).build()
+
+        diagnostics += output.diagnostics
+
+        // A same-domain isolated default argument relies on SE-0411 evaluating
+        // the expression in the callee's domain. Swift 6 language mode has that
+        // always; Swift 5 mode needs complete strict concurrency or the
+        // IsolatedDefaultValues upcoming feature. Every other isolated
+        // construct Zerk emits — isolated singleton storage, cross-domain
+        // async resolution, an isolated member with a nonisolated default —
+        // compiles under stock Swift 5, so none of them are gated here.
+        if output.usesIsolatedDefaultArguments, !settings.supportsIsolatedDefaultValues {
+            let path = settings.sourcePath ?? outputPath
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "Resolving an isolated dependency into a default argument requires SE-0411, which \(ZerkSettings.fileName) says this target does not have (swiftVersion \"\(settings.swiftVersion)\", strictConcurrency \"\(settings.strictConcurrency.rawValue)\", isolatedDefaultValues \(settings.isolatedDefaultValues)). Set SWIFT_UPCOMING_FEATURE_ISOLATED_DEFAULT_VALUES=YES on the target and \"isolatedDefaultValues\": true here, or set SWIFT_STRICT_CONCURRENCY=complete and \"strictConcurrency\": \"complete\" — or mark the providers 'nonisolated'.",
+                location: AttributeLocation(filePath: path, line: 1, column: 1)
+            ))
+        }
+
+        if diagnostics.contains(where: { $0.severity == .error }) {
+            emitDiagnostics(diagnostics)
+            throw Failure()
+        }
+
+        let url = URL(fileURLWithPath: outputPath)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try output.output.write(to: url, atomically: true, encoding: String.Encoding.utf8)
+    }
+    
+    /// The plugin resolves the settings file and passes its path explicitly.
+    /// When it finds none, the codegen falls back to the directories of the
+    /// input files so the tool stays usable standalone.
+    private func loadSettings() throws -> ZerkSettings {
+        if let settingsPath {
+            return try ZerkSettings.load(contentsOfFile: settingsPath)
+        }
+
+        var searchPaths: [String] = []
+        var seen = Set<String>()
+        for path in inputPaths {
+            let directory = (path as NSString).deletingLastPathComponent
+            if seen.insert(directory).inserted {
+                searchPaths.append(directory)
+            }
+        }
+        return try ZerkSettings.load(searchPaths: searchPaths)
+    }
+
+    /// Writes diagnostics to stderr as `file:line:column: severity: message`,
+    /// the form Xcode and SwiftPM parse to attach them to the developer's own
+    /// source rather than to the generated file.
+    func emitDiagnostics(_ diagnostics: [CodegenDiagnostic]) {
+        for diagnostic in diagnostics {
+            let severity = diagnostic.severity == .error ? "error" : "warning"
+            let line = "\(diagnostic.location.filePath):\(diagnostic.location.line):\(diagnostic.location.column): \(severity): \(diagnostic.message)\n"
+            if let data = line.data(using: .utf8) {
+                FileHandle.standardError.write(data)
+            }
+        }
+    }
+}

@@ -1,352 +1,475 @@
-Zerk
-========
+# Zerk
 
-[![CocoaPods Version](https://img.shields.io/cocoapods/v/Zerk.svg?style=flat)](http://cocoapods.org/pods/Zerk)
-[![Swift Package Manager compatible](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg?style=flat)](https://github.com/apple/swift-package-manager)
-[![License](https://img.shields.io/cocoapods/l/Zerk.svg?style=flat)](http://cocoapods.org/pods/Zerk)
-[![Platforms](https://img.shields.io/badge/platform-iOS-lightgrey.svg)](http://cocoapods.org/pods/Zerk)
-[![Swift Version](https://img.shields.io/badge/Swift-5.0-F16D39.svg?style=flat)](https://developer.apple.com/swift)
+[![Swift Package Manager](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg?style=flat)](https://github.com/apple/swift-package-manager)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platforms-iOS%2013%2B%20%7C%20macOS%2014%2B%20%7C%20macCatalyst%2013%2B%20%7C%20watchOS%206%2B%20%7C%20tvOS%2013%2B%20%7C%20visionOS%201%2B-lightgrey.svg)](#requirements)
+[![Swift Version](https://img.shields.io/badge/Swift-6.0-F16D39.svg?style=flat)](https://developer.apple.com/swift)
 
-Zerk is a framework written for Swift which allows you to easily store and restore your dependencies following the [dependency injection pattern](https://en.wikipedia.org/wiki/Dependency_injection) and [clean coding principles](https://en.wikipedia.org/wiki/Robert_C._Martin). It removes the need for static methods and singletons and thus helps to create more managable and testable global or local dependencies.
+Zerk is a compile-time dependency injection framework for Swift. Instead of a runtime container, it combines Swift macros with a build-tool plugin that scans your module's source, resolves the dependency graph during the build, and generates plain static factory code on a `Zerk<T>` namespace. There is nothing to register at runtime, resolution failures are build errors with file/line locations, and injected code is ordinary Swift you can step through.
 
-## Features
+For testing, the same plugin also generates a per-key `Interjecting<Key>` protocol. A test suite conforms `Zerk` to it to swap any injectable for a double without touching production code — a plain, compile-checked protocol conformance.
 
-- Zerk provides a way to store dependencies' initialization logic. The dependencies may be stored as short-, middle- or long-time living objects and are not initialized when stored. When a dependency is being called, if it hasn't been initialized before it will be initialized and only then the instance will be cached if it should to be used by upcoming calls.
+## What's changed
 
-- The stored dependencies can be restored easily and without any hussle so they can be injected via initializers, methods or properties.
+Zerk 2 is a ground-up replacement for the original runtime container:
 
-- The dependencies may depend on other stored dependencies. They even can have argumentations to give when being initialized.
+- Dependency registration moved from runtime calls like `Zerk.store.singleton(...)` to source annotations read by `ZerkPlugin`.
+- Resolution moved from `Zerk.standardStorage.restore()` to generated members on `Zerk<Key>`, usually reached through `Zerk<Key>.inject()` or `@Injected`.
+- Missing providers, ambiguous providers, cycles, unsupported singletons, and isolation mismatches are reported during the build instead of failing at runtime.
+- Swift concurrency is modeled directly: generated injectors mirror provider isolation, propagate `async`/`throws`, and reject constructs that Swift cannot express safely.
+- Test overrides are compile-checked through generated `Interjecting<Key>` protocols instead of mutating a shared container.
+- Installation is Swift Package Manager only; CocoaPods-era runtime APIs and key-path property injection wrappers are no longer part of the public model.
 
-- With new `@Injected` keyword the injected dependencies are restored automatically, allowing an even more readable code.
+## Migration
 
-- Also there are other keywords for injecting only the properties or methods of your dependencies, using the cutting-edge key path feature of Swift.
+For an app using Zerk 1.x, migrate one module at a time:
+
+1. Replace the dependency with Swift Package Manager and attach `ZerkPlugin` to each target that declares injectable types or values. Remove CocoaPods integration for Zerk.
+2. Delete central registration code (`Zerk.store`, `AutoStoring`, `transient`, `scoped`, and `singleton` chains). The graph now comes from declarations in the source files themselves.
+3. Mark injectable implementations with `@Injectable` or `@Injectable<Protocol>`. Use `@Singleton` for the old singleton lifetime, and leave non-singletons unmarked for transient factory-style construction.
+4. Mark the initializer or static factory Zerk should call with `@Providing` when a type has more than one possible provider. If there is exactly one initializer, Zerk can infer it.
+5. Convert registered constants or configuration values into `@Injectable` values, or group static constants under `@InjectableValues`.
+6. Replace manual restores with `Zerk<Key>.inject()`. Replace property injection with `@Injected var dependency: Key` when the dependency can be resolved synchronously.
+7. For initializer or method parameters that should be filled automatically, use lowercase `@injected` on the parameter and call the generated overload.
+8. Move tests from container mutation to interjection: `@testable import` the declaring module and conform `Zerk` to the generated `Interjecting<Key>` protocol for the member you want to override.
+9. Add `ZerkSettings.json` if your target uses Swift 5 language mode, `SWIFT_DEFAULT_ACTOR_ISOLATION`, or a non-default value injection policy.
+
+Key-path wrappers from 1.x such as `@InjectedProperty`, `@InjectedMutableProperty`, and `@InjectedMethod` do not have direct 2.x equivalents. Inject the dependency itself, or expose the needed operation through a small protocol and inject that protocol.
 
 ## Requirements
 
-- iOS 9.0+
-- Xcode 13+
-- Swift 5.0+
-- CocoaPods 1.1.1+ (if used)
+- Swift 6.0 **toolchain** (`swift-tools-version: 6.0`); Zerk's own targets build in `.v6` language mode
+- swift-syntax 600.x
+- Platforms: iOS 13+, macOS 14+, watchOS 6+, tvOS 13+, visionOS 1+, Mac Catalyst 13+
+
+### Consuming targets in Swift 5 language mode
+
+Your target does **not** have to be in Swift 6 language mode. A target with `SWIFT_VERSION = 5` under a Swift 6 toolchain (Xcode 16 or later) is fully supported, with one exception:
+
+| Your graph | `SWIFT_VERSION = 5` | Swift 6 |
+|---|---|---|
+| Nonisolated providers | works | works |
+| `@Singleton`, isolated or not | works | works |
+| Isolated provider, nonisolated dependency | works | works |
+| Isolated provider, dependency in *another* domain | works (resolves via `async`) | works |
+| Isolated provider, dependency in the **same** domain | needs an opt-in, below | works |
+
+The last row is the only one SE-0411 governs: Zerk resolves such a dependency into a default argument, and a Swift 5 target evaluates that expression at the *caller* unless you opt in. Either of these unlocks it, independently:
+
+- `SWIFT_UPCOMING_FEATURE_ISOLATED_DEFAULT_VALUES = YES` — the narrow opt-in, and the one to prefer, or
+- `SWIFT_STRICT_CONCURRENCY = complete`
+
+Then tell Zerk, since the plugin cannot read your build settings:
+
+```jsonc
+{ "swiftVersion": "5", "isolatedDefaultValues": true }
+```
+
+Without one of these, Zerk emits a build error naming the providers rather than generating code that cannot compile. Every other isolated construct generates normally.
 
 ## Installation
 
-Zerk is available through [CocoaPods](https://cocoapods.org) and [Swift Package Manager](https://swift.org/package-manager/).
-
-### CocoaPods
-
-To install Zerk with CocoaPods, add the following lines to your `Podfile`.
-
-```ruby
-source 'https://cdn.cocoapods.org/'
-platform :ios, '9.0'
-use_frameworks!
-
-pod 'Zerk'
-
-```
-
-Then run `pod install` command. For details of the installation and usage of CocoaPods, visit [its official website](https://cocoapods.org).
-
-### Swift Package Manager
-
-in `Package.swift` add the following:
+Attach the build plugin to every target that **declares** injectables. Test targets do not need it — they reach interjection through `@testable import`:
 
 ```swift
+// Package.swift
 dependencies: [
-    ...
-    .package(url: "https://github.com/ofgokce/Zerk.git", from: "1.0.0")
+    .package(url: "https://github.com/ofgokce/Zerk.git", from: "2.0.0"),
 ],
 targets: [
     .target(
-        name: "MyProject",
-        dependencies: [..., "Zerk"]
-    )
-    ...
+        name: "App",
+        dependencies: [.product(name: "Zerk", package: "Zerk")],
+        plugins: [.plugin(name: "ZerkPlugin", package: "Zerk")]
+    ),
+    .testTarget(
+        name: "AppTests",
+        dependencies: ["App"]        // no plugin needed
+    ),
 ]
 ```
 
-## Basic Usage
+The package vends two products: the `Zerk` library (the macros and the `Zerk<T>` namespace) and the `ZerkPlugin` build-tool plugin.
 
-### Storing
+The plugin generates the injectors **and** the `Interjecting<Key>` protocols into the module that declares the injectables. A test target that does `@testable import App` sees those (internal) protocols and conforms `Zerk` to them; the interjection guards already compiled into `App` resolve the conformance at runtime. Attach the plugin to a test target only if that target itself declares injectables (as this package's own `ZerkTests` does, because its fixtures live in the test target). In an Xcode project, add `ZerkPlugin` under the declaring target's Build Phases → Run Build Tool Plug-ins.
 
-Firstly the dependencies' initiation logic should be stored in a storage. For the most cases `Zerk.store` may be used to store all the dependencies.
-
-The stored dependencies can only be restored by the types they have been stored as. The dependencies may be stored as multiple types which they conform but for any type given there should be one dependency. It is recommended to store them as protocols for better testability.
-
-The dependencies can be stored with three life-time choices: 
- 
- - Transient:
-These dependencies are initialized every time they are being called.
- 
- - Scoped:
-These dependencies are initialized every time they are being restored by restore functions. This type is used by Zerk's property wrappers to ensure the instances live as long as their dependent object lives.
- 
- - Singleton:
-These dependencies are initialized only once when they are first called, then they are stored as instances in the storage and can be used globally.
-
-
-The dependencies will be stored as a wrapper-class `Dependency` which is responsible for identification, creation, typecasting and instance holding of said dependencies. This class has a `getInstance(with:)` method which creates the instances if not yet created or returns the stored instances for singletons if already been instantiated.
-
-- Storing dependencies which don't depend on others:
+## Quick start
 
 ```swift
-Zerk.store
-    .transient(TransientDependencyClass() as TransientDependencyProtocol)
-    .scoped(ScopedDependencyClass() as ScopedDependencyProtocol)
-    .singleton(SingletonDependencyClass() as SingletonDependencyProtocol)
-```
+import Zerk
 
-- Storing dependencies which depend on other dependencies:
+// 1. A value the graph can use to satisfy parameters of matching type
+@Injectable
+var baseURL: String {
+    "https://api.example.com"
+}
 
-```swift
-Zerk.store
-    .transient { dependency in
-        DependentClassA(dependency: dependency) as DependentProtocolA
-    }
-    .scoped { dependency0, dependency1, dependency2, dependency3, dependency4 in
-        DependentClassB(dependency0: dependency0, dependency1: dependency1, dependency2: dependency2, dependency3: dependency3, dependency4: dependency4)
-        as DependentProtocolB
-    }
-    .singleton {
-        DependentClassC(dependency0: $0, dependency1: $1, dependency2: $2, dependency3: $3, dependency4: $4)
-        as DependentProtocolC
-    }
-```
+// 2. An injectable keyed by a protocol
+protocol ApiServicing: AnyObject {
+    var host: String { get }
+}
 
-- Storing dependencies which depend on other dependencies (restoring by storage):
+@Singleton
+@Injectable<ApiServicing>
+final class ApiService: ApiServicing {
+    let host: String
 
-```swift
-Zerk.store
-    .transient { storage in
-        DependentClassA(dependency: storage.restore()) 
-        as DependentProtocolA
-    }
-    .scoped { storage in
-        DependentClassB(dependency0: storage.restore(), dependency1: storage.restore()) 
-        as DependentProtocolB
-    }
-```
-
-- Storing dependencies with argumentative init:
-
-```swift
-Zerk.store
-    .transient { storage, arguments in
-        ArgumentativeClassA(parameterName: arguments.parameterName) 
-        as ArgumentativeProtocolA
-    }
-    .singleton { storage, arguments in
-        ArgumentativeClassB(dependency: storage.restore(), parameterName0: arguments.parameterName0, parameterName1: arguments.customName) 
-        as ArgumentativeProtocolB
-    }
-```
-
-The argument names are not name-safe and not type-safe. Swift's [dynamicCallable](https://github.com/apple/swift-evolution/blob/main/proposals/0216-dynamic-callable.md) and [dynamicMemberLookup](https://github.com/apple/swift-evolution/blob/main/proposals/0195-dynamic-member-lookup.md) annotations have been used to provide this functionality. The namings and types used to store the dependencies should match those used to restore them. Otherwise there will be fatal errors thrown. For more information please check the documentations.
-
-- For dependencies with multiple types (aliases):
-
-```swift
-Zerk.store
-    .scoped({ _, _ in
-        MultitypeClass()
-    }, as: ProtocolA.self, ProtocolB.self, ProtocolC.self)
-    .singleton({ storage, arguments in
-        MultitypeClass(dependency: storage.restore(), parameterName0: arguments.parameterName0, parameterName1: arguments.customName)
-    }, as: ProtocolA.self, ProtocolB.self, ProtocolC.self)
-```
-
-The dependency should be able to be typecasted to the types given here. Otherwise there will be fatal errors thrown.
-
-And that's it! 
-
-### Restoring
-
-Now the `restore()`, `restore(with:)` and `restore(_:)` methods of the same storage can restore the stored dependencies. While the first two methods will return the typecasted instance of the dependency itself the latter one will return the wrapper instance of type `Dependency`.
-
-```swift
-let instanceA: DependencyProtocolA = Zerk.standardStorage.restore() // Returns the typecasted dependency instance
-let instanceB: DependencyProtocolB = Zerk.standardStorage.restore(with: .arguments(argument0: value0, argument1: value1) // Returns the typecasted dependency instance, instantiated with the given arguments
-```
-OR
-
-```swift
-let dependency = Zerk.standardStorage.restore(DependencyProtocol) // Returns the wrapper instance
-```
-
-### Basic Injection
-
-There are several ways of injecting a dependency to a type. 
-
-- Initializer injection
-
-```swift
-class SomeClass {
-    private let dependency: DependencyProtocol
-    init(dependency: DependencyProtocol) {
-        self.dependency = dependency
-        ...
+    @Providing
+    init(baseURL: String) {       // `baseURL: String` auto-satisfied by the value above
+        self.host = baseURL
     }
 }
 
-let someInstance = SomeClass(dependency: Zerk.standardStorage.restore())
+// 3. A consumer
+struct FeedViewModel {
+    @Injected
+    var apiService: ApiServicing   // resolved at init, at compile-time-verified call site
+}
 ```
 
-
-- Method injection
+The plugin generates (roughly):
 
 ```swift
-class SomeClass {
-    private var dependency: DependencyProtocol?
-    func set(dependency: DependencyProtocol) {
-        self.dependency = dependency
+extension Zerk<ApiServicing> {
+    nonisolated(unsafe) static let apiService: ApiServicing = {
+        // Test suites can override this via the interjection protocol below.
+        if let interjector = Self.self as? any InterjectingApiServicing.Type,
+            let interjected = interjector.interjectedApiService {
+            return interjected
+        }
+        return ApiService(baseURL: Zerk<String>.baseURL)
+    }()
+
+    static func inject() -> ApiServicing { apiService }
+}
+
+// Also generated, one per key, for tests to conform to:
+protocol InterjectingApiServicing {
+    static nonisolated var interjectedApiService: ApiServicing? { get }
+}
+```
+
+`@Injected var apiService` expands to a stored property whose default value is `Zerk<ApiServicing>.inject()`. `Zerk<T>` itself is an empty `public enum Zerk<T> {}`; everything lives in the generated extensions.
+
+## How it works
+
+Zerk is a macro package and a build-tool plugin, and it is worth knowing which does what — because **almost none of the code generation happens in the macros.**
+
+`@Injectable`, `@Providing`, `@Shared`, `@Primary`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a type that does not conform to the key it claims, a missing `@Providing`, an `@Isolated` contradicting a `nonisolated` modifier — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<T>.inject()`) depends on nothing but the property's own type.
+
+Everything else is the plugin, for one reason: an attached macro can only see the declaration it is attached to, while resolving a dependency graph requires the whole module. So `ZerkPlugin` runs `ZerkCodegen` over every `.swift` file in the target, in three stages:
+
+1. **Collect** — walk the syntax and record injectable types and values, their providers, `@Injected` uses, and members carrying `@injected` parameters.
+2. **Resolve** — decide which provider serves each key, and report the cases that are ambiguous or impossible.
+3. **Generate** — classify each provider's parameters, then emit the `Zerk<Key>` extensions, the `Interjecting<Key>` protocols, and the `Sendable` checks singletons need.
+
+The output is a single `ZerkGenerated/ZerkInjections.swift` in the build directory, declared as the command's only output so the build system reruns codegen exactly when a source file or `ZerkSettings.json` changes.
+
+One consequence runs through the whole design: **the plugin reads syntax, never resolved types.** It cannot see through a `typealias`, cannot follow a conformance into another module, and cannot read your build settings. That is why type keys are textual, why `@Isolated<A>` exists, and why `ZerkSettings.json` exists.
+
+## Macro reference
+
+### Declaring injectables
+
+**`@Injectable` / `@Injectable<Key1, Key2, …>`** — marks a class, struct, enum, actor, or a typed variable as injectable. Without generic arguments the type itself is the key; with them, each listed type (typically a protocol) is a key. On a variable, the declared type is the key and the body becomes the injected value:
+
+```swift
+@Injectable
+var timeout: TimeInterval { 30 }
+```
+
+Values participate in resolution: any provider parameter whose type matches a uniquely-declared value is filled in automatically. A value declared inside a type must be `static`, and values are matched by type **and name** together — which is what stops two unrelated `String` values from being interchangeable.
+
+**Copied vs. referenced values.** By default a value's body is *copied* into the generated member, which then never reads the original — so a later write to the source is invisible to injection. Pass `.referenced` to read through to the declaration instead, which is what you want for anything updated at runtime:
+
+```swift
+enum Settings {
+    @Injectable(.referenced)
+    nonisolated(unsafe) static var baseURL: String = "api.example.com"
+}
+
+Settings.baseURL = "staging.example.com"
+Zerk<String>.baseURL        // "staging.example.com" — follows the source
+Zerk<String>.baseURL = "x"  // writes back to Settings.baseURL
+```
+
+A settable source produces a settable member; a `let` or a get-only computed property stays read-only. The source must be at least `internal`, since the generated file has to see it — a `private` value can only be copied. The default is `.copied`, and `valueInjectionMethod` in `ZerkSettings.json` changes it globally.
+
+**`@InjectableValues`** — registers every eligible static property of a type, so a constants namespace does not need an attribute per member:
+
+```swift
+@InjectableValues(.referenced)
+enum AppConstants {
+    nonisolated(unsafe) static var baseURL: String = "api.example.com"
+    static let retries: Int = 3
+
+    @NonInjectable
+    static let buildStamp: String = "2026-07-29"   // opted out
+}
+```
+
+A property is swept up when it is `static`, at least `internal`, and declares an explicit type — the type *is* the injection key, and a syntax-only plugin cannot infer it, so a missing annotation is an error rather than a silent skip. `private` and `fileprivate` members, instance properties, methods, and nested types are left alone. An individual property may carry its own `@Injectable(...)` to override the method, or **`@NonInjectable`** to opt out entirely.
+
+**`@Providing`** — selects the provider. Place on an initializer or a `static` factory function. `@Providing<Key>` binds a provider to one specific key when a type is injectable under several. If no `@Providing` is present, Zerk infers the provider from a single initializer, including synthesized memberwise (structs) and default initializers. A type with multiple initializers and no `@Providing` is an error.
+
+```swift
+@Injectable<UserService>
+final class LiveUserService: UserService {
+    @Providing<UserService>
+    static func live(apiService: ApiServicing, logger: Logger) -> UserService { ... }
+}
+```
+
+Provider parameters are resolved in this order: a uniquely matching `@Injectable` value → a uniquely resolvable injectable key (recursively) → otherwise the parameter is exposed on the generated member and on `inject(...)` for the caller to supply ("parametric injection").
+
+**`@Singleton`** — one shared instance per key, created lazily and thread-safely on first access. Reference types (class/actor) only. Singleton providers cannot be `async`/`throws` and cannot require external arguments.
+
+**`@Primary`** — when several types are injectable under the same key, marks the one `inject()` should build. Without a primary, multiple providers for a key are generated as named members (`Zerk<Loading>.live`, `Zerk<Loading>.mock`) and `inject()` is omitted.
+
+**`@Shared`** — makes the generated `inject()` `public`, so other modules can resolve the key. The key type itself must be `public`, otherwise the modifier is dropped with a warning.
+
+**`@Isolated<A>`** — tells Zerk which global actor a declaration is isolated to, when the build plugin cannot see it. It is **corrective, not declarative**: it restates what the compiler already believes so the generated members mirror the right isolation. Claiming something untrue produces generated code that will not compile. Two cases need it — a custom global actor whose name does not end in `Actor` (Zerk's attribute heuristic misses it), and isolation inherited through a conformance (invisible to a syntax-only plugin):
+
+```swift
+@Isolated<DataStore>
+@DataStore
+@Injectable<Storing>
+final class FileStore: Storing { init() {} }
+```
+
+For "this is nonisolated", use Swift's own `nonisolated` keyword — it is real, and Zerk reads it. `@Isolated` may be attached to a type, an initializer, a `@Providing` factory, or an `@Injectable` value; the innermost annotation wins, exactly as Swift's own isolation inference works.
+
+### Consuming injectables
+
+**`@Injected`** — resolves eagerly when the enclosing value is initialized. Variants:
+
+```swift
+@Injected var service: ApiServicing                 // Zerk<ApiServicing>.inject()
+@Injected(seed: 100) var token: SeededToken         // forwards args to inject(seed:)
+@Injected(Zerk<ApiServicing>.mock) var s: ApiServicing  // explicit expression
+```
+
+`@Injected` requires an explicit type annotation and works with optionals (`Service?` resolves `Service`). A value passed to the memberwise initializer still wins over the injected default, so a caller can override what gets injected.
+
+**Lazy resolution** — there is no `@LazyInjected` macro. Use a plain `lazy var` calling `Zerk<Key>.inject()` directly, which is clearer and has no macro caveats:
+
+```swift
+final class Consumer {
+    lazy var token: SeededToken = Zerk<SeededToken>.inject(seed: 100)
+}
+```
+
+**`@injected` (lowercase) — parameter injection.** Marks an initializer or method parameter; the build plugin generates an overload with every marked parameter omitted and filled via `Zerk<T>.inject()`:
+
+```swift
+final class AuditTrail {
+    init(@injected logger: Logger, label: String) { ... }
+}
+
+AuditTrail(label: "audit")                    // generated overload, logger injected
+AuditTrail(logger: myLogger, label: "manual") // original init, untouched
+```
+
+The lowercase name is deliberate: `@Injected` is the property macro, `@injected` the parameter marker (case-sensitive, so they never collide). It has to be a property wrapper rather than a macro because Swift attached macros cannot apply to parameters; the wrapper is inert, so call sites of the original signature are unaffected. Class inits get a `convenience` overload; structs, actors, and enums get a plain extension init; methods get a delegating overload. Constraints: the marked parameter's type must be resolvable argument-free in the module (`@Injectable`, non-parametric provider), no default values on marked parameters, no variadic or `inout` parameters, no generic types/members, and the member must be at least `internal`. Async or throwing chains are allowed — and so are cross-domain ones, which merge in as `async` — so the generated overload becomes `async`/`throws` accordingly. This is the one injection path that supports effectful construction.
+
+**Manual resolution** — `Zerk<Key>.inject()` (or `try await Zerk<Key>.inject(...)` for effectful chains) anywhere.
+
+### Async and throwing providers
+
+Effects propagate through the chain: if a provider is `async`/`throws`, the generated members and `inject()` are too, and transitive dependents inherit the effects. `@Injected` expands to a synchronous accessor and cannot resolve such chains (the codegen emits an error if you try); resolve them manually, or use an `@injected` parameter, whose generated overload inherits the chain's effects.
+
+## Testing with interjection
+
+For every generated injector member, the plugin also emits a mirror requirement on a per-key protocol named `Interjecting<Key>`, and each generated member checks — at the top of its body — whether `Zerk<Key>` conforms:
+
+```swift
+// Generated:
+protocol InterjectingUserService {
+    static func interjectedLive(apiService: ApiServicing, logger: Logger) -> UserService?
+}
+protocol InterjectingSeededToken {
+    static func interjectedSeeded(seed: Int) -> SeededToken?
+}
+```
+
+These protocols are `internal` to the declaring module, so the test target reaches them with `@testable import App` — no plugin on the test target. A test suite overrides an implementation by conditionally conforming `Zerk` to the protocol. Returning a value overrides injection; returning `nil` falls through to the real provider — so you can gate overrides behind a flag and leave production code untouched:
+
+```swift
+@testable import App
+
+struct MockUserService: UserService {
+    func requestPath() -> String { "mock/users" }
+    var loggerSerial: Int { -1 }
+}
+
+extension Zerk: InterjectingUserService where T == UserService {
+    static func interjectedLive(apiService: ApiServicing, logger: Logger) -> UserService? {
+        MockUserService()
     }
 }
 
-let someInstance = SomeClass()
-someInstance.set(dependency: Zerk.standardStorage.restore())
-```
-
-
-- Property injection
-
-```swift
-class SomeClass {
-    var dependency: DependencyProtocol?
-}
-
-let someInstance = SomeClass()
-someInstance.dependency = Zerk.standardStorage.restore()
-```
-
-### Keyword Injection
-
-Zerk provides new keywords to make the injection even easier and more readable.
-
-- @Injected
-
-Injects the whole dependency.
-
-```swift
-class SomeClass {
-    @Injected var dependency: DependencyProtocol
-}
-```
-
-To inject a dependency with argumentation:
-
-```swift
-class SomeClass {
-    @Injected(with: .arguments(argument0: value0, argument1: value1)
-    var dependency: DependencyProtocol
-}
-```
-
-
-- @InjectedProperty
-
-Injects a read-only property of a dependency. Keypath syntax is to be used.
-
-```swift
-class SomeClass {
-    @InjectedProperty(\DependencyProtocol.someProperty) var someProperty: SomeType
-}
-```
-
-
-- @InjectedMutableProperty
-
-Injects a mutable property of a dependency.
-
-```swift
-class SomeClass {
-    @InjectedMutableProperty(\DependencyProtocol.someProperty) var someProperty: SomeType
-}
-```
-
-
-- @InjectedUnwrappedProperty & @InjectedUnwrappedMutableProperty
-
-Unwraps and injects an optional property of a dependency. If a default value has been given, the injected property will be unwrapped by the given default value. Else the property will be force-unwrapped.
-
-```swift
-class SomeClass {
-    @InjectedUnwrappedProperty(\DependencyProtocol.someProperty, default: someValue) var someProperty: SomeType
-}
-```
-
-
-- @InjectedMethod
-
-Injects a method of a dependency. As Swift currently doesn't support keypaths to methods, this wrapper had to be working in a different way.
-
-```swift
-class SomeClass {
-    @InjectedMethod(DependencyProtocol.someMethod) var someMethod: (ParameterTypes) -> (ReturnTypes)
-}
-```
-
-OR
-
-```swift
-class SomeClass {
-    @InjectedMethod(DependencyProtocol.someMethod(_:someParameter:)) var someMethod: (ParameterTypes) -> (ReturnTypes)
-}
-```
-
-## Where to Store Dependencies
-
-The dependencies must be stored before they are used.
-
-The typical approach would be to store them in `AppDelegate`, better before exiting the `application:didFinishLaunchingWithOptions:` method.
-
-```swift
-class AppDelegate: UIResponder, UIApplicationDelegate {
-    var window: UIWindow?
-
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey : Any]? = nil) -> Bool {
-        ...
-        
-        Zerk.store
-            .transient( ... )
-            .singleton { ... }
-            ...
-            
-        ...
+// A parameterized provider is overridden the same way, bypassing the real factory:
+extension Zerk: InterjectingSeededToken where T == SeededToken {
+    static func interjectedSeeded(seed: Int) -> SeededToken? {
+        SeededToken(value: 999)
     }
 }
 ```
 
-In order to automatize the storing process without cluttering the AppDelegate, you may conform `Zerk` to `AutoStoring` protocol in an empty file. This protocol only has a `store()` function which will be called only once when the very first time any dependency restoration is needed. 
+The interjected member name is `interjected` + the capitalized generated member name (so `Zerk<Loading>.live` → `interjectedLive`), and it mirrors the generated member's parameters. Property-shaped members (values, singletons, argument-free providers) become a `var interjected…: Key? { get }` requirement instead. Because interjection is an ordinary protocol conformance, renaming a provider surfaces as a *compile error* on the stale conformance rather than silently falling through.
+
+## Swift 6 concurrency model
+
+Zerk's rule is: **a generated member's isolation is its provider's isolation.** Whatever a provider is isolated to — nothing, a global actor, or an actor's nonisolated init — the member built for it says the same thing explicitly, so the generated file's meaning never depends on a build flag.
+
+Isolation does not merge. There is no join of `MainActor` and `DatabaseActor`, so a dependency in a *different* domain does not change the member's isolation — it converts into an `async` effect instead:
+
+| dependency | member | cost |
+|---|---|---|
+| nonisolated | any | none — synchronous call |
+| same domain | same domain | none — synchronous call |
+| domain A | domain B, or nonisolated | the member becomes `async` |
+| `actor` | any | none — a sync actor init is nonisolated at entry (SE-0327) |
+
+The asymmetry matters: **nonisolated → isolated is free.** The common shape — isolated things depending on nonisolated things — costs nothing. The expensive direction, a nonisolated provider depending on a `@MainActor` one, is surfaced as `async` rather than hidden.
+
+### What the compiler needs from you
+
+- **SE-0411, for same-domain isolated dependencies only.** Zerk puts a resolved dependency in a default argument, which relies on SE-0411 evaluating it in the callee's isolation domain. Swift 6 language mode has this always; a Swift 5 target needs `SWIFT_UPCOMING_FEATURE_ISOLATED_DEFAULT_VALUES` or complete strict concurrency (see [Requirements](#consuming-targets-in-swift-5-language-mode)). Zerk refuses only this construct, and only when `ZerkSettings.json` says the target lacks it.
+- **`ZerkSettings.json`.** A build-tool plugin cannot read `SWIFT_DEFAULT_ACTOR_ISOLATION`, so you restate it (see below). Without it Zerk assumes `nonisolated`.
+
+### Under `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`
+
+With that setting, a declaration that states no isolation of its own *is* `@MainActor` — including your `@Injectable` types. Zerk mirrors that, so most of the generated registry becomes `@MainActor`-isolated. That is what the flag means; the point is to make it explicit rather than accidental. If you want DI callable from anywhere, mark the provider `nonisolated`:
 
 ```swift
-extension Zerk: AutoStoring {
-
-    func store() {
-    
-        Zerk.store
-            .transient( ... )
-            .singleton { ... }
-            ...
-    }
+@Injectable<ApiServicing>
+final class ApiService: ApiServicing {
+    nonisolated init(baseURL: String) { ... }   // Zerk<ApiServicing>.inject() stays nonisolated
 }
 ```
 
-## Notes
+### Effectful and cross-domain dependencies
 
-I have written most of this as a DI solution for a project I was working on which is being used by millions of users on AppStore. This is the backbones of that app. I just wanted to share it with the world so I have changed it a bit and made into a framework. The documentation might be somewhat bad since there was none before but I will be bettering it as I find the time to do so. I will also check and update the requirements and compatible platforms. 
+`await` cannot appear in a default argument at all. So a dependency whose resolution is effectful or crosses a domain is not exposed as a defaulted parameter — the member splits in two:
 
-Feel free to contact me if you have some ideas to make this better. It will be appreciated. Most importantly, have fun!
+```swift
+// explicit variant — carries the interjection guard and the construction
+nonisolated static func userRepository(manager: ApiManager) -> UserRepository { ... }
 
-## Credits
+// resolving variant — resolves and delegates, inheriting the merged effects
+nonisolated static func userRepository() async -> UserRepository {
+    userRepository(manager: await Zerk<ApiManager>.inject())
+}
+```
 
-The storage approach have been inspired by:
+Their arities always differ, so the overload is never ambiguous, and there is still exactly one construction point and one interjection guard per provider.
 
-- [Swinject](https://github.com/Swinject/Swinject)
+### Crossing a domain
 
-The multitypes (aliases) have been inspired by:
+A value that leaves the domain it was built in currently needs its key to be `Sendable` — which for `actor` injectables and `Sendable`-refined protocols it usually already is:
 
-- [DependencyInjection](https://github.com/sebastianpixel/DependencyInjection)
+```swift
+protocol ApiServicing: Sendable { ... }   // actors conform automatically
+```
+
+`sending` returns would remove that requirement for freshly constructed values. They are designed but deliberately not emitted yet: eligibility is computed in the codegen and the annotation withheld, because `sending` is not expressible on a property and would force every isolated argument-free provider to change shape. See `isSendingEligible` in `GeneratorOutputBuilder.swift`, which documents the full rationale.
+
+### Singletons
+
+`@Singleton` storage mirrors provider isolation too: `nonisolated(unsafe) static let` for a nonisolated provider, `@MainActor static let` for a `@MainActor` one (global-actor isolation already protects the storage, so no `unsafe` escape hatch is needed). Singletons stay synchronous and non-throwing, so a singleton whose dependency lives in a *different* domain is a build error — resolving it would need `await`, and a `static let` initializer cannot.
+
+When a singleton is injected across an isolation boundary, Zerk emits a `Sendable` constraint check next to an explanatory comment. Zerk does not attempt to prove `Sendable` from syntax; the check costs nothing when the type already conforms, and it puts the compiler's complaint on a line that explains itself.
+
+## Settings
+
+`ZerkSettings.json`, in your target's directory or at the package root (the target wins). The plugin declares it as a build input, so edits trigger regeneration. `//` and `/* */` comments are supported. Every key is optional; the defaults below describe a stock Swift 6 target.
+
+```jsonc
+{
+  "version": 1,
+
+  // Must match SWIFT_DEFAULT_ACTOR_ISOLATION. If the two disagree, Zerk infers
+  // the wrong isolation and the generated code will not compile.
+  //   "nonisolated" | "MainActor" | any custom global actor name
+  "defaultActorIsolation": "nonisolated",
+
+  // How @Injectable values reach their value when the declaration does not say.
+  // Mirrors no build setting — it is Zerk's own default, overridden per value
+  // by @Injectable(.copied) / @Injectable(.referenced).
+  //   "copied" | "referenced"
+  "valueInjectionMethod": "copied",
+
+  // Language mode, mirroring SWIFT_VERSION — not the toolchain version.
+  //   "5" | "6"
+  "swiftVersion": "6",
+
+  // Mirrors SWIFT_STRICT_CONCURRENCY. Only consulted under "5"; Swift 6
+  // language mode is complete checking by definition.
+  //   "minimal" | "targeted" | "complete"
+  "strictConcurrency": "minimal",
+
+  // Mirrors SWIFT_UPCOMING_FEATURE_ISOLATED_DEFAULT_VALUES (SE-0411).
+  // Under "5", either this or "strictConcurrency": "complete" is what allows
+  // an isolated provider to resolve a same-domain isolated dependency.
+  "isolatedDefaultValues": false
+}
+```
+
+The file governs how Zerk **reads** your source. It never governs what Zerk **writes** — every generated member is pinned with explicit isolation regardless.
+
+## Limitations
+
+**Syntax-level resolution.** The codegen parses source; it does not type-check. Consequences: type keys are textual, so `typealias` indirection, module qualification (`ModuleA.Service` vs `Service`), and spelling variations are different keys — `[String]` and `Array<String>` are distinct keys even though the compiler unifies them. A provider parameter like `seed: Int` is indistinguishable from an injectable dependency except by whether a matching injectable exists.
+
+**Module-scoped.** Auto-resolution only sees the current module. `@Shared` makes a key's `inject()` public so another module can call it manually, but the consuming module cannot auto-resolve a foreign key: its plugin has no way to know that key's effects or isolation. Forward it explicitly with an `@Injectable` value if you want it in the graph.
+
+**Conformances must be written on the declaration.** `@Injectable<Key>` checks that the type lists `Key` in its own inheritance clause. A conformance added in an extension, inherited transitively, or declared in another module is invisible to a syntax-only plugin.
+
+**Global actor detection is heuristic.** `@MainActor` is recognized exactly; any other attribute ending in `Actor` is assumed to be a global actor. A custom global actor named otherwise, or isolation inherited through a conformance, is invisible to the plugin — annotate it with `@Isolated<A>`.
+
+**Ambient isolation is restated, not read.** The plugin cannot see `SWIFT_DEFAULT_ACTOR_ISOLATION`, so `ZerkSettings.json` has to agree with it. When they disagree Zerk infers the wrong provider isolation and the generated code fails to compile. The failure is loud and immediate, but the file is load-bearing rather than advisory.
+
+**`@Isolated<A>` is unverified.** It states what the compiler already believes; Zerk cannot check that claim and will generate code matching whatever you wrote.
+
+**One provider per key per type; one `@Primary` per key module-wide.** Ambiguity is a build error.
+
+**Circular dependencies are rejected** with the cycle path in the error. Break cycles manually (e.g. inject a factory or make one edge parametric).
+
+**Generated member names must be unique per key.** Two types that lower-camel-case to the same member name under the same key (e.g. `Service` in two files) collide; rename the type or use a distinctly named `@Providing` factory.
+
+**`@Singleton` constraints.** Reference types only; provider must be synchronous and non-throwing; no external arguments; and no dependency in a different isolation domain, since resolving one would need `await`.
+
+**Referenced values must be visible to the generated file.** That file is a separate file in the same module, so `private` and `fileprivate` sources cannot be referenced — only copied. A mutable `static var` also has to be legal Swift 6 global state in its own right (`nonisolated(unsafe)`, or actor-isolated); Zerk mirrors whatever isolation you give it but does not launder it.
+
+**`@Injected` cannot resolve async, throwing, or cross-domain chains** — use `try await Zerk<Key>.inject()` manually (or an `@injected` parameter). For lazy resolution, use a plain `lazy var = Zerk<Key>.inject()`; there is no `@LazyInjected` macro.
+
+**Interjection is keyed by generated member name.** A test override conforms `Zerk` to `Interjecting<Key>` and implements `interjected<MemberName>`. Renaming an injectable type or `@Providing` factory changes that member name, so a stale conformance becomes a *compile error* — the mismatch is caught, not silently ignored. Requirements mirror the member's isolation, so a double for a `@MainActor` provider is built on the main actor.
+
+**Interjection does not short-circuit resolution.** A member's dependencies are resolved before the guard runs, so an interjected value still builds its real dependency subtree first.
+
+**Generated code is per-build.** The plugin output lives in the build directory (`ZerkGenerated/ZerkInjections.swift`). Never edit it; regenerate by building.
+
+## Diagnostics
+
+All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
+
+The ones you are most likely to meet: no provider found for a key, multiple non-generic providers on a type, multiple `@Primary` for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency, circular dependency, member-name collision, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+
+One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
+
+## Contributing
+
+The package builds with `swift build`. To run the tests:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
+```
+
+The `DEVELOPER_DIR` prefix is needed when `xcode-select` points at the Command Line Tools, whose swift-testing install is incomplete; a bare `swift test` then fails to launch with a missing `Testing` module or `lib_TestingInterop.dylib`.
+
+Isolation and effects cannot be verified by comparing generated strings — text can look right and still not compile. `Tests/ZerkInjectionCodegenTests` therefore includes a compile harness that runs the codegen over a fixture and type-checks the result with a real `swiftc`, across both language modes and both `SWIFT_DEFAULT_ACTOR_ISOLATION` values. Add a case there for anything touching isolation, effects, or `sending`.
 
 ## License
 
-MIT license. See the [LICENSE file](LICENSE) for details.
+See [LICENSE](LICENSE).
