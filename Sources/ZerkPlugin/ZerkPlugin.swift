@@ -43,7 +43,7 @@ struct ZerkPlugin: BuildToolPlugin {
             inputFiles: inputFiles,
             settingsFile: Self.settingsFile(
                 searchingIn: [
-                    URL(fileURLWithPath: target.directory.string),
+                    target.directoryURL,
                     context.package.directoryURL
                 ]
             )
@@ -112,7 +112,7 @@ extension ZerkPlugin: XcodeBuildToolPlugin {
         // Xcode targets expose no directory of their own, so the settings file
         // is looked up next to the project and alongside the input files.
         var searchDirectories: [URL] = [
-            URL(fileURLWithPath: context.xcodeProject.directory.string)
+            context.xcodeProject.directoryURL
         ]
         var seen = Set<String>()
         for file in inputFiles {
