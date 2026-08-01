@@ -6,7 +6,7 @@
 //
 
 /// An initializer Zerk may adopt as a provider implicitly, when the type has
-/// exactly one and declares no `@Providing`.
+/// exactly one and declares no `@InjectableProviding`.
 ///
 /// Recorded for every initializer, since "exactly one" is only knowable after
 /// the whole type has been walked.

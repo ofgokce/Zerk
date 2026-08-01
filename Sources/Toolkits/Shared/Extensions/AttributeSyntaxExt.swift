@@ -50,4 +50,41 @@ public extension AttributeSyntax {
             return []
         }
     }
+
+    /// The attribute's `primary:` argument.
+    ///
+    /// Zerk reads syntax and never evaluates it, so only a `true`/`false`
+    /// literal can be honoured — `primary: isDebug` has no readable value.
+    /// `nonLiteral` exists so that case is reported rather than silently
+    /// treated as `false`.
+    var primaryArgument: PrimaryArgument {
+        for argument in labeledArguments where argument.label?.text == "primary" {
+            guard let literal = argument.expression.as(BooleanLiteralExprSyntax.self) else {
+                return .nonLiteral
+            }
+            return .literal(literal.literal.tokenKind == .keyword(.true))
+        }
+        return .absent
+    }
+
+    /// Whether the attribute carries a positional argument, i.e. the
+    /// `ValueInjectionMethod` in `@Injectable(.referenced)`.
+    var hasPositionalArgument: Bool {
+        labeledArguments.contains { $0.label == nil }
+    }
+}
+
+/// The three states a `primary:` argument can be in. See
+/// ``AttributeSyntax/primaryArgument``.
+public enum PrimaryArgument: Equatable {
+    case absent
+    case literal(Bool)
+    case nonLiteral
+
+    /// The claimed value, defaulting to `false` for anything unreadable. The
+    /// unreadable case is reported separately, so this only decides what the
+    /// generated code does while the build is already failing.
+    public var isPrimary: Bool {
+        self == .literal(true)
+    }
 }

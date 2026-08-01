@@ -29,7 +29,6 @@ struct ZerkMacrosPlugin: CompilerPlugin {
         InjectedMacro.self,
         ProvidingMacro.self,
         SharedMacro.self,
-        PrimaryMacro.self,
         SingletonMacro.self,
         IsolatedMacro.self,
     ]

@@ -4,17 +4,69 @@
 /// each listed key instead. On a `var` or `let` the declared type is the key
 /// and the declaration supplies the value.
 ///
-/// `method` applies to values only and controls whether the value is copied
-/// into the generated member or read through to the original declaration —
-/// see ``ValueInjectionMethod``. It is ignored on a type.
+/// The two arguments apply to opposite halves of that: ``ValueInjectionMethod``
+/// is meaningful on a value only, `primary` on a type only. Neither overload
+/// accepts both, and passing one to the wrong kind of declaration is an error
+/// rather than a silently ignored argument.
 @attached(peer)
-public macro Injectable(_ method: ValueInjectionMethod = .default) = #externalMacro(
+public macro Injectable() = #externalMacro(
     module: "ZerkMacros",
     type: "InjectableMacro"
 )
 
 @attached(peer)
-public macro Injectable<each T>(_ method: ValueInjectionMethod = .default) = #externalMacro(
+public macro Injectable<each T>() = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
+/// Registers a **value** and states how the generated member reaches it.
+///
+/// `method` controls whether the value is copied into the generated member or
+/// read through to the original declaration — see ``ValueInjectionMethod``.
+@attached(peer)
+public macro Injectable(_ method: ValueInjectionMethod) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
+@attached(peer)
+public macro Injectable<each T>(_ method: ValueInjectionMethod) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
+/// Registers a **type** and claims its keys for `Zerk<Key>.inject()`.
+///
+/// When several types are injectable under one key, exactly one of them must
+/// be `primary` — that type is the one `inject()` builds. The others are still
+/// generated as named members (`Zerk<Loading>.mock`), they simply do not win
+/// the key.
+///
+/// ```swift
+/// @Injectable<Loading>(primary: true)
+/// final class LiveLoader: Loading { init() {} }
+///
+/// @Injectable<Loading>
+/// final class MockLoader: Loading { init() {} }
+///
+/// Zerk<Loading>.inject()   // LiveLoader
+/// Zerk<Loading>.mockLoader // still available
+/// ```
+///
+/// This picks the winning *type*. Which of that type's providers builds it is
+/// a separate choice — see ``InjectableProviding(primary:)``.
+///
+/// `primary` must be written as a `true`/`false` literal: Zerk reads syntax, so
+/// it cannot evaluate a constant or a computed expression.
+@attached(peer)
+public macro Injectable(primary: Bool) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
+@attached(peer)
+public macro Injectable<each T>(primary: Bool) = #externalMacro(
     module: "ZerkMacros",
     type: "InjectableMacro"
 )
@@ -65,14 +117,56 @@ public macro NonInjectable() = #externalMacro(
     type: "NonInjectableMacro"
 )
 
+/// Marks an initializer or `static` factory as a way to build an
+/// `@Injectable`.
+///
+/// A type may declare **several** providers for one key; each becomes its own
+/// named member under `Zerk<Key>`. `@InjectableProviding<Key>` binds a provider
+/// to one specific key, while a bare `@InjectableProviding` serves every key the
+/// type is injectable under — the two combine rather than shadowing each other.
+///
+/// ```swift
+/// @Injectable<Loading>
+/// final class Loader: Loading {
+///     @InjectableProviding<Loading>(primary: true)
+///     static func live() -> Loading { ... }
+///
+///     @InjectableProviding<Loading>
+///     static func cached() -> Loading { ... }
+/// }
+///
+/// Zerk<Loading>.live       // both members exist
+/// Zerk<Loading>.cached
+/// Zerk<Loading>.inject()   // live, because it is primary
+/// ```
+///
+/// When a type has more than one provider for a key, whichever one `inject()`
+/// should call must be marked `primary`. It is only required of the type that
+/// actually wins the key — see ``Injectable(primary:)``.
 @attached(body)
-public macro Providing() = #externalMacro(
+public macro InjectableProviding() = #externalMacro(
     module: "ZerkMacros",
     type: "ProvidingMacro"
 )
 
 @attached(body)
-public macro Providing<each T>() = #externalMacro(
+public macro InjectableProviding<each T>() = #externalMacro(
+    module: "ZerkMacros",
+    type: "ProvidingMacro"
+)
+
+/// Marks a provider, and states whether it is the one `inject()` calls.
+///
+/// `primary` must be written as a `true`/`false` literal: Zerk reads syntax, so
+/// it cannot evaluate a constant or a computed expression.
+@attached(body)
+public macro InjectableProviding(primary: Bool) = #externalMacro(
+    module: "ZerkMacros",
+    type: "ProvidingMacro"
+)
+
+@attached(body)
+public macro InjectableProviding<each T>(primary: Bool) = #externalMacro(
     module: "ZerkMacros",
     type: "ProvidingMacro"
 )
@@ -87,18 +181,6 @@ public macro Shared() = #externalMacro(
 public macro Shared<each T>() = #externalMacro(
     module: "ZerkMacros",
     type: "SharedMacro"
-)
-
-@attached(peer)
-public macro Primary() = #externalMacro(
-    module: "ZerkMacros",
-    type: "PrimaryMacro"
-)
-
-@attached(peer)
-public macro Primary<each T>() = #externalMacro(
-    module: "ZerkMacros",
-    type: "PrimaryMacro"
 )
 
 @attached(peer)

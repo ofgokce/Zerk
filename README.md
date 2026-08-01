@@ -27,7 +27,7 @@ For an app using Zerk 1.x, migrate one module at a time:
 1. Replace the dependency with Swift Package Manager and attach `ZerkPlugin` to each target that declares injectable types or values. Remove CocoaPods integration for Zerk.
 2. Delete central registration code (`Zerk.store`, `AutoStoring`, `transient`, `scoped`, and `singleton` chains). The graph now comes from declarations in the source files themselves.
 3. Mark injectable implementations with `@Injectable` or `@Injectable<Protocol>`. Use `@Singleton` for the old singleton lifetime, and leave non-singletons unmarked for transient factory-style construction.
-4. Mark the initializer or static factory Zerk should call with `@Providing` when a type has more than one possible provider. If there is exactly one initializer, Zerk can infer it.
+4. Mark each initializer or static factory Zerk may call with `@InjectableProviding`. If there is exactly one initializer and no provider is marked, Zerk infers it. A key with several providers needs one of them marked `@InjectableProviding(primary: true)`.
 5. Convert registered constants or configuration values into `@Injectable` values, or group static constants under `@InjectableValues`.
 6. Replace manual restores with `Zerk<Key>.inject()`. Replace property injection with `@Injected var dependency: Key` when the dependency can be resolved synchronously.
 7. For initializer or method parameters that should be filled automatically, use lowercase `@injected` on the parameter and call the generated overload.
@@ -114,7 +114,7 @@ protocol ApiServicing: AnyObject {
 final class ApiService: ApiServicing {
     let host: String
 
-    @Providing
+    @InjectableProviding
     init(baseURL: String) {       // `baseURL: String` auto-satisfied by the value above
         self.host = baseURL
     }
@@ -155,12 +155,12 @@ protocol InterjectingApiServicing {
 
 Zerk is a macro package and a build-tool plugin, and it is worth knowing which does what — because **almost none of the code generation happens in the macros.**
 
-`@Injectable`, `@Providing`, `@Shared`, `@Primary`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a type that does not conform to the key it claims, a missing `@Providing`, an `@Isolated` contradicting a `nonisolated` modifier — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<T>.inject()`) depends on nothing but the property's own type.
+`@Injectable`, `@InjectableProviding`, `@Shared`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a type that does not conform to the key it claims, a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<T>.inject()`) depends on nothing but the property's own type.
 
 Everything else is the plugin, for one reason: an attached macro can only see the declaration it is attached to, while resolving a dependency graph requires the whole module. So `ZerkPlugin` runs `ZerkCodegen` over every `.swift` file in the target, in three stages:
 
 1. **Collect** — walk the syntax and record injectable types and values, their providers, `@Injected` uses, and members carrying `@injected` parameters.
-2. **Resolve** — decide which provider serves each key, and report the cases that are ambiguous or impossible.
+2. **Resolve** — collect every provider for each key, elect the one that backs `inject()`, and report the cases that are ambiguous or impossible.
 3. **Generate** — classify each provider's parameters, then emit the `Zerk<Key>` extensions, the `Interjecting<Key>` protocols, and the `Sendable` checks singletons need.
 
 The output is a single `ZerkGenerated/ZerkInjections.swift` in the build directory, declared as the command's only output so the build system reruns codegen exactly when a source file or `ZerkSettings.json` changes.
@@ -210,21 +210,59 @@ enum AppConstants {
 
 A property is swept up when it is `static`, at least `internal`, and declares an explicit type — the type *is* the injection key, and a syntax-only plugin cannot infer it, so a missing annotation is an error rather than a silent skip. `private` and `fileprivate` members, instance properties, methods, and nested types are left alone. An individual property may carry its own `@Injectable(...)` to override the method, or **`@NonInjectable`** to opt out entirely.
 
-**`@Providing`** — selects the provider. Place on an initializer or a `static` factory function. `@Providing<Key>` binds a provider to one specific key when a type is injectable under several. If no `@Providing` is present, Zerk infers the provider from a single initializer, including synthesized memberwise (structs) and default initializers. A type with multiple initializers and no `@Providing` is an error.
+**`@InjectableProviding`** — marks a way to build the type. Place on an initializer or a `static` factory function. `@InjectableProviding<Key>` binds a provider to one specific key when a type is injectable under several; a bare `@InjectableProviding` serves every key the type claims. The two **combine** rather than shadowing each other, so a key can be served by both at once.
+
+If no provider is marked at all, Zerk infers one from a single initializer, including synthesized memberwise (structs) and default initializers. Marking any provider suppresses that inference — declaring one is a deliberate choice, and a bare initializer must not silently join it. A type with multiple initializers and no marked provider is an error.
 
 ```swift
 @Injectable<UserService>
 final class LiveUserService: UserService {
-    @Providing<UserService>
+    @InjectableProviding<UserService>
     static func live(apiService: ApiServicing, logger: Logger) -> UserService { ... }
 }
 ```
+
+A key may have **several** providers, each generated as its own named member. When it does, the one `inject()` should call is marked `primary`:
+
+```swift
+@Injectable<Loading>
+final class Loader: Loading {
+    @InjectableProviding<Loading>(primary: true)
+    static func live() -> Loading { ... }
+
+    @InjectableProviding<Loading>
+    static func cached() -> Loading { ... }
+}
+
+Zerk<Loading>.live       // both members exist
+Zerk<Loading>.cached
+Zerk<Loading>.inject()   // live, because it is primary
+```
+
+`primary` must be a `true`/`false` literal — Zerk reads it from source and cannot evaluate an expression. It is only *required* of the type that wins the key (see `@Injectable(primary:)` below); writing it on a lone provider is accepted and has no effect.
+
+Providers that share a member name are fine as long as their parameters differ — two marked initializers are both named after their type, and the generated overloads are told apart exactly as the initializers are.
 
 Provider parameters are resolved in this order: a uniquely matching `@Injectable` value → a uniquely resolvable injectable key (recursively) → otherwise the parameter is exposed on the generated member and on `inject(...)` for the caller to supply ("parametric injection").
 
 **`@Singleton`** — one shared instance per key, created lazily and thread-safely on first access. Reference types (class/actor) only. Singleton providers cannot be `async`/`throws` and cannot require external arguments.
 
-**`@Primary`** — when several types are injectable under the same key, marks the one `inject()` should build. Without a primary, multiple providers for a key are generated as named members (`Zerk<Loading>.live`, `Zerk<Loading>.mock`) and `inject()` is omitted.
+**`@Injectable(primary:)`** — when several *types* are injectable under the same key, marks the one `inject()` should build. Exactly one must claim it; leaving the key contested is a build error. The others are still generated as named members (`Zerk<Loading>.mockLoader`), they simply do not win the key.
+
+```swift
+@Injectable<Loading>(primary: true)
+final class LiveLoader: Loading { init() {} }
+
+@Injectable<Loading>
+final class MockLoader: Loading { init() {} }
+
+Zerk<Loading>.inject()      // LiveLoader
+Zerk<Loading>.mockLoader    // still available
+```
+
+The two `primary` flags are independent axes: `@Injectable(primary:)` picks the winning **type**, `@InjectableProviding(primary:)` picks the winning **provider within that type**. `inject()` is the intersection. A type that loses the key never needs a primary among its own providers.
+
+Like every Zerk attribute it applies per key, so `@Injectable<A>(primary: true) @Injectable<B>` claims `A` only. It is a *type*-only argument: a value is the sole provider for its key, so `primary` on one is an error.
 
 **`@Shared`** — makes the generated `inject()` `public`, so other modules can resolve the key. The key type itself must be `public`, otherwise the modifier is dropped with a warning.
 
@@ -237,7 +275,7 @@ Provider parameters are resolved in this order: a uniquely matching `@Injectable
 final class FileStore: Storing { init() {} }
 ```
 
-For "this is nonisolated", use Swift's own `nonisolated` keyword — it is real, and Zerk reads it. `@Isolated` may be attached to a type, an initializer, a `@Providing` factory, or an `@Injectable` value; the innermost annotation wins, exactly as Swift's own isolation inference works.
+For "this is nonisolated", use Swift's own `nonisolated` keyword — it is real, and Zerk reads it. `@Isolated` may be attached to a type, an initializer, an `@InjectableProviding` factory, or an `@Injectable` value; the innermost annotation wins, exactly as Swift's own isolation inference works.
 
 ### Consuming injectables
 
@@ -432,11 +470,11 @@ The file governs how Zerk **reads** your source. It never governs what Zerk **wr
 
 **`@Isolated<A>` is unverified.** It states what the compiler already believes; Zerk cannot check that claim and will generate code matching whatever you wrote.
 
-**One provider per key per type; one `@Primary` per key module-wide.** Ambiguity is a build error.
+**A key may have many providers; exactly one of them backs `inject()`.** When several types claim a key, one needs `@Injectable(primary: true)`. When the winning type has several providers for that key, one needs `@InjectableProviding(primary: true)`. Unresolved ambiguity is a build error — but only for the type that actually wins the key; a losing type's providers are just named members and need no primary.
 
 **Circular dependencies are rejected** with the cycle path in the error. Break cycles manually (e.g. inject a factory or make one edge parametric).
 
-**Generated member names must be unique per key.** Two types that lower-camel-case to the same member name under the same key (e.g. `Service` in two files) collide; rename the type or use a distinctly named `@Providing` factory.
+**Generated member names must be unique per key *per signature*.** Providers may share a member name when their parameters differ — two marked initializers both generate `Zerk<Key>.loader(...)`, told apart exactly as the initializers are. Two that agree on name *and* parameters (e.g. a `Service` in two files, both argument-free) collide; rename the type or use a distinctly named `@InjectableProviding` factory.
 
 **`@Singleton` constraints.** Reference types only; provider must be synchronous and non-throwing; no external arguments; and no dependency in a different isolation domain, since resolving one would need `await`.
 
@@ -444,7 +482,7 @@ The file governs how Zerk **reads** your source. It never governs what Zerk **wr
 
 **`@Injected` cannot resolve async, throwing, or cross-domain chains** — use `try await Zerk<Key>.inject()` manually (or an `@injected` parameter). For lazy resolution, use a plain `lazy var = Zerk<Key>.inject()`; there is no `@LazyInjected` macro.
 
-**Interjection is keyed by generated member name.** A test override conforms `Zerk` to `Interjecting<Key>` and implements `interjected<MemberName>`. Renaming an injectable type or `@Providing` factory changes that member name, so a stale conformance becomes a *compile error* — the mismatch is caught, not silently ignored. Requirements mirror the member's isolation, so a double for a `@MainActor` provider is built on the main actor.
+**Interjection is keyed by generated member name.** A test override conforms `Zerk` to `Interjecting<Key>` and implements `interjected<MemberName>`. Renaming an injectable type or `@InjectableProviding` factory changes that member name, so a stale conformance becomes a *compile error* — the mismatch is caught, not silently ignored. Requirements mirror the member's isolation, so a double for a `@MainActor` provider is built on the main actor.
 
 **Interjection does not short-circuit resolution.** A member's dependencies are resolved before the guard runs, so an interjected value still builds its real dependency subtree first.
 
@@ -454,7 +492,7 @@ The file governs how Zerk **reads** your source. It never governs what Zerk **wr
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, multiple non-generic providers on a type, multiple `@Primary` for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency, circular dependency, member-name collision, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency, circular dependency, member-name collision, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

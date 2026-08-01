@@ -66,6 +66,7 @@ public struct CodeGenerator {
             types: collector.types,
             values: collector.values,
             resolutions: resolution.resolutions,
+            primaryResolutions: resolution.primaryResolutions,
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: collector.injectedUses,
             markedMembers: collector.markedMembers

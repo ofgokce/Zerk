@@ -15,9 +15,9 @@ import SwiftSyntaxMacros
 ///
 /// Registration happens in the build plugin. What this macro adds is the
 /// subset of errors decidable from the declaration alone — the type does not
-/// conform to the key it claims, a key is annotated twice, no `@Providing`
-/// provider exists — reported at the declaration instead of from generated
-/// code the developer did not write.
+/// conform to the key it claims, a key is annotated twice, no
+/// `@InjectableProviding` provider exists — reported at the declaration instead
+/// of from generated code the developer did not write.
 public struct InjectableMacro: PeerMacro {
     public static func expansion(of node: AttributeSyntax,
                                  providingPeersOf declaration: some DeclSyntaxProtocol,
@@ -62,6 +62,15 @@ private extension InjectableMacro {
         }
 
         var seenKeys = Set<String>()
+
+        for attribute in injectableAttributes {
+            if attribute.primaryArgument != .absent {
+                context.zerkError(
+                    attribute,
+                    "'primary' applies to types only. A value is the sole provider for its key, so there is nothing to be primary over."
+                )
+            }
+        }
 
         for attribute in injectableAttributes {
             let genericArgs = attribute.genericArgumentTypes
@@ -120,8 +129,9 @@ private extension InjectableMacro {
     /// Checks that the type conforms to each key it claims (the conformance
     /// must be written in the declaration — the macro cannot see conformances
     /// added in an extension or another module), that no key is claimed twice,
-    /// and that every key has a provider: `@Providing<Key>`, a plain
-    /// `@Providing`, or a sole initializer used implicitly.
+    /// and that every key has at least one provider:
+    /// `@InjectableProviding<Key>`, a plain `@InjectableProviding`, or a sole
+    /// initializer used implicitly.
     static func validateInjectableType(_ declaration: ZerkTypeDecl,
                                        node: AttributeSyntax,
                                        in context: some MacroExpansionContext) {
@@ -135,6 +145,21 @@ private extension InjectableMacro {
         // otherwise every error is reported once per attribute.
         guard let first = injectableAttributes.first, first.id == node.id else {
             return
+        }
+
+        for attribute in injectableAttributes {
+            if attribute.hasPositionalArgument {
+                context.zerkError(
+                    attribute,
+                    "The injection method applies to values only. A type is built by a provider, not read from a declaration, so there is nothing to copy or reference."
+                )
+            }
+            if attribute.primaryArgument == .nonLiteral {
+                context.zerkError(
+                    attribute,
+                    "@Injectable(primary:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression."
+                )
+            }
         }
 
         var injectableKeys: [String: AttributeSyntax] = [:]
@@ -172,32 +197,18 @@ private extension InjectableMacro {
             from: declaration,
             in: context)
 
+        // Several providers for one key is now the point, not an error. Whether
+        // one of them must be `primary` is a module-wide question — it only
+        // binds the type that actually wins the key — so `ProviderResolver`
+        // asks it and this macro stays silent.
         for (key, providers) in providerInfo.typedProviders {
-            if providers.count > 1 {
-                for provider in providers.dropFirst() {
-                    context.zerkError(
-                        provider,
-                        "Multiple @Providing<\(key)> providers found. Only one is allowed per injectable type."
-                    )
-                }
-            }
-
             if injectableKeys[key] == nil {
                 if let provider = providers.first {
                     context.zerkError(
                         provider,
-                        "@Providing<\(key)> is defined, but there is no matching @Injectable<\(key)> on '\(declaration.nameText)'."
+                        "@InjectableProviding<\(key)> is defined, but there is no matching @Injectable<\(key)> on '\(declaration.nameText)'."
                     )
                 }
-            }
-        }
-
-        if providerInfo.defaultProviders.count > 1 {
-            for provider in providerInfo.defaultProviders.dropFirst() {
-                context.zerkError(
-                    provider,
-                    "Multiple non-generic @Providing providers found. Only one default provider is allowed."
-                )
             }
         }
 
@@ -216,7 +227,7 @@ private extension InjectableMacro {
 
             context.zerkError(
                 attribute,
-                "No @Providing provider found for @Injectable<\(key)>. Mark an initializer or a static factory with @Providing."
+                "No @InjectableProviding provider found for @Injectable<\(key)>. Mark an initializer or a static factory with @InjectableProviding."
             )
         }
     }

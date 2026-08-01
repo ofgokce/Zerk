@@ -14,11 +14,14 @@
 struct ParameterClassifier {
 
     let values: [InjectableValueRecord]
-    let resolutionsByKey: [String: [ProviderResolution]]
+    /// The provider `inject()` calls, per key — the only one a dependency may
+    /// be resolved through. A key whose providers were ambiguous is absent, and
+    /// parameters of that type fall back to **E**.
+    let primaryResolutions: [String: ProviderResolution]
 
-    init(values: [InjectableValueRecord], resolutions: [ProviderResolution]) {
+    init(values: [InjectableValueRecord], primaryResolutions: [String: ProviderResolution]) {
         self.values = values
-        self.resolutionsByKey = Dictionary(grouping: resolutions, by: \.injectableKey)
+        self.primaryResolutions = primaryResolutions
     }
 
     /// `visiting` holds the injectable keys currently on the resolution stack.
@@ -62,14 +65,12 @@ struct ParameterClassifier {
 
             guard
                 !visiting.contains(parameter.typeKey),
-                let candidates = resolutionsByKey[parameter.typeKey],
-                candidates.count == 1
+                let dependency = primaryResolutions[parameter.typeKey]
             else {
                 classified.append(ClassifiedParameter(parameter: parameter, binding: .external))
                 continue
             }
 
-            let dependency = candidates[0]
             let dependencyClassification = classify(dependency, visiting: nextVisiting)
 
             guard dependencyClassification.isFullyResolvable else {

@@ -1,4 +1,5 @@
 import Testing
+import Zerk
 
 @Suite("Zerk Macro Integration", .serialized)
 struct ZerkTests {
@@ -69,6 +70,38 @@ struct ZerkTests {
         let manual = AuditTrail(logger: trail.logger, label: "manual")
         #expect(manual.logger.serial == 1)
         #expect(Logger.createdCount == 1)
+    }
+
+    @Test("every provider for a key becomes a member, and the primary backs inject")
+    func multipleProvidersPerKey() {
+        resetFixtureState()
+
+        // The primary provider on the primary type.
+        #expect(LoaderConsumer().loader.source == "live")
+        #expect(Zerk<Loading>.inject().source == "live")
+
+        // Its siblings on the same type.
+        #expect(Zerk<Loading>.live.source == "live")
+        #expect(Zerk<Loading>.cached.source == "cached")
+        #expect(Zerk<Loading>.seeded(source: "custom").source == "custom")
+
+        // And the losing type's providers, which need no primary of their own.
+        #expect(Zerk<Loading>.silent.source == "null")
+        #expect(Zerk<Loading>.noisy.source == "null")
+    }
+
+    @Test("the non-generic primary overloads resolve through the real macros")
+    func nonGenericPrimaryOverloads() {
+        resetFixtureState()
+
+        // Two marked initializers: same member name, told apart by parameters.
+        #expect(Zerk<Reporter>.inject().mode == "default")
+        #expect(Zerk<Reporter>.reporter(mode: "verbose").mode == "verbose")
+
+        // @Injectable(.referenced) reads through to the declaration.
+        RetryPolicy.retryLimit = 7
+        #expect(Zerk<Int>.retryLimit == 7)
+        RetryPolicy.retryLimit = 3
     }
 
     @Test("interjection overrides injection with mock type")

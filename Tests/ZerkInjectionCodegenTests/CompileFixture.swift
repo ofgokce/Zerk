@@ -113,10 +113,35 @@ enum CompileFixture {
             types: collector.types,
             values: collector.values,
             resolutions: resolution.resolutions,
+            primaryResolutions: resolution.primaryResolutions,
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: collector.injectedUses,
             markedMembers: collector.markedMembers
         ).build()
+    }
+
+    /// Codegen plus the diagnostics that only `ProviderResolver` can produce.
+    ///
+    /// `generateOutput` reports what the *builder* found; provider ambiguity is
+    /// settled a stage earlier, so tests about it need both halves.
+    static func generateWithResolution(source: String,
+                                       settings: ZerkSettings = .default)
+    -> (output: GeneratorOutput, diagnostics: [CodegenDiagnostic]) {
+        let collector = SourceCollector(settings: settings)
+        collector.walk(Parser.parse(source: source))
+
+        let resolution = ProviderResolver(types: collector.types).resolve()
+        let output = GeneratorOutputBuilder(
+            types: collector.types,
+            values: collector.values,
+            resolutions: resolution.resolutions,
+            primaryResolutions: resolution.primaryResolutions,
+            moduleAccessLevels: collector.moduleAccessLevels,
+            injectedUses: collector.injectedUses,
+            markedMembers: collector.markedMembers
+        ).build()
+
+        return (output, collector.diagnostics + resolution.diagnostics + output.diagnostics)
     }
 
     // MARK: - Compilation
@@ -187,9 +212,10 @@ enum CompileFixture {
     }
     """
 
-    // Prefix matches, so "@Injectable" also covers "@InjectableValues".
+    // Prefix matches, so "@Injectable" also covers "@InjectableValues" and
+    // "@InjectableProviding".
     private static let zerkAttributePrefixes = [
-        "@Injectable", "@NonInjectable", "@Providing", "@Singleton", "@Primary",
+        "@Injectable", "@NonInjectable", "@Singleton",
         "@Shared", "@Isolated", "@Injected"
     ]
 

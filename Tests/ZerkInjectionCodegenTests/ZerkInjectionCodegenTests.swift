@@ -4,21 +4,67 @@ import SwiftParser
 
 @Suite("ProviderResolver")
 struct ProviderResolverTests {
-    @Test("typed provider overrides default provider for matching injectable key")
-    func typedProviderOverridesDefaultProvider() {
+    @Test("a typed provider joins the default provider rather than replacing it")
+    func typedProviderJoinsDefaultProvider() {
         let record = makeTypeRecord(
             name: "APIService",
             injectableKeys: ["Service", "APIService"],
-            defaultProviders: [makeInitializerProvider()],
-            typedProviders: ["Service": [makeStaticProvider(name: "live")]]
+            defaultProviders: [makeInitializerProvider(isPrimary: true)],
+            typedProviders: ["Service": [makeStaticProvider(name: "live", location: makeLocation(line: 20))]]
+        )
+
+        let result = ProviderResolver(types: [record]).resolve()
+
+        #expect(result.diagnostics.isEmpty)
+        // 'Service' is served by both the untyped initializer and the typed
+        // factory; 'APIService' only by the initializer.
+        #expect(result.resolutions.count == 3)
+        #expect(result.resolutions.contains { $0.injectableKey == "Service" && $0.provider.memberNameHint == "live" })
+        #expect(result.resolutions.contains { $0.injectableKey == "Service" && $0.provider.memberNameHint == nil })
+        #expect(result.resolutions.contains { $0.injectableKey == "APIService" && $0.provider.memberNameHint == nil })
+        #expect(result.primaryResolutions["Service"]?.provider.memberNameHint == nil)
+        #expect(result.primaryResolutions["APIService"]?.provider.memberNameHint == nil)
+    }
+
+    @Test("several typed providers for one key all resolve")
+    func severalTypedProvidersAllResolve() {
+        let record = makeTypeRecord(
+            name: "Loader",
+            injectableKeys: ["Loading"],
+            typedProviders: [
+                "Loading": [
+                    makeStaticProvider(name: "live", isPrimary: true),
+                    makeStaticProvider(name: "cached", location: makeLocation(line: 20))
+                ]
+            ]
         )
 
         let result = ProviderResolver(types: [record]).resolve()
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.resolutions.count == 2)
-        #expect(result.resolutions.contains { $0.injectableKey == "Service" && $0.provider.memberNameHint == "live" })
-        #expect(result.resolutions.contains { $0.injectableKey == "APIService" && $0.provider.memberNameHint == nil })
+        #expect(result.primaryResolutions["Loading"]?.provider.memberNameHint == "live")
+    }
+
+    @Test("a singleton may not declare more than one provider for a key")
+    func singletonRejectsMultipleProviders() {
+        let record = makeTypeRecord(
+            name: "Loader",
+            injectableKeys: ["Loading"],
+            typedProviders: [
+                "Loading": [
+                    makeStaticProvider(name: "live", isPrimary: true),
+                    makeStaticProvider(name: "cached", location: makeLocation(line: 20))
+                ]
+            ],
+            isSingleton: true
+        )
+
+        let result = ProviderResolver(types: [record]).resolve()
+
+        #expect(result.resolutions.isEmpty)
+        #expect(result.diagnostics.count == 1)
+        #expect(result.diagnostics[0].message.contains("@Singleton 'Loader' declares multiple providers for 'Loading'"))
     }
 
     @Test("missing provider emits error when implicit initializer cannot be inferred")
@@ -36,10 +82,10 @@ struct ProviderResolverTests {
 
         #expect(result.resolutions.isEmpty)
         #expect(result.diagnostics.count == 1)
-        #expect(result.diagnostics[0].message.contains("No @Providing provider found"))
+        #expect(result.diagnostics[0].message.contains("No @InjectableProviding provider found"))
     }
 
-    @Test("multiple primaries for a key emit diagnostics")
+    @Test("multiple primary types for a key emit diagnostics")
     func multiplePrimariesEmitDiagnostics() {
         let first = makeTypeRecord(
             name: "LiveService",
@@ -57,7 +103,8 @@ struct ProviderResolverTests {
         let result = ProviderResolver(types: [first, second]).resolve()
 
         #expect(result.diagnostics.count == 1)
-        #expect(result.diagnostics[0].message.contains("Multiple @Primary injectables found"))
+        #expect(result.diagnostics[0].message.contains("Multiple primary injectables found for 'Service'"))
+        #expect(result.primaryResolutions["Service"] == nil)
     }
 
     @Test("selective shared keys are tracked per injectable key")
@@ -155,11 +202,11 @@ struct ProviderResolverTests {
         #expect(result.resolutions[0].injectableKey == "Service")
         #expect(result.resolutions[0].isolation == .globalActor("MainActor"))
 
-        let output = GeneratorOutputBuilder(
+        let output = buildOutput(
             types: collector.types,
             values: collector.values,
             resolutions: result.resolutions
-        ).build()
+        )
 
         #expect(output.diagnostics.isEmpty)
         #expect(output.output.contains("@MainActor static var liveService: Service {"))
@@ -294,7 +341,7 @@ struct ProviderResolverTests {
         @MainActor
         @Injectable<Service>
         final class LiveService: Service {
-            @Providing
+            @InjectableProviding
             nonisolated static func live() -> Service {
                 LiveService()
             }
@@ -369,7 +416,7 @@ struct GeneratorOutputBuilderTests {
             location: makeLocation()
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [value], resolutions: []).build()
+        let result = buildOutput(types: [], values: [value], resolutions: [])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("extension Zerk<String> {"))
@@ -395,7 +442,7 @@ struct GeneratorOutputBuilderTests {
             location: makeLocation()
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [value], resolutions: [resolution]).build()
+        let result = buildOutput(types: [], values: [value], resolutions: [resolution])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("nonisolated(unsafe) static let apiService: ApiServicing = {"))
@@ -414,7 +461,7 @@ struct GeneratorOutputBuilderTests {
             isSingleton: true
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [resolution]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [resolution])
 
         #expect(result.diagnostics.count == 1)
         #expect(result.diagnostics[0].message.contains("@Singleton providers cannot be async or throwing"))
@@ -454,7 +501,7 @@ struct GeneratorOutputBuilderTests {
             isSingleton: true
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [store, cache]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [store, cache])
 
         #expect(result.diagnostics.count == 1)
         #expect(result.diagnostics[0].message.contains("crosses an isolation boundary"))
@@ -479,7 +526,7 @@ struct GeneratorOutputBuilderTests {
             isSingleton: true
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [store, cache]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [store, cache])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("@MainActor static let cache: Cache = {"))
@@ -504,7 +551,7 @@ struct GeneratorOutputBuilderTests {
             )
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [logger, reporter]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [logger, reporter])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("private func _$zerk_sendable_conformance_check<T: Sendable>(_: T.Type) {}"))
@@ -535,7 +582,7 @@ struct GeneratorOutputBuilderTests {
             )
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [manager, repository]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [manager, repository])
 
         #expect(result.diagnostics.isEmpty)
         // The dependency cannot be a default argument — `await` is not allowed
@@ -563,7 +610,7 @@ struct GeneratorOutputBuilderTests {
             provider: .explicit(makeStaticProvider(name: "live"))
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [first, second]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [first, second])
 
         #expect(result.diagnostics.contains { $0.message.contains("collides") })
     }
@@ -585,28 +632,26 @@ struct GeneratorOutputBuilderTests {
             ))
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [a, b]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [a, b])
 
         #expect(result.diagnostics.contains { $0.message.contains("Circular dependency detected") })
     }
 
     @Test("@Shared on a non-public key clamps access and warns")
     func sharedOnInternalKeyClampsAccess() {
-        let service = ProviderResolution(
+        let service = makeResolution(
             typeName: "LiveService",
             injectableKey: "Service",
             provider: .explicit(makeStaticProvider(name: "live")),
-            isPrimary: false,
-            isShared: true,
-            isSingleton: false
+            isShared: true
         )
 
-        let result = GeneratorOutputBuilder(
+        let result = buildOutput(
             types: [],
             values: [],
             resolutions: [service],
             moduleAccessLevels: ["Service": false]
-        ).build()
+        )
 
         #expect(result.diagnostics.contains { $0.severity == .warning && $0.message.contains("@Shared has no effect") })
         #expect(result.output.contains("public ") == false)
@@ -629,12 +674,12 @@ struct GeneratorOutputBuilderTests {
             location: makeLocation()
         )
 
-        let result = GeneratorOutputBuilder(
+        let result = buildOutput(
             types: [],
             values: [],
             resolutions: [repository],
             injectedUses: [use]
-        ).build()
+        )
 
         #expect(result.diagnostics.contains { $0.message.contains("@Injected cannot resolve it") })
     }
@@ -651,7 +696,7 @@ struct GeneratorOutputBuilderTests {
             provider: .explicit(tokenProvider)
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [resolution]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [resolution])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("macro Injected(seed: Int)"))
@@ -687,7 +732,7 @@ struct GeneratorOutputBuilderTests {
             )
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [apiService, logger, live]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [apiService, logger, live])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("static func live(apiService: ApiServicing = Zerk<ApiServicing>.inject(), logger: Logger = Zerk<Logger>.inject()) -> UserService"))
@@ -723,11 +768,11 @@ struct GeneratorOutputBuilderTests {
             ))
         )
 
-        let result = GeneratorOutputBuilder(
+        let result = buildOutput(
             types: [],
             values: [baseUrl],
             resolutions: [apiService, userRepository]
-        ).build()
+        )
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("static func apiService(baseUrl: String = Zerk<String>.baseUrl) -> ApiServicing"))
@@ -737,8 +782,8 @@ struct GeneratorOutputBuilderTests {
         #expect(result.output.contains("userId: String = Zerk<String>.baseUrl") == false)
     }
 
-    @Test("multiple providers for the same injectable key omit inject wrapper")
-    func multipleProvidersOmitInjectWrapper() {
+    @Test("competing types with no primary are an error")
+    func competingTypesWithoutPrimaryAreAnError() {
         let live = makeResolution(
             typeName: "LiveLoader",
             injectableKey: "Loading",
@@ -747,56 +792,148 @@ struct GeneratorOutputBuilderTests {
         let mock = makeResolution(
             typeName: "MockLoader",
             injectableKey: "Loading",
-            provider: .explicit(makeStaticProvider(name: "mock"))
+            provider: .explicit(makeStaticProvider(name: "mock", location: makeLocation(line: 20)))
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [live, mock]).build()
+        let diagnostics = electionDiagnostics([live, mock])
 
-        #expect(result.diagnostics.isEmpty)
-        #expect(result.output.contains("static func inject() -> Loading") == false)
-        #expect(result.output.contains("static var live: Loading"))
-        #expect(result.output.contains("static var mock: Loading"))
+        #expect(diagnostics.count == 1)
+        #expect(diagnostics[0].severity == .error)
+        #expect(diagnostics[0].message.contains("Multiple types are injectable under 'Loading' (LiveLoader, MockLoader) and none is primary"))
+        #expect(diagnostics[0].message.contains("@Injectable(primary: true)"))
     }
 
-    @Test("primary provider restores inject wrapper when multiple providers exist")
-    func primaryProviderRestoresInjectWrapper() {
+    @Test("a primary type wins the key while the others stay as named members")
+    func primaryTypeWinsTheKey() {
         let live = makeResolution(
             typeName: "LiveLoader",
             injectableKey: "Loading",
             provider: .explicit(makeStaticProvider(name: "live")),
-            isPrimary: true
+            isTypePrimary: true
         )
         let mock = makeResolution(
             typeName: "MockLoader",
             injectableKey: "Loading",
-            provider: .explicit(makeStaticProvider(name: "mock"))
+            provider: .explicit(makeStaticProvider(name: "mock", location: makeLocation(line: 20)))
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [live, mock]).build()
+        #expect(electionDiagnostics([live, mock]).isEmpty)
+
+        let result = buildOutput(types: [], values: [], resolutions: [live, mock])
 
         #expect(result.diagnostics.isEmpty)
+        #expect(result.output.contains("static var live: Loading"))
+        #expect(result.output.contains("static var mock: Loading"))
         #expect(result.output.contains("static func inject() -> Loading"))
-        #expect(result.output.contains("live"))
+        #expect(result.output.contains("        live"))
+    }
+
+    @Test("a losing type needs no primary among its own providers")
+    func losingTypeNeedsNoProviderPrimary() {
+        let live = makeResolution(
+            typeName: "LiveLoader",
+            injectableKey: "Loading",
+            provider: .explicit(makeStaticProvider(name: "live")),
+            isTypePrimary: true
+        )
+        let empty = makeResolution(
+            typeName: "MockLoader",
+            injectableKey: "Loading",
+            provider: .explicit(makeStaticProvider(name: "empty", location: makeLocation(line: 20)))
+        )
+        let failing = makeResolution(
+            typeName: "MockLoader",
+            injectableKey: "Loading",
+            provider: .explicit(makeStaticProvider(name: "failing", location: makeLocation(line: 30)))
+        )
+
+        #expect(electionDiagnostics([live, empty, failing]).isEmpty)
+
+        let result = buildOutput(types: [], values: [], resolutions: [live, empty, failing])
+
+        #expect(result.diagnostics.isEmpty)
+        #expect(result.output.contains("static var empty: Loading"))
+        #expect(result.output.contains("static var failing: Loading"))
+        #expect(result.output.contains("static func inject() -> Loading"))
+    }
+
+    @Test("the winning type must pick one of its own providers")
+    func winningTypeMustPickAProvider() {
+        let empty = makeResolution(
+            typeName: "Loader",
+            injectableKey: "Loading",
+            provider: .explicit(makeStaticProvider(name: "empty"))
+        )
+        let failing = makeResolution(
+            typeName: "Loader",
+            injectableKey: "Loading",
+            provider: .explicit(makeStaticProvider(name: "failing", location: makeLocation(line: 20)))
+        )
+
+        let diagnostics = electionDiagnostics([empty, failing])
+
+        #expect(diagnostics.count == 1)
+        #expect(diagnostics[0].message.contains("'Loader' declares multiple providers for 'Loading' and none is primary"))
+        #expect(diagnostics[0].message.contains("@InjectableProviding(primary: true)"))
+        // Reported against the second provider, so the first stays the one the
+        // developer is being asked to keep.
+        #expect(diagnostics[0].location.line == 20)
+    }
+
+    @Test("two primary providers on one type are an error")
+    func twoPrimaryProvidersAreAnError() {
+        let live = makeResolution(
+            typeName: "Loader",
+            injectableKey: "Loading",
+            provider: .explicit(makeStaticProvider(name: "live", isPrimary: true))
+        )
+        let cached = makeResolution(
+            typeName: "Loader",
+            injectableKey: "Loading",
+            provider: .explicit(makeStaticProvider(name: "cached", location: makeLocation(line: 20), isPrimary: true))
+        )
+
+        let diagnostics = electionDiagnostics([live, cached])
+
+        #expect(diagnostics.count == 1)
+        #expect(diagnostics[0].message.contains("'Loader' declares multiple primary providers for 'Loading'"))
+    }
+
+    @Test("a primary provider backs inject while its siblings stay callable")
+    func primaryProviderBacksInject() {
+        let live = makeResolution(
+            typeName: "Loader",
+            injectableKey: "Loading",
+            provider: .explicit(makeStaticProvider(name: "live", isPrimary: true))
+        )
+        let cached = makeResolution(
+            typeName: "Loader",
+            injectableKey: "Loading",
+            provider: .explicit(makeStaticProvider(name: "cached", location: makeLocation(line: 20)))
+        )
+
+        #expect(electionDiagnostics([live, cached]).isEmpty)
+
+        let result = buildOutput(types: [], values: [], resolutions: [live, cached])
+
+        #expect(result.diagnostics.isEmpty)
+        #expect(result.output.contains("static var live: Loading"))
+        #expect(result.output.contains("static var cached: Loading"))
+        #expect(result.output.contains("static func inject() -> Loading"))
+        #expect(result.output.contains("        live"))
     }
 
     @Test("shared injectables generate a public inject wrapper without publicizing internal members")
     func sharedInjectablesGeneratePublicInjectOnly() {
-        let service = makeResolution(
+        let sharedService = makeResolution(
             typeName: "LiveService",
             injectableKey: "Service",
             provider: .explicit(makeStaticProvider(name: "live")),
-            isPrimary: true
-        )
-        let sharedService = ProviderResolution(
-            typeName: service.typeName,
-            injectableKey: service.injectableKey,
-            provider: service.provider,
-            isPrimary: service.isPrimary,
-            isShared: true,
-            isSingleton: service.isSingleton
+            isTypePrimary: true,
+            isShared: true
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [sharedService]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [sharedService])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("static var live: Service"))
@@ -822,7 +959,7 @@ struct GeneratorOutputBuilderTests {
             )
         )
 
-        let result = GeneratorOutputBuilder(types: [], values: [], resolutions: [apiManager, userRepository]).build()
+        let result = buildOutput(types: [], values: [], resolutions: [apiManager, userRepository])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("static func userRepository(manager: ApiManager = Zerk<ApiManager>.inject()) async throws -> UserRepository"))
@@ -839,14 +976,14 @@ struct ParameterInjectionTests {
         let collector = SourceCollector()
         collector.walk(Parser.parse(source: source))
         let resolution = ProviderResolver(types: collector.types).resolve()
-        let output = GeneratorOutputBuilder(
+        let output = buildOutput(
             types: collector.types,
             values: collector.values,
             resolutions: resolution.resolutions,
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: collector.injectedUses,
             markedMembers: collector.markedMembers
-        ).build()
+        )
         return GeneratorOutput(
             output: output.output,
             diagnostics: collector.diagnostics + resolution.diagnostics + output.diagnostics
@@ -856,7 +993,7 @@ struct ParameterInjectionTests {
     private let loggerFixture = """
     @Injectable
     struct Logger {
-        @Providing
+        @InjectableProviding
         init() {}
     }
 
@@ -946,7 +1083,7 @@ struct ParameterInjectionTests {
         let result = generate("""
         @Injectable
         struct Logger {
-            @Providing
+            @InjectableProviding
             init() async {}
         }
 
@@ -976,7 +1113,7 @@ struct ParameterInjectionTests {
         let result = generate("""
         @Injectable
         struct Token {
-            @Providing
+            @InjectableProviding
             init(seed: Int) {}
         }
 
@@ -1066,16 +1203,18 @@ private func makeInitializerRecord(parameters: [ParameterRecord] = [],
 private func makeInitializerProvider(parameters: [ParameterRecord] = [],
                                      effects: ProviderEffects = .none,
                                      location: AttributeLocation = makeLocation(),
-                                     isolation: ProviderIsolation = .nonisolated) -> InjectingProvider {
-    InjectingProvider(kind: .initializer, parameters: parameters, effects: effects, location: location, isolation: isolation)
+                                     isolation: ProviderIsolation = .nonisolated,
+                                     isPrimary: Bool = false) -> InjectingProvider {
+    InjectingProvider(kind: .initializer, parameters: parameters, effects: effects, location: location, isolation: isolation, isPrimary: isPrimary)
 }
 
 private func makeStaticProvider(name: String,
                                 parameters: [ParameterRecord] = [],
                                 effects: ProviderEffects = .none,
                                 location: AttributeLocation = makeLocation(),
-                                isolation: ProviderIsolation = .nonisolated) -> InjectingProvider {
-    InjectingProvider(kind: .staticFunction(name: name), parameters: parameters, effects: effects, location: location, isolation: isolation)
+                                isolation: ProviderIsolation = .nonisolated,
+                                isPrimary: Bool = false) -> InjectingProvider {
+    InjectingProvider(kind: .staticFunction(name: name), parameters: parameters, effects: effects, location: location, isolation: isolation, isPrimary: isPrimary)
 }
 
 private func makeParameter(label: String?,
@@ -1088,16 +1227,46 @@ private func makeParameter(label: String?,
 private func makeResolution(typeName: String,
                             injectableKey: String,
                             provider: ProviderChoice,
-                            isPrimary: Bool = false,
+                            isTypePrimary: Bool = false,
+                            isShared: Bool = false,
                             isSingleton: Bool = false) -> ProviderResolution {
     ProviderResolution(
         typeName: typeName,
         injectableKey: injectableKey,
         provider: provider,
-        isPrimary: isPrimary,
-        isShared: false,
+        isTypePrimary: isTypePrimary,
+        isShared: isShared,
         isSingleton: isSingleton
     )
+}
+
+/// Builds generated output from hand-written resolutions, electing the primary
+/// per key exactly as the real pipeline does.
+///
+/// Tests construct resolutions directly rather than parsing source, but which
+/// provider backs `inject()` is `ProviderResolver`'s decision — restating those
+/// rules here would let the two drift apart silently.
+private func buildOutput(types: [TypeRecord] = [],
+                         values: [InjectableValueRecord] = [],
+                         resolutions: [ProviderResolution],
+                         moduleAccessLevels: [String: Bool] = [:],
+                         injectedUses: [InjectedUseRecord] = [],
+                         markedMembers: [MarkedMemberRecord] = []) -> GeneratorOutput {
+    GeneratorOutputBuilder(
+        types: types,
+        values: values,
+        resolutions: resolutions,
+        primaryResolutions: ProviderResolver.electPrimaries(among: resolutions).primaries,
+        moduleAccessLevels: moduleAccessLevels,
+        injectedUses: injectedUses,
+        markedMembers: markedMembers
+    ).build()
+}
+
+/// The diagnostics `ProviderResolver` raises while electing primaries, for
+/// tests that assert on ambiguity rather than on generated text.
+private func electionDiagnostics(_ resolutions: [ProviderResolution]) -> [CodegenDiagnostic] {
+    ProviderResolver.electPrimaries(among: resolutions).diagnostics
 }
 
 private func makeLocation(line: Int = 1, column: Int = 1) -> AttributeLocation {

@@ -9,11 +9,15 @@ import SharedToolkit
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-/// The `@Providing` declarations on one type, as the macro sees them.
+/// The `@InjectableProviding` declarations on one type, as the macro sees them.
 ///
 /// Covers the same ground as `SourceCollector` but from a single declaration,
-/// which is enough to report a missing or duplicated provider at the
-/// declaration site instead of from the generated file.
+/// which is enough to report a missing provider, or one bound to a key the type
+/// does not claim, at the declaration site instead of from the generated file.
+///
+/// It cannot report *ambiguity*: several providers for one key are legal, and
+/// whether one of them has to be `primary` depends on which type wins the key
+/// module-wide — which only `ProviderResolver` can see.
 public struct InjectingProviderInfo {
     
     public var defaultProviders: [AttributeSyntax]
@@ -26,9 +30,10 @@ public struct InjectingProviderInfo {
 
     /// Whether the type can fall back to its sole initializer.
     ///
-    /// Requires no `@Providing` anywhere — declaring one is a deliberate
-    /// choice that a bare initializer must not silently override — and at most
-    /// one initializer. Zero counts, because the compiler then synthesizes one.
+    /// Requires no `@InjectableProviding` anywhere — declaring one is a
+    /// deliberate choice that a bare initializer must not silently override —
+    /// and at most one initializer. Zero counts, because the compiler then
+    /// synthesizes one.
     public var implicitDefaultAvailable: Bool {
         typedProviders.isEmpty && defaultProviders.isEmpty && initializerCount <= 1
     }
@@ -46,32 +51,35 @@ public struct InjectingProviderInfo {
         var typedProviders: [String: [AttributeSyntax]] = [:]
         var initializerCount = 0
 
+        // Every matching attribute, not just the first: one factory can be
+        // bound to several keys at once with repeated
+        // `@InjectableProviding<A> @InjectableProviding<B>`, and a key whose
+        // attribute went unread would be reported as having no provider.
         for member in declaration.members.members {
             if let initializerDecl = member.decl.as(InitializerDeclSyntax.self) {
                 initializerCount += 1
 
-                if let attribute = initializerDecl.attributes.firstAttribute(
-                    named: ZerkMacroNames.providingAttributeName
-                ) {
-                    if attribute.genericArgumentTypes.isEmpty {
-                        defaultProviders.append(attribute)
-                    }
+                for attribute in initializerDecl.attributes.attributes(
+                    named: ZerkMacroNames.injectableProvidingAttributeName
+                ) where attribute.genericArgumentTypes.isEmpty {
+                    defaultProviders.append(attribute)
                 }
             } else if let functionDecl = member.decl.as(FunctionDeclSyntax.self) {
-                guard let attribute = functionDecl.attributes.firstAttribute(
-                    named: ZerkMacroNames.providingAttributeName
-                ) else {
-                    continue
-                }
-
                 guard functionDecl.modifiers.isStatic else {
                     continue
                 }
 
-                if let arg = attribute.genericArgumentTypes.first {
-                    typedProviders[arg.normalizedTypeKey, default: []].append(attribute)
-                } else {
-                    defaultProviders.append(attribute)
+                for attribute in functionDecl.attributes.attributes(
+                    named: ZerkMacroNames.injectableProvidingAttributeName
+                ) {
+                    let keys = attribute.genericArgumentTypes
+                    if keys.isEmpty {
+                        defaultProviders.append(attribute)
+                        continue
+                    }
+                    for key in keys {
+                        typedProviders[key.normalizedTypeKey, default: []].append(attribute)
+                    }
                 }
             }
         }

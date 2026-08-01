@@ -9,18 +9,26 @@ import Foundation
 
 /// Turns resolved providers into the text of the generated file.
 ///
-/// The last stage of the pipeline. For each resolution it emits an
-/// `extension Zerk<Key>` holding a factory named after the provider plus an
-/// `inject()` entry point; alongside those go the `@injected` overloads, the
-/// `Interjecting<Key>` protocols tests conform to, and the `Sendable` checks
-/// singletons need.
+/// The last stage of the pipeline. For each key it emits an
+/// `extension Zerk<Key>` holding one factory per provider — named after the
+/// provider, so a key with several providers gets several members — plus a
+/// single `inject()` entry point backed by the primary one. Alongside those go
+/// the `@injected` overloads, the `Interjecting<Key>` protocols tests conform
+/// to, and the `Sendable` checks singletons need.
 ///
 /// Output is assembled as strings rather than syntax nodes, so nearly every
 /// helper here returns a line or a fragment of one.
 struct GeneratorOutputBuilder {
     let types: [TypeRecord]
     let values: [InjectableValueRecord]
+    /// Every (key, provider) pair: one generated member each.
     let resolutions: [ProviderResolution]
+    /// The provider backing `inject()` for each key, as elected by
+    /// `ProviderResolver`. Everything resolved *implicitly* — a dependency
+    /// parameter, an `@injected` argument, an `@Injected` property — goes
+    /// through this rather than through `resolutions`, because those all call
+    /// `inject()`.
+    var primaryResolutions: [String: ProviderResolution] = [:]
     var moduleAccessLevels: [String: Bool] = [:]
     var injectedUses: [InjectedUseRecord] = []
     var markedMembers: [MarkedMemberRecord] = []
@@ -35,9 +43,9 @@ struct GeneratorOutputBuilder {
     }
 
     /// Rebuilt on each access rather than stored — it is a pure function of
-    /// `values` and `resolutions`, both of which are immutable here.
+    /// `values` and `primaryResolutions`, both of which are immutable here.
     private var classifier: ParameterClassifier {
-        ParameterClassifier(values: values, resolutions: resolutions)
+        ParameterClassifier(values: values, primaryResolutions: primaryResolutions)
     }
 
     /// Emits the complete file.
@@ -60,25 +68,11 @@ struct GeneratorOutputBuilder {
 
         diagnostics += cycleDiagnostics()
 
-        let keysWithUniqueProviders = Dictionary(grouping: resolutions, by: \.injectableKey)
-            .compactMapValues { providers in
-                if providers.count == 1 {
-                    return providers[0]
-                }
-
-                let primaryProviders = providers.filter(\.isPrimary)
-                if primaryProviders.count == 1 {
-                    return primaryProviders[0]
-                }
-
-                return nil
-            }
-
         // @Injected expands to a synchronous, non-throwing accessor; a chain
         // containing an async or throwing provider — or one that crosses an
         // isolation domain, which becomes async — cannot be resolved by it.
         for use in injectedUses where !use.hasExplicitExpression {
-            guard let unique = keysWithUniqueProviders[use.typeKey] else {
+            guard let unique = primaryResolutions[use.typeKey] else {
                 continue
             }
             let plan = wrapperPlan(for: unique)
@@ -91,7 +85,7 @@ struct GeneratorOutputBuilder {
             }
         }
 
-        let uniqueExternalSignatures = Set(keysWithUniqueProviders.values.map { macroSignatureKey(for: wrapperPlan(for: $0).parameters) })
+        let uniqueExternalSignatures = Set(primaryResolutions.values.map { macroSignatureKey(for: wrapperPlan(for: $0).parameters) })
             .sorted()
 
         output += generatedInjectedMacroDeclarations(for: uniqueExternalSignatures)
@@ -177,17 +171,24 @@ struct GeneratorOutputBuilder {
                 memberName(for: lhs) < memberName(for: rhs)
             }
 
-            var seenMemberNames: [String: String] = [:]
+            // Keyed on name *and* parameter shape, because same-named members
+            // are how multiple providers coexist: two marked initializers are
+            // both named after their type, and generate overloads that Swift
+            // tells apart exactly as it tells the initializers apart. Only an
+            // identical shape is a genuine redeclaration.
+            var seenMemberSignatures: [String: String] = [:]
             for provider in providers {
                 let name = memberName(for: provider)
-                if let existing = seenMemberNames[name] {
-                    diagnostics.append(CodegenDiagnostic(
-                        severity: .error,
-                        message: "Generated member name '\(name)' for '\(provider.typeName)' collides with '\(existing)' in Zerk<\(injectableKey)>. Rename the type or use a distinct @Providing function name.",
-                        location: provider.provider.location
-                    ))
-                } else {
-                    seenMemberNames[name] = provider.typeName
+                for signature in memberSignatureKeys(for: provider, name: name) {
+                    if let existing = seenMemberSignatures[signature] {
+                        diagnostics.append(CodegenDiagnostic(
+                            severity: .error,
+                            message: "Generated member '\(name)' for '\(provider.typeName)' collides with '\(existing)' in Zerk<\(injectableKey)>: same name, same parameters. Rename the type, or give the provider a distinct @InjectableProviding function name.",
+                            location: provider.provider.location
+                        ))
+                    } else {
+                        seenMemberSignatures[signature] = provider.typeName
+                    }
                 }
             }
 
@@ -218,11 +219,11 @@ struct GeneratorOutputBuilder {
                 output.append("")
             }
 
-            if let uniqueProvider = keysWithUniqueProviders[injectableKey] {
+            if let primary = primaryResolutions[injectableKey] {
                 output += injectLines(
-                    for: uniqueProvider,
+                    for: primary,
                     injectableKey: injectableKey,
-                    classification: classifier.classify(uniqueProvider),
+                    classification: classifier.classify(primary),
                     diagnostics: &diagnostics
                 )
                 output.append("")
@@ -232,7 +233,7 @@ struct GeneratorOutputBuilder {
             output.append("")
         }
 
-        output += markedMemberLines(uniqueProviders: keysWithUniqueProviders, diagnostics: &diagnostics)
+        output += markedMemberLines(diagnostics: &diagnostics)
         output += interjectionProtocolLines(requirements: requirements)
         output += sendabilityCheckLines(sendabilityChecks)
 
@@ -587,7 +588,16 @@ struct GeneratorOutputBuilder {
             // effect-free by construction.
             lines.append("    \(isolation.declarationPrefix)\(accessPrefix)static func inject()\(plan.effects.declarationSuffix) -> \(returns) {")
             if memberIsCallable {
-                lines.append("        \(plan.effects.callPrefix)\(memberName)()")
+                if isOverloaded(memberName, in: injectableKey) {
+                    // Sibling providers share this name and are told apart by
+                    // their parameters — but each one's parameters are fully
+                    // defaulted, so a bare call matches every overload at once.
+                    // Naming the arguments is what makes the call resolve; they
+                    // are the same expressions the defaults hold.
+                    lines.append("        \(provider.provider.effects.callPrefix)\(memberName)(\(memberCallArguments(for: provider, using: plan.argumentExpressions)))")
+                } else {
+                    lines.append("        \(plan.effects.callPrefix)\(memberName)()")
+                }
             } else {
                 lines.append("        \(memberName)")
             }
@@ -631,8 +641,7 @@ struct GeneratorOutputBuilder {
     /// parameters pass through unchanged. Effects of resolved chains merge
     /// into the overload (an async chain yields an async overload), and a
     /// dependency in another isolation domain merges in as `async` too.
-    private func markedMemberLines(uniqueProviders: [String: ProviderResolution],
-                                   diagnostics: inout [CodegenDiagnostic]) -> [String] {
+    private func markedMemberLines(diagnostics: inout [CodegenDiagnostic]) -> [String] {
         guard !markedMembers.isEmpty else {
             return []
         }
@@ -679,7 +688,7 @@ struct GeneratorOutputBuilder {
                         continue
                     }
 
-                    if let unique = uniqueProviders[core.typeKey] {
+                    if let unique = primaryResolutions[core.typeKey] {
                         let plan = wrapperPlan(for: unique)
                         if plan.parameters.isEmpty {
                             let hops = unique.isolation.requiresHop(callingFrom: record.isolation.dependencyCallContext)
@@ -777,18 +786,21 @@ struct GeneratorOutputBuilder {
     /// Detects circular dependencies in the resolution graph up front, so the
     /// classifier's recursion guard never degrades silently. Edges mirror the
     /// classifier's resolution rules: injectable values shadow providers, and
-    /// only uniquely-resolvable keys form edges.
+    /// an edge exists only where the dependency resolves through `inject()`.
+    ///
+    /// Non-primary providers contribute no edges. They are never resolved on
+    /// anyone's behalf, so a cycle through one is not a cycle Zerk can walk into
+    /// — the caller has to name that member itself.
     private func cycleDiagnostics() -> [CodegenDiagnostic] {
-        let resolutionGroups = Dictionary(grouping: resolutions, by: \.injectableKey)
         let classifier = self.classifier
 
         var edges: [String: [String]] = [:]
-        for (key, group) in resolutionGroups where group.count == 1 {
-            for parameter in group[0].provider.parameters {
+        for (key, resolution) in primaryResolutions {
+            for parameter in resolution.provider.parameters {
                 if classifier.injectableValue(matching: parameter) != nil {
                     continue
                 }
-                if let dependencies = resolutionGroups[parameter.typeKey], dependencies.count == 1 {
+                if primaryResolutions[parameter.typeKey] != nil {
                     edges[key, default: []].append(parameter.typeKey)
                 }
             }
@@ -803,7 +815,7 @@ struct GeneratorOutputBuilder {
                 let cycle = Array(path[startIndex...]) + [node]
                 let canonical = cycle.dropLast().sorted().joined(separator: "|")
                 if reportedCycles.insert(canonical).inserted,
-                   let location = resolutionGroups[node]?.first?.provider.location {
+                   let location = primaryResolutions[node]?.provider.location {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
                         message: "Circular dependency detected: \(cycle.joined(separator: " -> ")). Break the cycle by removing one dependency.",
@@ -832,6 +844,47 @@ struct GeneratorOutputBuilder {
     /// an initializer-backed provider is named after its type, lowercased.
     private func memberName(for resolution: ProviderResolution) -> String {
         resolution.provider.memberNameHint ?? resolution.typeName.lowerCamelCased
+    }
+
+    /// Whether more than one provider for this key generates a member of this
+    /// name — i.e. whether the name is an overload set rather than a single
+    /// member. Two of a type's initializers are the usual way this happens.
+    private func isOverloaded(_ name: String, in injectableKey: String) -> Bool {
+        resolutions.filter {
+            $0.injectableKey == injectableKey && memberName(for: $0) == name
+        }
+        .count > 1
+    }
+
+    /// Every signature the member(s) generated for one provider will occupy.
+    ///
+    /// Two of a type's initializers are both named after that type, so their
+    /// members share a name and are told apart by their parameters — exactly as
+    /// the initializers themselves are. Sharing a name is therefore not a
+    /// collision; sharing a name *and* a parameter list is.
+    ///
+    /// A provider yields two signatures when its dependencies split it, since
+    /// both variants carry the same name. A property-shaped member is keyed as
+    /// taking no parameters, which is conservative: Swift will not accept a
+    /// `var` alongside an argument-free `func` of the same name either.
+    private func memberSignatureKeys(for provider: ProviderResolution, name: String) -> [String] {
+        guard !provider.isSingleton else {
+            return ["\(name)()"]
+        }
+
+        let parameters = provider.provider.parameters
+        let effects = provider.provider.effects
+        guard !parameters.isEmpty || effects.isAsync || effects.isThrowing else {
+            return ["\(name)()"]
+        }
+
+        var keys = ["\(name)\(protocolParameterClause(parameters))"]
+
+        let classification = classifier.classify(provider)
+        if classification.requiresSplit {
+            keys.append("\(name)\(protocolParameterClause(classification.resolvingVariantParameters))")
+        }
+        return keys
     }
 
     /// Renders a parameter list, attaching a default value to each parameter
@@ -975,12 +1028,16 @@ struct GeneratorOutputBuilder {
         let grouped = Dictionary(grouping: requirements, by: \.zerkArgument)
 
         for zerkArgument in grouped.keys.sorted() {
-            let sorted = grouped[zerkArgument]!.sorted { $0.interjectedName < $1.interjectedName }
+            // Deduped by name *and* parameters, not by name alone: several
+            // providers for one key can share a member name, and each overload
+            // needs its own requirement. Collapsing them would leave a generated
+            // member calling a requirement that was never declared.
+            let sorted = grouped[zerkArgument]!.sorted { identity(of: $0) < identity(of: $1) }
             var seen = Set<String>()
 
             lines.append("protocol \(interjectingProtocolName(for: zerkArgument)) {")
             for requirement in sorted {
-                guard seen.insert(requirement.interjectedName).inserted else {
+                guard seen.insert(identity(of: requirement)).inserted else {
                     continue
                 }
                 // Isolation comes first: `@MainActor static var` is the valid
@@ -999,6 +1056,17 @@ struct GeneratorOutputBuilder {
         }
 
         return lines
+    }
+
+    /// What makes two interjection requirements the same requirement: the
+    /// mirrored member's name together with its parameters.
+    private func identity(of requirement: InterjectionRequirement) -> String {
+        switch requirement.kind {
+        case .variable:
+            return requirement.interjectedName
+        case .function(let parameters):
+            return requirement.interjectedName + protocolParameterClause(parameters)
+        }
     }
 
     /// Like `parameterClause`, minus defaults: a protocol requirement cannot
@@ -1103,7 +1171,6 @@ struct GeneratorOutputBuilder {
         }
 
         let nextVisiting = visiting.union([resolutionKey])
-        let resolutionGroups = Dictionary(grouping: resolutions, by: \.injectableKey)
         let memberIsolation = resolution.isolation
         let classifier = self.classifier
 
@@ -1120,8 +1187,7 @@ struct GeneratorOutputBuilder {
                 continue
             }
 
-            if let matchingProviders = resolutionGroups[parameter.typeKey], matchingProviders.count == 1 {
-                let dependency = matchingProviders[0]
+            if let dependency = primaryResolutions[parameter.typeKey] {
                 let dependencyPlan = wrapperPlan(for: dependency, visiting: nextVisiting)
                 let hops = dependency.isolation.requiresHop(callingFrom: memberIsolation)
                 let callEffects = dependencyPlan.effects

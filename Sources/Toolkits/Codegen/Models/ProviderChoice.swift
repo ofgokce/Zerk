@@ -5,8 +5,8 @@
 //  Created by Ömer Faruk Gökce on 27.07.2026.
 //
 
-/// Where a provider came from: an explicit `@Providing` declaration, or the
-/// type's sole initializer adopted implicitly.
+/// Where a provider came from: an explicit `@InjectableProviding` declaration,
+/// or the type's sole initializer adopted implicitly.
 ///
 /// The distinction only matters for diagnostics and for naming the generated
 /// member. Everything the generator needs — parameters, effects, isolation,
@@ -61,6 +61,17 @@ enum ProviderChoice {
             provider.isolation
         case .implicit(let initializer):
             initializer.isolation
+        }
+    }
+
+    /// An implicit initializer is never marked: it is adopted only when the
+    /// type declares no provider at all, so it has nothing to be primary over.
+    var isPrimary: Bool {
+        switch self {
+        case .explicit(let provider):
+            provider.isPrimary
+        case .implicit:
+            false
         }
     }
 }

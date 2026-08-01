@@ -205,8 +205,8 @@ final class SourceCollector: SyntaxVisitor {
     /// Records one type's injectable keys and the providers that satisfy them.
     ///
     /// A type can be injectable under several keys at once, and `@Shared` and
-    /// `@Primary` apply per key rather than per type, so all three are gathered
-    /// as dictionaries keyed by type key.
+    /// `@Injectable(primary:)` apply per key rather than per type, so all three
+    /// are gathered as dictionaries keyed by type key.
     private func collectType(_ node: some DeclGroupSyntax, isolation typeIsolation: ProviderIsolation) {
         moduleAccessLevels[node.declaredName] = node.modifiers.isPublic
 
@@ -216,8 +216,24 @@ final class SourceCollector: SyntaxVisitor {
 
         let sharedAttributes = node.attributes.attributes(named: "Shared")
         let isSingleton = node.attributes.hasAttribute(named: "Singleton")
-        let primaryAttributes = node.attributes.attributes(named: "Primary")
         let location = self.location(for: Syntax(node))
+
+        for attribute in injectableAttributes {
+            if attribute.hasPositionalArgument {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "The injection method applies to values only. A type is built by a provider, not read from a declaration, so there is nothing to copy or reference.",
+                    location: location
+                ))
+            }
+            if attribute.primaryArgument == .nonLiteral {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "@Injectable(primary:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression.",
+                    location: location
+                ))
+            }
+        }
 
         if isSingleton && (node.is(StructDeclSyntax.self) || node.is(EnumDeclSyntax.self)) {
             diagnostics.append(CodegenDiagnostic(
@@ -245,10 +261,12 @@ final class SourceCollector: SyntaxVisitor {
             }
         }
 
+        // `@Injectable<A>(primary: true) @Injectable<B>` claims A only: primacy
+        // rides on the attribute that names the key, not on the declaration.
         var primaryKeys: [String: AttributeLocation] = [:]
-        for attribute in primaryAttributes {
+        for attribute in injectableAttributes where attribute.primaryArgument.isPrimary {
             let genericKeys = attribute.genericArgumentKeys
-            let keys = genericKeys.isEmpty ? Array(injectableKeys.keys) : genericKeys
+            let keys = genericKeys.isEmpty ? [node.declaredName] : genericKeys
             for key in keys {
                 primaryKeys[key] = location
             }
@@ -283,13 +301,16 @@ final class SourceCollector: SyntaxVisitor {
                     )
                 )
 
-                for attribute in initializer.attributes.attributes(named: "Providing") {
+                for attribute in initializer.attributes.attributes(named: "InjectableProviding") {
                     if !attribute.genericArgumentKeys.isEmpty {
                         diagnostics.append(CodegenDiagnostic(
                             severity: .error,
-                            message: "@Providing on an initializer cannot declare generic keys.",
+                            message: "@InjectableProviding on an initializer cannot declare generic keys.",
                             location: initializerLocation
                         ))
+                    }
+                    if attribute.primaryArgument == .nonLiteral {
+                        diagnostics.append(nonLiteralPrimaryDiagnostic(at: initializerLocation))
                     }
                     defaultProviders.append(
                         InjectingProvider(
@@ -297,7 +318,8 @@ final class SourceCollector: SyntaxVisitor {
                             parameters: parameters,
                             effects: effects,
                             location: initializerLocation,
-                            isolation: initializerIsolation
+                            isolation: initializerIsolation,
+                            isPrimary: attribute.primaryArgument.isPrimary
                         )
                     )
                 }
@@ -311,7 +333,7 @@ final class SourceCollector: SyntaxVisitor {
                 continue
             }
 
-            let injectingAttributes = function.attributes.attributes(named: "Providing")
+            let injectingAttributes = function.attributes.attributes(named: "InjectableProviding")
             guard !injectingAttributes.isEmpty else {
                 continue
             }
@@ -328,15 +350,23 @@ final class SourceCollector: SyntaxVisitor {
                 attributes: function.attributes,
                 location: functionLocation
             )
-            let provider = InjectingProvider(
-                kind: .staticFunction(name: function.name.text),
-                parameters: function.signature.parameterClause.parameters.parameterRecords,
-                effects: ProviderEffects(from: function.signature.effectSpecifiers?.trimmedDescription),
-                location: functionLocation,
-                isolation: functionStated.resolved(default: typeIsolation)
-            )
-
+            // One record per attribute rather than per function: `primary:` is a
+            // claim about a single key, so a factory bound to two keys can be
+            // primary for one of them and not the other.
             for attribute in injectingAttributes {
+                if attribute.primaryArgument == .nonLiteral {
+                    diagnostics.append(nonLiteralPrimaryDiagnostic(at: functionLocation))
+                }
+
+                let provider = InjectingProvider(
+                    kind: .staticFunction(name: function.name.text),
+                    parameters: function.signature.parameterClause.parameters.parameterRecords,
+                    effects: ProviderEffects(from: function.signature.effectSpecifiers?.trimmedDescription),
+                    location: functionLocation,
+                    isolation: functionStated.resolved(default: typeIsolation),
+                    isPrimary: attribute.primaryArgument.isPrimary
+                )
+
                 let genericKeys = attribute.genericArgumentKeys
                 if genericKeys.isEmpty {
                     defaultProviders.append(provider)
@@ -351,7 +381,7 @@ final class SourceCollector: SyntaxVisitor {
             if returnType.isEmpty {
                 diagnostics.append(CodegenDiagnostic(
                     severity: .error,
-                    message: "@Providing functions must declare a return type.",
+                    message: "@InjectableProviding functions must declare a return type.",
                     location: functionLocation
                 ))
             }
@@ -387,6 +417,17 @@ final class SourceCollector: SyntaxVisitor {
     /// Reads the `ValueInjectionMethod` from an attribute's first unlabeled
     /// argument. `nil` covers both "no argument" and an explicit `.default` —
     /// they mean the same thing, defer to settings.
+    /// `primary:` decides which implementation ships, and it is read out of the
+    /// source text rather than evaluated — so an expression Zerk cannot read
+    /// would quietly resolve to "not primary" instead of failing.
+    private func nonLiteralPrimaryDiagnostic(at location: AttributeLocation) -> CodegenDiagnostic {
+        CodegenDiagnostic(
+            severity: .error,
+            message: "@InjectableProviding(primary:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression.",
+            location: location
+        )
+    }
+
     private func statedValueMethod(_ attribute: AttributeSyntax) -> ValueInjectionMethod? {
         for argument in attribute.labeledArguments where argument.label == nil {
             guard let member = argument.expression.as(MemberAccessExprSyntax.self) else {
@@ -446,6 +487,14 @@ final class SourceCollector: SyntaxVisitor {
         let keys = genericKeys.isEmpty ? [annotation.type.normalizedTypeKey] : genericKeys
         let bodyText = binding.initializer?.value.trimmedDescription ?? accessorBodyText(from: binding.accessorBlock)
         let valueLocation = location(for: Syntax(node))
+
+        for attribute in injectableAttributes where attribute.primaryArgument != .absent {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "'primary' applies to types only. A value is the sole provider for its key, so there is nothing to be primary over.",
+                location: valueLocation
+            ))
+        }
 
         let method = injectableAttributes.compactMap(statedValueMethod).first
             ?? sweptMethod
