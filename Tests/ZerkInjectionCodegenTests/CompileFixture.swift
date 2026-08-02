@@ -108,16 +108,21 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
-        let resolution = ProviderResolver(types: collector.types).resolve()
+        let aliases = KeyAliases(declarations: collector.aliasDeclarations)
+        let rewriter = AliasRewriter(aliases: aliases)
+        let resolution = ProviderResolver(
+            types: rewriter.rewrite(types: collector.types),
+            aliases: aliases
+        ).resolve()
         return GeneratorOutputBuilder(
-            types: collector.types,
-            values: collector.values,
+            types: rewriter.rewrite(types: collector.types),
+            values: rewriter.rewrite(values: collector.values),
             resolutions: resolution.resolutions,
             primaryResolutions: resolution.primaryResolutions,
             moduleAccessLevels: collector.moduleAccessLevels,
-            injectedUses: collector.injectedUses,
-            markedMembers: collector.markedMembers,
-            keyDisplayNames: collector.keyDisplayNames
+            injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
+            markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
+            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
         ).build()
     }
 
@@ -131,16 +136,21 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
-        let resolution = ProviderResolver(types: collector.types).resolve()
+        let aliases = KeyAliases(declarations: collector.aliasDeclarations)
+        let rewriter = AliasRewriter(aliases: aliases)
+        let resolution = ProviderResolver(
+            types: rewriter.rewrite(types: collector.types),
+            aliases: aliases
+        ).resolve()
         let output = GeneratorOutputBuilder(
-            types: collector.types,
-            values: collector.values,
+            types: rewriter.rewrite(types: collector.types),
+            values: rewriter.rewrite(values: collector.values),
             resolutions: resolution.resolutions,
             primaryResolutions: resolution.primaryResolutions,
             moduleAccessLevels: collector.moduleAccessLevels,
-            injectedUses: collector.injectedUses,
-            markedMembers: collector.markedMembers,
-            keyDisplayNames: collector.keyDisplayNames
+            injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
+            markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
+            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
         ).build()
 
         return (output, collector.diagnostics + resolution.diagnostics + output.diagnostics)

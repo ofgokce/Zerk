@@ -31,5 +31,7 @@ struct ZerkMacrosPlugin: CompilerPlugin {
         SharedMacro.self,
         SingletonMacro.self,
         IsolatedMacro.self,
+        ZerkAliasMacro.self,
+        ZerkAliasDeclarationMacro.self,
     ]
 }

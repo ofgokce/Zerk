@@ -14,7 +14,8 @@
 /// the value is recomputed per resolution rather than captured once.
 struct InjectableValueRecord {
     let name: String
-    let typeKey: String
+    /// `var` so the alias pass can fold it onto its group's representative.
+    var typeKey: String
     let typeName: String
     /// How the key is written in the generated file: the canonical spelling with
     /// `any` as the developer wrote it. `nil` falls back to the key itself.

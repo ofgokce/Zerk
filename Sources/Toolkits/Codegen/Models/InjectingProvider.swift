@@ -17,7 +17,7 @@
 /// two records, because `isPrimary` is a claim about one key.
 struct InjectingProvider {
     let kind: ProviderKind
-    let parameters: [ParameterRecord]
+    var parameters: [ParameterRecord]
     let effects: ProviderEffects
     let location: AttributeLocation
     /// The return type as written, or `nil` for an initializer — which can only

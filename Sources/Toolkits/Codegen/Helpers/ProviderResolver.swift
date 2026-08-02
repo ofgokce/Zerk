@@ -14,6 +14,10 @@
 struct ProviderResolver {
 
     let types: [TypeRecord]
+    /// Keys merged by `@ZerkAlias` / `#ZerkAlias`. Records already arrive
+    /// rewritten to representatives, so this is consulted only to *explain* a
+    /// collision the developer did not literally write.
+    var aliases: KeyAliases = .empty
 
     /// Collects every provider for every key, then elects one primary per key.
     ///
@@ -77,7 +81,7 @@ struct ProviderResolver {
             resolutions += typeResolutions
         }
 
-        let election = Self.electPrimaries(among: resolutions)
+        let election = Self.electPrimaries(among: resolutions, aliases: aliases)
 
         return ProviderResolutionResult(
             resolutions: resolutions,
@@ -104,7 +108,8 @@ extension ProviderResolver {
     ///
     /// A pure function of the resolutions, so it is `static`: nothing here needs
     /// the `TypeRecord`s the rest of the resolver works from.
-    static func electPrimaries(among resolutions: [ProviderResolution])
+    static func electPrimaries(among resolutions: [ProviderResolution],
+                               aliases: KeyAliases = .empty)
     -> (primaries: [String: ProviderResolution], diagnostics: [CodegenDiagnostic]) {
         var primaries: [String: ProviderResolution] = [:]
         var diagnostics: [CodegenDiagnostic] = []
@@ -114,7 +119,7 @@ extension ProviderResolver {
         for key in grouped.keys.sorted() {
             let candidates = grouped[key]!.sorted { $0.provider.location < $1.provider.location }
 
-            guard let typeName = electType(for: key, among: candidates, into: &diagnostics) else {
+            guard let typeName = electType(for: key, among: candidates, aliases: aliases, into: &diagnostics) else {
                 continue
             }
             guard let winner = electProvider(
@@ -216,6 +221,7 @@ private extension ProviderResolver {
     /// Which type wins the key. Unanimous when only one type claims it.
     static func electType(for key: String,
                           among candidates: [ProviderResolution],
+                          aliases: KeyAliases,
                           into diagnostics: inout [CodegenDiagnostic]) -> String? {
         let typeNames = uniqued(candidates.map(\.typeName))
         if typeNames.count == 1 {
@@ -227,7 +233,7 @@ private extension ProviderResolver {
         guard let first = claimants.first else {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "Multiple types are injectable under '\(key)' (\(typeNames.joined(separator: ", "))) and none is primary. Mark one with @Injectable(primary: true).",
+                message: "Multiple types are injectable under '\(key)' (\(typeNames.joined(separator: ", "))) and none is primary.\(Self.aliasSentence(for: key, aliases: aliases)) Mark one with @Injectable(primary: true).",
                 location: candidates[0].provider.location
             ))
             return nil
@@ -237,7 +243,7 @@ private extension ProviderResolver {
             let second = candidates.first { $0.typeName == claimants[1] && $0.isTypePrimary }
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "Multiple primary injectables found for '\(key)' (\(claimants.joined(separator: ", "))). Only one type can be primary for a key.",
+                message: "Multiple primary injectables found for '\(key)' (\(claimants.joined(separator: ", "))). Only one type can be primary for a key.\(Self.aliasSentence(for: key, aliases: aliases))",
                 location: second?.provider.location ?? candidates[0].provider.location
             ))
             return nil
@@ -276,6 +282,20 @@ private extension ProviderResolver {
         }
 
         return first
+    }
+
+    /// Names the alias that merged two keys, so a collision the developer did
+    /// not literally write still explains itself.
+    ///
+    /// Without it the message reports a key that appears nowhere in their
+    /// source — the representative Zerk elected — and the merge looks arbitrary.
+    static func aliasSentence(for key: String, aliases: KeyAliases) -> String {
+        let others = aliases.aliases(of: key)
+        guard !others.isEmpty else {
+            return ""
+        }
+        let list = others.map { "'\($0)'" }.joined(separator: ", ")
+        return " '\(key)' and \(list) are the same type (registered via @ZerkAlias), so those declarations claim one key."
     }
 
     /// Order-preserving deduplication, so diagnostics list competing types in

@@ -40,6 +40,22 @@ final class Tagger: Tagging {
     }
 }
 
+/// `Archiving` is a second name for `Tagging`. Without `@ZerkAlias` the two
+/// would be separate keys and this consumer's dependency would bubble up to the
+/// caller instead of resolving.
+@ZerkAlias
+typealias Archiving = Tagging
+
+@Injectable
+final class ArchiveConsumer {
+    let joined: String
+
+    @InjectableProviding
+    init(tagger: Archiving) {
+        self.joined = tagger.joined
+    }
+}
+
 protocol Reading: AnyObject {
     var id: Int { get }
 }

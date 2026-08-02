@@ -11,7 +11,7 @@
 /// Recorded for every initializer, since "exactly one" is only knowable after
 /// the whole type has been walked.
 struct InitializerRecord {
-    let parameters: [ParameterRecord]
+    var parameters: [ParameterRecord]
     let effects: ProviderEffects
     let location: AttributeLocation
     /// Isolation domain the provider constructs in, resolved from the

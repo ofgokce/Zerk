@@ -165,7 +165,7 @@ Everything else is the plugin, for one reason: an attached macro can only see th
 
 The output is a single `ZerkGenerated/ZerkInjections.swift` in the build directory, declared as the command's only output so the build system reruns codegen exactly when a source file or `ZerkSettings.json` changes.
 
-One consequence runs through the whole design: **the plugin reads syntax, never resolved types.** It cannot see through a `typealias`, cannot follow a conformance into another module, and cannot read your build settings. That is why type keys are canonicalized only as far as syntax allows, why `@Isolated<A>` exists, and why `ZerkSettings.json` exists.
+One consequence runs through the whole design: **the plugin reads syntax, never resolved types.** It cannot see through an unmarked `typealias`, cannot follow a conformance into another module, and cannot read your build settings. That is why type keys are canonicalized only as far as syntax allows, why `@Isolated<A>` exists, and why `ZerkSettings.json` exists.
 
 ## Macro reference
 
@@ -263,6 +263,21 @@ Zerk<Loading>.mockLoader    // still available
 The two `primary` flags are independent axes: `@Injectable(primary:)` picks the winning **type**, `@InjectableProviding(primary:)` picks the winning **provider within that type**. `inject()` is the intersection. A type that loses the key never needs a primary among its own providers.
 
 Like every Zerk attribute it applies per key, so `@Injectable<A>(primary: true) @Injectable<B>` claims `A` only. It is a *type*-only argument: a value is the sole provider for its key, so `primary` on one is an error.
+
+**`@ZerkAlias` / `#ZerkAlias<A, B, …>()`** — tells Zerk that two names are one key. Zerk matches by spelling, so without this a provider registered as `Storing` will not satisfy a parameter written `Persisting`:
+
+```swift
+@ZerkAlias
+typealias Persisting = Storing        // the typealias is in this target
+
+#ZerkAlias<Storing, Caching>()        // it is not — list the types instead
+```
+
+Merging is not just convenience. `Zerk<Storing>` and `Zerk<Persisting>` are the *same* generic specialization, so registering an injectable under each would emit two `inject()` members on one type — `invalid redeclaration of 'inject()'`. Equivalence is transitive, and the group is represented by the underlying type where there is one (`@ZerkAlias typealias Names = [String]` emits `Zerk<Array<String>>`), otherwise by the alphabetically first name.
+
+The freestanding form expands to a private, never-called function that pairs the listed types through a generic same-type parameter, so **the compiler** checks the claim — listing types that are not interchangeable is a build error at the `#ZerkAlias` line. The check is invariant, so a subclass and its superclass are correctly rejected. The trailing `()` is required: written bare, Swift does not hand the generic arguments to the macro.
+
+Generic typealiases are rejected — substituting their parameters would need real type resolution. Alias a concrete instantiation instead.
 
 **`@Shared`** — makes the generated `inject()` `public`, so other modules can resolve the key. The key type itself must be `public`, otherwise the modifier is dropped with a warning.
 
@@ -485,7 +500,7 @@ The file governs how Zerk **reads** your source. It never governs what Zerk **wr
 
 Spellings Swift treats as one type *are* unified into one key, because that much is decidable from syntax: `[T]`/`Array<T>`, `[K: V]`/`Dictionary<K, V>`, `T?`/`T!`/`Optional<T>`, `()`/`Void`, `(T)`/`T`, `A & B`/`B & A`, and `P`/`any P`. Canonicalization nests, so `[String]?` and `Optional<Array<String>>` are the same key.
 
-What it cannot unify needs real type resolution, and stays distinct: `typealias` indirection, and module qualification (`ModuleA.Service` vs `Service`). A provider parameter like `seed: Int` is likewise indistinguishable from an injectable dependency except by whether a matching injectable exists.
+What it cannot unify needs real type resolution, and stays distinct: module qualification (`ModuleA.Service` vs `Service`), and any `typealias` you have not marked with `@ZerkAlias` — the plugin cannot see through an alias on its own, which is exactly why that macro exists. A provider parameter like `seed: Int` is likewise indistinguishable from an injectable dependency except by whether a matching injectable exists.
 
 `any` is a special case. Zerk cannot tell a protocol from a superclass or a struct, and `any` is only legal on an existential — so keys *match* with `any` stripped, but the generated file emits the spelling you wrote. If one declaration says `P` and another `any P`, they are one key and `any P` is what gets emitted.
 
@@ -521,7 +536,7 @@ What it cannot unify needs real type resolution, and stays distinct: `typealias`
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

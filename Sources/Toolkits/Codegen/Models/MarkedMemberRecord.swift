@@ -49,7 +49,7 @@ struct MarkedMemberRecord {
     let typeName: String
     let typeKind: MarkedTypeKind
     let kind: MemberKind
-    let parameters: [MarkedParameter]
+    var parameters: [MarkedParameter]
     let effects: ProviderEffects
     let isPublic: Bool
     let location: AttributeLocation

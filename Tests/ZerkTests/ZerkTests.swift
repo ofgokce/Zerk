@@ -68,6 +68,17 @@ struct ZerkTests {
         #expect(tagger.joined == "alpha,beta")
     }
 
+    @Test("a @ZerkAlias key resolves from the underlying key's provider")
+    func aliasedKeyResolves() {
+        resetFixtureState()
+
+        // `Archiving` is a typealias of `Tagging`; nothing is registered under
+        // it, so this only resolves because the keys were merged.
+        let consumer = Zerk<ArchiveConsumer>.inject()
+
+        #expect(consumer.joined == "alpha,beta")
+    }
+
     @Test("a singleton injectable under two keys is one instance")
     func singletonIsSharedAcrossKeys() {
         resetFixtureState()

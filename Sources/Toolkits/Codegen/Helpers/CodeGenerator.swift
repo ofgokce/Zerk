@@ -54,7 +54,17 @@ public struct CodeGenerator {
             collector.walk(tree, path: path)
         }
 
-        let resolution = ProviderResolver(types: collector.types).resolve()
+        // Alias groups merge keys before anything compares them, so resolution
+        // and generation are alias-aware without knowing aliases exist.
+        let aliases = KeyAliases(declarations: collector.aliasDeclarations)
+        let rewriter = AliasRewriter(aliases: aliases)
+        let types = rewriter.rewrite(types: collector.types)
+        let values = rewriter.rewrite(values: collector.values)
+        let injectedUses = rewriter.rewrite(injectedUses: collector.injectedUses)
+        let markedMembers = rewriter.rewrite(markedMembers: collector.markedMembers)
+        let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
+
+        let resolution = ProviderResolver(types: types, aliases: aliases).resolve()
         var diagnostics = collector.diagnostics + resolution.diagnostics
 
         if diagnostics.contains(where: { $0.severity == .error }) {
@@ -63,14 +73,14 @@ public struct CodeGenerator {
         }
 
         let output = GeneratorOutputBuilder(
-            types: collector.types,
-            values: collector.values,
+            types: types,
+            values: values,
             resolutions: resolution.resolutions,
             primaryResolutions: resolution.primaryResolutions,
             moduleAccessLevels: collector.moduleAccessLevels,
-            injectedUses: collector.injectedUses,
-            markedMembers: collector.markedMembers,
-            keyDisplayNames: collector.keyDisplayNames
+            injectedUses: injectedUses,
+            markedMembers: markedMembers,
+            keyDisplayNames: keyDisplayNames
         ).build()
 
         diagnostics += output.diagnostics

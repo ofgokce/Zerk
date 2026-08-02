@@ -12,7 +12,7 @@
 /// them verbatim, `defaultText` included; marked ones are dropped from the
 /// signature and resolved in the body instead.
 struct MarkedParameter {
-    let parameter: ParameterRecord
+    var parameter: ParameterRecord
     let isMarked: Bool
     let defaultText: String?
 }

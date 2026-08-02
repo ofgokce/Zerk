@@ -12,7 +12,8 @@
 /// is async, throwing, or crosses an isolation domain cannot satisfy it — that
 /// is reported against this record's location.
 struct InjectedUseRecord {
-    let typeKey: String
+    /// `var` so the alias pass can fold it onto its group's representative.
+    var typeKey: String
     let macroName: String
     /// True when the attribute passes a single unlabeled expression
     /// (`@Injected(Zerk<T>.custom)`) — resolution is explicit, skip chain checks.

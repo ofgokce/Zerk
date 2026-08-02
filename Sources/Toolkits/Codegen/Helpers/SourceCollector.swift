@@ -38,6 +38,9 @@ final class SourceCollector: SyntaxVisitor {
     /// `any` spelling wins, since it is the one that is correct in both Swift 6
     /// and under `ExistentialAny`.
     private(set) var keyDisplayNames: [String: String] = [:]
+    /// `@ZerkAlias` / `#ZerkAlias` declarations, which merge keys before
+    /// resolution. See ``KeyAliases``.
+    private(set) var aliasDeclarations: [AliasDeclaration] = []
 
     private let settings: ZerkSettings
     private var sourceFile: String = ""
@@ -186,6 +189,69 @@ final class SourceCollector: SyntaxVisitor {
                 location: location
             ))
         }
+    }
+
+    /// `@ZerkAlias typealias Persisting = Storing` — the alias and the type it
+    /// names become one key.
+    ///
+    /// A generic typealias is rejected by the macro; skipping it here keeps the
+    /// plugin from acting on something the macro already refused.
+    override func visit(_ node: TypeAliasDeclSyntax) -> SyntaxVisitorContinueKind {
+        guard node.attributes.hasAttribute(named: "ZerkAlias") else {
+            return .skipChildren
+        }
+        guard node.genericParameterClause?.parameters.isEmpty ?? true else {
+            return .skipChildren
+        }
+
+        let aliasKey = node.name.text
+        aliasDeclarations.append(
+            AliasDeclaration(
+                keys: [aliasKey, node.initializer.value.normalizedTypeKey],
+                aliasKey: aliasKey,
+                location: location(for: Syntax(node))
+            )
+        )
+        return .skipChildren
+    }
+
+    /// `#ZerkAlias<A, B, C>()` — every listed type is the same key.
+    ///
+    /// The macro's expansion is what proves the claim to the compiler; all the
+    /// plugin needs is the list. Written without the trailing `()` the generic
+    /// clause never reaches either of us, so there is nothing to collect and the
+    /// macro reports it.
+    override func visit(_ node: MacroExpansionDeclSyntax) -> SyntaxVisitorContinueKind {
+        collectAlias(macroName: node.macroName.text,
+                     arguments: node.genericArgumentClause,
+                     syntax: Syntax(node))
+        return .skipChildren
+    }
+
+    override func visit(_ node: MacroExpansionExprSyntax) -> SyntaxVisitorContinueKind {
+        collectAlias(macroName: node.macroName.text,
+                     arguments: node.genericArgumentClause,
+                     syntax: Syntax(node))
+        return .skipChildren
+    }
+
+    private func collectAlias(macroName: String,
+                              arguments: GenericArgumentClauseSyntax?,
+                              syntax: Syntax) {
+        guard macroName == "ZerkAlias" else {
+            return
+        }
+        let keys = (arguments?.arguments.map(\.argument) ?? []).map(\.normalizedTypeKey)
+        guard keys.count >= 2 else {
+            return
+        }
+        aliasDeclarations.append(
+            AliasDeclaration(
+                keys: keys,
+                aliasKey: nil,
+                location: location(for: syntax)
+            )
+        )
     }
 
     /// Protocols are recorded for their access level alone. A protocol is an
