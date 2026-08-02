@@ -256,6 +256,12 @@ struct LoaderConsumer {
     var loader: Loading
 }
 
+/// Names a non-primary member with a key path, rather than taking `inject()`.
+struct KeyPathLoaderConsumer {
+    @Injected(\.cached)
+    var loader: Loading
+}
+
 struct EagerTokenConsumer {
     @Injected(seed: 100)
     var seededToken: SeededToken

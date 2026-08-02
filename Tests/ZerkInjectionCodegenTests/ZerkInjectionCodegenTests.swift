@@ -676,7 +676,6 @@ struct GeneratorOutputBuilderTests {
         let use = InjectedUseRecord(
             typeKey: "UserRepository",
             macroName: "@Injected",
-            hasExplicitExpression: false,
             location: makeLocation()
         )
 

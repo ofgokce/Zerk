@@ -299,8 +299,21 @@ For "this is nonisolated", use Swift's own `nonisolated` keyword — it is real,
 ```swift
 @Injected var service: ApiServicing                 // Zerk<ApiServicing>.inject()
 @Injected(seed: 100) var token: SeededToken         // forwards args to inject(seed:)
-@Injected(Zerk<ApiServicing>.mock) var s: ApiServicing  // explicit expression
+@Injected(\.cached) var loader: Loading             // names a member instead of the primary
 ```
+
+The key-path form picks one specific `Zerk<Key>` member rather than the primary, checked by the compiler rather than by string matching. Because a key path can name a property but never a method, Zerk also generates an argument-free `static var` beside every function-shaped member whose parameters it resolves in full:
+
+```swift
+@InjectableProviding<Loading>
+static func live(store: Storing) -> Loading { ... }
+
+// generated — the method stays, the var is additional:
+// static func live(store: Storing = Zerk<Storing>.inject()) -> Loading { ... }
+// static var live: Loading { live() }
+```
+
+That var is emitted only where it can exist and be reached: the member must take at least one parameter (with none it is already a `var`), every parameter must be resolvable, the member must be free of `async`/`throws` (Swift refuses to form a key path to such a property), and its name must be unique for that key (two providers sharing a name are told apart by their parameters, which an argument-free var has none of).
 
 `@Injected` requires an explicit type annotation and works with optionals (`Service?` resolves `Service`). A value passed to the memberwise initializer still wins over the injected default, so a caller can override what gets injected.
 
@@ -578,6 +591,8 @@ What it cannot unify needs real type resolution, and stays distinct: module qual
 `any` is a special case. Zerk cannot tell a protocol from a superclass or a struct, and `any` is only legal on an existential — so keys *match* with `any` stripped, but the generated file emits the spelling you wrote. If one declaration says `P` and another `any P`, they are one key and `any P` is what gets emitted.
 
 **Module-scoped.** Auto-resolution only sees the current module. `@Shared` makes a key's `inject()` public so another module can call it manually, but the consuming module cannot auto-resolve a foreign key: its plugin has no way to know that key's effects or isolation. Forward it explicitly with an `@Injectable` value if you want it in the graph.
+
+`@Shared` publicises `inject()` and nothing else — named members stay `internal`, so `@Injected(\.member)` cannot reach across a module boundary. A target that declares no injectables needs no plugin and can still use `@Injected`, resolving a `@Shared` key's primary or a `Zerk<Key>` member it declares itself.
 
 **Conformances must be written on the declaration.** `@Injectable<Key>` checks that the type lists `Key` in its own inheritance clause. A conformance added in an extension, inherited transitively, or declared in another module is invisible to a syntax-only plugin.
 

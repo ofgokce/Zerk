@@ -68,6 +68,15 @@ struct ZerkTests {
         #expect(tagger.joined == "alpha,beta")
     }
 
+    @Test("@Injected with a key path resolves the named member, not the primary")
+    func keyPathInjectionPicksTheNamedMember() {
+        resetFixtureState()
+
+        // `live` is primary, so a plain @Injected would give "live".
+        #expect(LoaderConsumer().loader.source == "live")
+        #expect(KeyPathLoaderConsumer().loader.source == "cached")
+    }
+
     @Test("@injectable feeds one parameter to both the member and its dependency")
     func injectableSharesAParameter() {
         resetFixtureState()

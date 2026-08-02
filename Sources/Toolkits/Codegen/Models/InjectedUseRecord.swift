@@ -15,8 +15,13 @@ struct InjectedUseRecord {
     /// `var` so the alias pass can fold it onto its group's representative.
     var typeKey: String
     let macroName: String
-    /// True when the attribute passes a single unlabeled expression
-    /// (`@Injected(Zerk<T>.custom)`) — resolution is explicit, skip chain checks.
-    let hasExplicitExpression: Bool
+    /// True when the attribute named a member with a key path.
+    ///
+    /// The chain check below is about the key's *primary*, which such a use does
+    /// not go through — so it does not apply. Nothing is lost by skipping it: a
+    /// key path can only reach a property, and Swift refuses to form one to an
+    /// `async` or `throws` property, so anything reachable this way is already
+    /// effect-free.
+    var namesMemberDirectly: Bool = false
     let location: AttributeLocation
 }

@@ -849,16 +849,17 @@ final class SourceCollector: SyntaxVisitor {
             }
 
             for attribute in attributes {
-                var hasExplicitExpression = false
+                var namesMemberDirectly = false
                 if case .argumentList(let arguments)? = attribute.arguments,
                    arguments.count == 1,
-                   arguments.first?.label == nil {
-                    hasExplicitExpression = true
+                   arguments.first?.label == nil,
+                   arguments.first?.expression.is(KeyPathExprSyntax.self) == true {
+                    namesMemberDirectly = true
                 }
                 injectedUses.append(InjectedUseRecord(
                     typeKey: typeKey,
                     macroName: "@\(macroName)",
-                    hasExplicitExpression: hasExplicitExpression,
+                    namesMemberDirectly: namesMemberDirectly,
                     location: location(for: Syntax(node))
                 ))
             }

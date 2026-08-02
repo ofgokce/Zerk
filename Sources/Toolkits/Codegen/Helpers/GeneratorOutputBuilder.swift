@@ -111,7 +111,7 @@ struct GeneratorOutputBuilder {
         // @Injected expands to a synchronous, non-throwing accessor; a chain
         // containing an async or throwing provider — or one that crosses an
         // isolation domain, which becomes async — cannot be resolved by it.
-        for use in injectedUses where !use.hasExplicitExpression {
+        for use in injectedUses where !use.namesMemberDirectly {
             guard let unique = primaryResolutions[use.typeKey] else {
                 continue
             }
@@ -224,6 +224,14 @@ struct GeneratorOutputBuilder {
             // both named after their type, and generate overloads that Swift
             // tells apart exactly as it tells the initializers apart. Only an
             // identical shape is a genuine redeclaration.
+            // A companion `var` can only exist where the member name is used
+            // once: two providers sharing it are distinguished by their
+            // parameters, which an argument-free `var` has none of.
+            var memberNameCounts: [String: Int] = [:]
+            for provider in providers {
+                memberNameCounts[memberName(for: provider), default: 0] += 1
+            }
+
             var seenMemberSignatures: [String: String] = [:]
             for provider in providers {
                 let name = memberName(for: provider)
@@ -284,6 +292,7 @@ struct GeneratorOutputBuilder {
                     for: provider,
                     injectableKey: injectableKey,
                     classification: classification,
+                    hasUniqueMemberName: memberNameCounts[memberName(for: provider)] == 1,
                     singletonStorage: singletonStorage,
                     requirements: &requirements,
                     diagnostics: &diagnostics
@@ -341,6 +350,7 @@ struct GeneratorOutputBuilder {
     private func memberLines(for provider: ProviderResolution,
                              injectableKey: String,
                              classification: ProviderClassification,
+                             hasUniqueMemberName: Bool,
                              singletonStorage: [String: SingletonStorage],
                              requirements: inout [InterjectionRequirement],
                              diagnostics: inout [CodegenDiagnostic]) -> [String]? {
@@ -404,6 +414,16 @@ struct GeneratorOutputBuilder {
                 kind: .function(parameters: allParameters),
                 isolation: isolation
             ))
+
+            if hasUniqueMemberName {
+                lines += keyPathReachableVariantLines(
+                    memberName: memberName,
+                    keyText: keyText,
+                    isolation: isolation,
+                    ownEffects: ownEffects,
+                    classification: classification
+                )
+            }
         } else {
             let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))()"
             lines.append("    \(isolation.declarationPrefix)static var \(memberName): \(keyText) {")
@@ -452,6 +472,45 @@ struct GeneratorOutputBuilder {
         lines.append("    }")
 
         return lines
+    }
+
+    /// Emits an argument-free `static var` alongside a function-shaped member
+    /// whose parameters Zerk resolves in full.
+    ///
+    /// The function stays and keeps the construction and the interjection guard;
+    /// this only delegates to it. That is what makes the pair legal — `live` and
+    /// `live(dep:)` are different names, where `live` and `live()` would be a
+    /// redeclaration — and it keeps one construction site, one guard and one
+    /// interjection requirement.
+    ///
+    /// Its purpose is reach: `@Injected(\.live)` takes a key path, and a key path
+    /// can name a property but not a method. The conditions below are exactly
+    /// what makes such a property expressible:
+    ///
+    /// - **parameters, all resolvable** — with none the member is already a
+    ///   `var`, and with an unresolvable one there is nothing to default it to.
+    /// - **no effects, its own or its dependencies'** — Swift refuses to form a
+    ///   key path to an `async` or `throws` property, so an effectful variant
+    ///   could not be reached anyway; and for an argument-free effectful member
+    ///   the two names would collide.
+    private func keyPathReachableVariantLines(memberName: String,
+                                              keyText: String,
+                                              isolation: ProviderIsolation,
+                                              ownEffects: ProviderEffects,
+                                              classification: ProviderClassification) -> [String] {
+        guard !classification.parameters.isEmpty,
+              classification.isFullyResolvable,
+              ownEffects == .none,
+              classification.dependencyEffects == .none else {
+            return []
+        }
+
+        return [
+            "",
+            "    \(isolation.declarationPrefix)static var \(memberName): \(keyText) {",
+            "        \(memberName)()",
+            "    }"
+        ]
     }
 
     // MARK: - Singletons
@@ -791,6 +850,13 @@ struct GeneratorOutputBuilder {
             [
                 "@attached(peer, names: prefixed(_$zerk_injection_))",
                 "macro Injected() = #externalMacro(module: \"ZerkMacros\", type: \"InjectedMacro\")"
+            ],
+            // Generic over the key, so one declaration serves every one of them —
+            // unlike the argument-forwarding overloads, whose labels differ per
+            // provider.
+            [
+                "@attached(peer, names: prefixed(_$zerk_injection_))",
+                "macro Injected<T>(_ keyPath: KeyPath<Zerk<T>.Type, T>) = #externalMacro(module: \"ZerkMacros\", type: \"InjectedMacro\")"
             ]
         ]
 

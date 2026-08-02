@@ -119,9 +119,12 @@ public struct InjectedPropertyInfo {
             }
         }
 
-        let expression = info.explicitExpression ?? Self.buildInjectedExpression(
-            injectedType: injectedType,
-            arguments: info.callArguments)
+        // A key path names a member outright, so it replaces the `inject()`
+        // call rather than adding arguments to it.
+        let expression = info.keyPathMember.map { "Zerk<\(injectedType)>\($0)" }
+            ?? Self.buildInjectedExpression(
+                injectedType: injectedType,
+                arguments: info.callArguments)
 
         self.init(
             propertyName: identifier.identifier.text,
