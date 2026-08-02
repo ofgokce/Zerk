@@ -42,6 +42,25 @@ struct GeneratorOutputBuilder {
         let effects: ProviderEffects
     }
 
+    /// One `@Singleton`'s shared instance, as it appears in `_$zerk_singletons`.
+    ///
+    /// There is exactly one of these per singleton *type*, which is the whole
+    /// point: storing it per key would give a type injectable under two keys two
+    /// instances, and "singleton" would only hold within a key.
+    struct SingletonStorage {
+        let memberName: String
+        let typeName: String
+        let construction: String
+        let isolation: ProviderIsolation
+    }
+
+    /// The name of the generated namespace holding every shared instance.
+    ///
+    /// File-private, and prefixed to stay out of the way of anything a developer
+    /// might declare — the module's own code reaches these through `Zerk<Key>`,
+    /// never directly.
+    static let singletonStorageEnumName = "_$zerk_singletons"
+
     /// Rebuilt on each access rather than stored — it is a pure function of
     /// `values` and `primaryResolutions`, both of which are immutable here.
     private var classifier: ParameterClassifier {
@@ -67,6 +86,10 @@ struct GeneratorOutputBuilder {
         let classifier = self.classifier
 
         diagnostics += cycleDiagnostics()
+
+        // Built up front: the storage is per type while the members reading it
+        // are per key, so it cannot be assembled from inside the per-key loop.
+        let singletonStorage = singletonStorage(diagnostics: &diagnostics)
 
         // @Injected expands to a synchronous, non-throwing accessor; a chain
         // containing an async or throwing provider — or one that crosses an
@@ -165,6 +188,9 @@ struct GeneratorOutputBuilder {
             output.append("")
         }
 
+        // Ahead of the extensions, which read from it.
+        output += singletonStorageLines(singletonStorage)
+
         let grouped = Dictionary(grouping: resolutions, by: \.injectableKey)
         for injectableKey in grouped.keys.sorted() {
             let providers = grouped[injectableKey]!.sorted { lhs, rhs in
@@ -209,6 +235,7 @@ struct GeneratorOutputBuilder {
                     for: provider,
                     injectableKey: injectableKey,
                     classification: classification,
+                    singletonStorage: singletonStorage,
                     requirements: &requirements,
                     diagnostics: &diagnostics
                 ) else {
@@ -265,6 +292,7 @@ struct GeneratorOutputBuilder {
     private func memberLines(for provider: ProviderResolution,
                              injectableKey: String,
                              classification: ProviderClassification,
+                             singletonStorage: [String: SingletonStorage],
                              requirements: inout [InterjectionRequirement],
                              diagnostics: inout [CodegenDiagnostic]) -> [String]? {
         let memberName = memberName(for: provider)
@@ -275,15 +303,11 @@ struct GeneratorOutputBuilder {
         let interjectedName = interjectedName(for: memberName)
 
         if provider.isSingleton {
-            guard let lines = singletonLines(
-                for: provider,
-                injectableKey: injectableKey,
-                classification: classification,
-                memberName: memberName,
-                protocolName: protocolName,
-                interjectedName: interjectedName,
-                diagnostics: &diagnostics
-            ) else {
+            // No entry means the shared instance had no legal form and the
+            // reason was already reported against the type; emitting a member
+            // that reads storage which does not exist would bury that behind a
+            // compile error in generated code.
+            guard let storage = singletonStorage[provider.typeName] else {
                 return nil
             }
             requirements.append(InterjectionRequirement(
@@ -293,7 +317,14 @@ struct GeneratorOutputBuilder {
                 kind: .variable,
                 isolation: isolation
             ))
-            return lines
+            return singletonLines(
+                for: provider,
+                injectableKey: injectableKey,
+                memberName: memberName,
+                protocolName: protocolName,
+                interjectedName: interjectedName,
+                storage: storage
+            )
         }
 
         let defaults = classification.defaultExpressions
@@ -371,19 +402,69 @@ struct GeneratorOutputBuilder {
         return lines
     }
 
-    /// Emits a `@Singleton`'s backing storage as a `static let` initialized in
-    /// place, so the instance is built once and shared.
+    // MARK: - Singletons
+
+    /// Builds the shared instance for every `@Singleton` in the module, keyed by
+    /// the type that owns it.
+    ///
+    /// One entry per *type*, not per key. `Zerk<A>` and `Zerk<B>` are distinct
+    /// generic specializations with distinct static storage, so a singleton
+    /// stored on them directly would exist once per key — "singleton" would only
+    /// hold within a key, which is not what the annotation says.
+    ///
+    /// Runs ahead of the per-key emission because the validation is per type
+    /// too: checking inside the member loop would report the same unbuildable
+    /// singleton once for every key it claims.
+    private func singletonStorage(diagnostics: inout [CodegenDiagnostic]) -> [String: SingletonStorage] {
+        var storage: [String: SingletonStorage] = [:]
+        var attempted = Set<String>()
+        var claimedNames: [String: String] = [:]
+        let classifier = self.classifier
+
+        // Sorted so the enum's members, and any diagnostic, land in the same
+        // order on every build.
+        let singletons = resolutions
+            .filter(\.isSingleton)
+            .sorted { ($0.typeName, $0.injectableKey) < ($1.typeName, $1.injectableKey) }
+
+        for resolution in singletons {
+            // The resolver has already proved every key of this type resolves to
+            // the same provider, so the first one seen speaks for all of them.
+            guard attempted.insert(resolution.typeName).inserted else {
+                continue
+            }
+            guard let entry = singletonStorageEntry(
+                for: resolution,
+                classification: classifier.classify(resolution),
+                diagnostics: &diagnostics
+            ) else {
+                continue
+            }
+
+            if let owner = claimedNames[entry.memberName] {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "@Singleton '\(resolution.typeName)' and '\(owner)' both store as '\(entry.memberName)' in \(Self.singletonStorageEnumName). Rename one of the types.",
+                    location: resolution.provider.location
+                ))
+                continue
+            }
+
+            claimedNames[entry.memberName] = resolution.typeName
+            storage[resolution.typeName] = entry
+        }
+
+        return storage
+    }
+
+    /// Validates one `@Singleton` and describes the storage to emit for it.
     ///
     /// Storage is initialized synchronously, which is why a singleton whose
     /// dependencies need `await` — including across an isolation hop — is
     /// reported as unbuildable rather than silently made async.
-    private func singletonLines(for provider: ProviderResolution,
-                                injectableKey: String,
-                                classification: ProviderClassification,
-                                memberName: String,
-                                protocolName: String,
-                                interjectedName: String,
-                                diagnostics: inout [CodegenDiagnostic]) -> [String]? {
+    private func singletonStorageEntry(for provider: ProviderResolution,
+                                       classification: ProviderClassification,
+                                       diagnostics: inout [CodegenDiagnostic]) -> SingletonStorage? {
         if !classification.isFullyResolvable {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
@@ -421,30 +502,70 @@ struct GeneratorOutputBuilder {
         }
 
         let defaults = classification.defaultExpressions
-        let construction = "\(builderConstruction(for: provider))(\(builderArguments(provider.provider.parameters, useParameterNames: false, defaults: defaults)))"
 
-        var lines: [String] = []
-        switch provider.isolation {
-        case .nonisolated:
-            // `static let` initialization is thread-safe in the Swift runtime;
-            // `nonisolated(unsafe)` acknowledges that sharing the instance
-            // across isolation domains is the documented contract of
-            // @Singleton (Swift 6 would otherwise require the stored type to
-            // be Sendable).
-            lines.append("    nonisolated(unsafe) static let \(memberName): \(injectableKey) = {")
-        case .globalActor(let name):
-            // Global-actor isolation already protects the storage, so no
-            // `nonisolated(unsafe)` escape hatch is needed here.
-            lines.append("    @\(name) static let \(memberName): \(injectableKey) = {")
+        return SingletonStorage(
+            memberName: provider.typeName.lowerCamelCased,
+            typeName: provider.singletonStorageTypeName,
+            construction: "\(builderConstruction(for: provider))(\(builderArguments(provider.provider.parameters, useParameterNames: false, defaults: defaults)))",
+            isolation: provider.isolation
+        )
+    }
+
+    /// Emits the namespace holding every shared instance, or nothing when the
+    /// module declares no singletons.
+    private func singletonStorageLines(_ storage: [String: SingletonStorage]) -> [String] {
+        guard !storage.isEmpty else {
+            return []
         }
 
+        var lines = ["private enum \(Self.singletonStorageEnumName) {"]
+
+        for entry in storage.values.sorted(by: { $0.memberName < $1.memberName }) {
+            switch entry.isolation {
+            case .nonisolated:
+                // `static let` initialization is thread-safe in the Swift
+                // runtime; `nonisolated(unsafe)` acknowledges that sharing the
+                // instance across isolation domains is the documented contract
+                // of @Singleton (Swift 6 would otherwise require the stored type
+                // to be Sendable).
+                lines.append("    nonisolated(unsafe) static let \(entry.memberName): \(entry.typeName) = \(entry.construction)")
+            case .globalActor(let name):
+                // Global-actor isolation already protects the storage, so no
+                // `nonisolated(unsafe)` escape hatch is needed here.
+                lines.append("    @\(name) static let \(entry.memberName): \(entry.typeName) = \(entry.construction)")
+            }
+        }
+
+        lines.append("}")
+        lines.append("")
+        return lines
+    }
+
+    /// Emits one key's view onto a shared instance: a getter reading the single
+    /// entry in `_$zerk_singletons`.
+    ///
+    /// The interjection guard lives here rather than in the storage initializer,
+    /// which it cannot: the guard is per key — `InterjectingA` and
+    /// `InterjectingB` are different protocols — while the storage is per type.
+    /// Consulting it on each read is the better semantics anyway: a test double
+    /// installed after the first resolution now takes effect, and interjecting a
+    /// singleton never builds the real instance at all.
+    private func singletonLines(for provider: ProviderResolution,
+                                injectableKey: String,
+                                memberName: String,
+                                protocolName: String,
+                                interjectedName: String,
+                                storage: SingletonStorage) -> [String] {
+        var lines = [
+            "    \(provider.isolation.declarationPrefix)static var \(memberName): \(injectableKey) {"
+        ]
         lines += interjectionGuardLines(
             protocolName: protocolName,
             interjectedName: interjectedName,
             callArguments: nil
         )
-        lines.append("        return \(construction)")
-        lines.append("    }()")
+        lines.append("        return \(Self.singletonStorageEnumName).\(storage.memberName)")
+        lines.append("    }")
         return lines
     }
 

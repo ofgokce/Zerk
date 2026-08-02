@@ -423,8 +423,8 @@ struct GeneratorOutputBuilderTests {
         #expect(result.output.contains("static var baseURL: String"))
     }
 
-    @Test("singleton with injectable defaults generates nonisolated(unsafe) static let and inject wrapper")
-    func singletonGeneratesNonisolatedUnsafeStaticLet() {
+    @Test("a singleton stores one instance in _$zerk_singletons and reads it through a getter")
+    func singletonStoresInSharedNamespace() {
         let serviceProvider = makeInitializerProvider(
             parameters: [makeParameter(label: "baseURL", name: "baseURL", typeKey: "String", typeName: "String")]
         )
@@ -445,8 +445,12 @@ struct GeneratorOutputBuilderTests {
         let result = buildOutput(types: [], values: [value], resolutions: [resolution])
 
         #expect(result.diagnostics.isEmpty)
-        #expect(result.output.contains("nonisolated(unsafe) static let apiService: ApiServicing = {"))
-        #expect(result.output.contains("return ApiService(baseURL: Zerk<String>.baseURL)"))
+        // Storage is typed as the concrete type, not the key: one instance has
+        // to be assignable to every key the type claims.
+        #expect(result.output.contains("private enum _$zerk_singletons {"))
+        #expect(result.output.contains("nonisolated(unsafe) static let apiService: ApiService = ApiService(baseURL: Zerk<String>.baseURL)"))
+        #expect(result.output.contains("nonisolated static var apiService: ApiServicing {"))
+        #expect(result.output.contains("return _$zerk_singletons.apiService"))
         #expect(result.output.contains("static func inject() -> ApiServicing"))
     }
 
@@ -529,8 +533,10 @@ struct GeneratorOutputBuilderTests {
         let result = buildOutput(types: [], values: [], resolutions: [store, cache])
 
         #expect(result.diagnostics.isEmpty)
-        #expect(result.output.contains("@MainActor static let cache: Cache = {"))
-        #expect(result.output.contains("return Cache(store: Zerk<Store>.inject())"))
+        // Global-actor isolation already protects the storage, so it carries the
+        // attribute rather than `nonisolated(unsafe)`.
+        #expect(result.output.contains("@MainActor static let cache: Cache = Cache(store: Zerk<Store>.inject())"))
+        #expect(result.output.contains("return _$zerk_singletons.cache"))
     }
 
     @Test("a singleton crossing into another domain emits a sendability check")

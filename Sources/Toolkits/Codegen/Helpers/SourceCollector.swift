@@ -318,6 +318,7 @@ final class SourceCollector: SyntaxVisitor {
                             parameters: parameters,
                             effects: effects,
                             location: initializerLocation,
+                            returnTypeName: nil,
                             isolation: initializerIsolation,
                             isPrimary: attribute.primaryArgument.isPrimary
                         )
@@ -363,6 +364,7 @@ final class SourceCollector: SyntaxVisitor {
                     parameters: function.signature.parameterClause.parameters.parameterRecords,
                     effects: ProviderEffects(from: function.signature.effectSpecifiers?.trimmedDescription),
                     location: functionLocation,
+                    returnTypeName: returnType.isEmpty ? nil : returnType,
                     isolation: functionStated.resolved(default: typeIsolation),
                     isPrimary: attribute.primaryArgument.isPrimary
                 )

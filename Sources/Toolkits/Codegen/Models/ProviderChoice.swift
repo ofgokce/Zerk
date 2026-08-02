@@ -64,6 +64,17 @@ enum ProviderChoice {
         }
     }
 
+    /// The return type as written, or `nil` when the provider is an initializer
+    /// and therefore produces the type itself.
+    var returnTypeName: String? {
+        switch self {
+        case .explicit(let provider):
+            provider.returnTypeName
+        case .implicit:
+            nil
+        }
+    }
+
     /// An implicit initializer is never marked: it is adopted only when the
     /// type declares no provider at all, so it has nothing to be primary over.
     var isPrimary: Bool {

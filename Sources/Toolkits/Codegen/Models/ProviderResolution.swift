@@ -28,4 +28,15 @@ struct ProviderResolution {
     var isProviderPrimary: Bool { provider.isPrimary }
 
     var isolation: ProviderIsolation { provider.isolation }
+
+    /// The type a `@Singleton`'s shared storage is declared as.
+    ///
+    /// The provider's declared return type, falling back to the concrete type
+    /// for an initializer. Deliberately *not* the injectable key: one instance
+    /// serves every key the type claims, so the storage has to be typed as
+    /// something assignable to all of them, and the construction expression is
+    /// only known to produce this.
+    var singletonStorageTypeName: String {
+        provider.returnTypeName ?? typeName
+    }
 }

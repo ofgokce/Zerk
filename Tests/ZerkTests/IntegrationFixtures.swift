@@ -20,6 +20,35 @@ final class ApiService: ApiServicing {
     }
 }
 
+protocol Reading: AnyObject {
+    var id: Int { get }
+}
+
+protocol Writing: AnyObject {
+    var id: Int { get }
+}
+
+/// One singleton under two keys.
+///
+/// `Zerk<Reading>` and `Zerk<Writing>` are distinct generic specializations with
+/// distinct static storage, so storing the instance on them directly built one
+/// per key. It lives in `_$zerk_singletons` instead, once per type.
+@Singleton
+@Injectable<Reading, Writing>
+final class Store: Reading, Writing {
+    // Test-only counter; the ZerkTests suite is .serialized. Deliberately not
+    // reset between tests — the instance outlives any single test, so a count
+    // that could be zeroed underneath it would prove nothing.
+    nonisolated(unsafe) static var buildCount = 0
+    let id: Int
+
+    @InjectableProviding
+    init() {
+        Self.buildCount += 1
+        self.id = Self.buildCount
+    }
+}
+
 @Injectable
 struct Logger {
     // Test-only counter; the ZerkTests suite is .serialized.

@@ -245,7 +245,7 @@ Providers that share a member name are fine as long as their parameters differ �
 
 Provider parameters are resolved in this order: a uniquely matching `@Injectable` value → a uniquely resolvable injectable key (recursively) → otherwise the parameter is exposed on the generated member and on `inject(...)` for the caller to supply ("parametric injection").
 
-**`@Singleton`** — one shared instance per key, created lazily and thread-safely on first access. Reference types (class/actor) only. Singleton providers cannot be `async`/`throws` and cannot require external arguments.
+**`@Singleton`** — one shared instance per *type*, created lazily and thread-safely on first access. A type injectable under several keys is built once and every key returns that same instance. Reference types (class/actor) only. Singleton providers cannot be `async`/`throws` and cannot require external arguments, and a singleton must resolve to one provider across all of its keys — one instance cannot be built two ways.
 
 **`@Injectable(primary:)`** — when several *types* are injectable under the same key, marks the one `inject()` should build. Exactly one must claim it; leaving the key contested is a build error. The others are still generated as named members (`Zerk<Loading>.mockLoader`), they simply do not win the key.
 
@@ -415,7 +415,30 @@ protocol ApiServicing: Sendable { ... }   // actors conform automatically
 
 ### Singletons
 
+Shared instances live in a generated `private enum _$zerk_singletons`, one stored property per singleton *type*, and each `Zerk<Key>` member is a getter reading from it:
+
+```swift
+private enum _$zerk_singletons {
+    nonisolated(unsafe) static let store: Store = Store()
+}
+
+extension Zerk<Reading> {
+    nonisolated static var store: Reading { _$zerk_singletons.store }
+}
+
+extension Zerk<Writing> {
+    nonisolated static var store: Writing { _$zerk_singletons.store }
+}
+```
+
+Storage sits there rather than on `Zerk<Key>` because `Zerk<Reading>` and `Zerk<Writing>` are distinct generic specializations with distinct static storage — a singleton held on them directly would exist once *per key*, so `@Singleton` would only hold within a key. Two consequences follow:
+
+- The storage is typed as the provider's declared return type, falling back to the concrete type for an initializer. One instance serves every key, so a multi-key singleton's factory must return the concrete type; a single-key singleton's factory may return the key.
+- A singleton must resolve to the same provider for every key it claims. Naming a different factory per key is a build error.
+
 `@Singleton` storage mirrors provider isolation too: `nonisolated(unsafe) static let` for a nonisolated provider, `@MainActor static let` for a `@MainActor` one (global-actor isolation already protects the storage, so no `unsafe` escape hatch is needed). Singletons stay synchronous and non-throwing, so a singleton whose dependency lives in a *different* domain is a build error — resolving it would need `await`, and a `static let` initializer cannot.
+
+Because the storage is shared but the `Interjecting<Key>` protocols are per key, the interjection guard lives in the getter rather than in the storage initializer. A test double is therefore consulted on every read — one installed after the first resolution still takes effect, and interjecting a singleton never builds the real instance at all.
 
 When a singleton is injected across an isolation boundary, Zerk emits a `Sendable` constraint check next to an explanatory comment. Zerk does not attempt to prove `Sendable` from syntax; the check costs nothing when the type already conforms, and it puts the compiler's complaint on a line that explains itself.
 
@@ -476,7 +499,7 @@ The file governs how Zerk **reads** your source. It never governs what Zerk **wr
 
 **Generated member names must be unique per key *per signature*.** Providers may share a member name when their parameters differ — two marked initializers both generate `Zerk<Key>.loader(...)`, told apart exactly as the initializers are. Two that agree on name *and* parameters (e.g. a `Service` in two files, both argument-free) collide; rename the type or use a distinctly named `@InjectableProviding` factory.
 
-**`@Singleton` constraints.** Reference types only; provider must be synchronous and non-throwing; no external arguments; and no dependency in a different isolation domain, since resolving one would need `await`.
+**`@Singleton` constraints.** Reference types only; provider must be synchronous and non-throwing; no external arguments; no dependency in a different isolation domain, since resolving one would need `await`; exactly one provider per key, and the *same* provider across every key the type claims. A singleton injectable under several keys must be built by an initializer or by a factory returning the concrete type — its one instance is stored once and read through every key.
 
 **Referenced values must be visible to the generated file.** That file is a separate file in the same module, so `private` and `fileprivate` sources cannot be referenced — only copied. A mutable `static var` also has to be legal Swift 6 global state in its own right (`nonisolated(unsafe)`, or actor-isolated); Zerk mirrors whatever isolation you give it but does not launder it.
 
@@ -492,7 +515,7 @@ The file governs how Zerk **reads** your source. It never governs what Zerk **wr
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency, circular dependency, member-name collision, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

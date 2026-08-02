@@ -32,12 +32,14 @@ struct ProviderResolver {
         var diagnostics: [CodegenDiagnostic] = []
 
         for type in types {
+            var typeResolutions: [ProviderResolution] = []
+
             for key in type.injectableKeys.keys.sorted() {
                 let providers = explicitProviders(of: type, for: key)
 
                 guard !providers.isEmpty else {
                     if type.initializers.count == 1 {
-                        resolutions.append(
+                        typeResolutions.append(
                             resolution(of: type, key: key, provider: .implicit(type.initializers[0]))
                         )
                     } else {
@@ -63,10 +65,16 @@ struct ProviderResolver {
                     continue
                 }
 
-                resolutions += providers.map {
+                typeResolutions += providers.map {
                     resolution(of: type, key: key, provider: .explicit($0))
                 }
             }
+
+            if type.isSingleton {
+                typeResolutions = validatedSingleton(type, resolutions: typeResolutions, into: &diagnostics)
+            }
+
+            resolutions += typeResolutions
         }
 
         let election = Self.electPrimaries(among: resolutions)
@@ -136,6 +144,60 @@ private extension ProviderResolver {
     func explicitProviders(of type: TypeRecord, for key: String) -> [InjectingProvider] {
         ((type.typedProviders[key] ?? []) + type.defaultProviders)
             .sorted { $0.location < $1.location }
+    }
+
+    /// Enforces the two rules that only make sense once a `@Singleton`'s keys
+    /// are all resolved, and drops the type's resolutions when either is broken
+    /// — the generator has no shared instance to emit in that case.
+    ///
+    /// Both follow from the same fact: a singleton is *one* instance, stored
+    /// once and read through every key it claims.
+    ///
+    /// 1. **One provider across all keys.** Per-key uniqueness is checked at
+    ///    collection; this catches the other shape, where each key names a
+    ///    different factory. One instance cannot be built two ways.
+    /// 2. **A multi-key singleton's provider returns the concrete type.** The
+    ///    shared storage is typed as the provider's return type, so a factory
+    ///    declaring one of the keys produces storage the *other* keys cannot be
+    ///    served from. An initializer is exempt: it always yields the type
+    ///    itself.
+    func validatedSingleton(_ type: TypeRecord,
+                            resolutions: [ProviderResolution],
+                            into diagnostics: inout [CodegenDiagnostic]) -> [ProviderResolution] {
+        guard let first = resolutions.first else {
+            return resolutions
+        }
+
+        // Same declaration, not same record: a factory bound to two keys yields
+        // one record per attribute, and those share a location.
+        if let mismatch = resolutions.first(where: { $0.provider.location != first.provider.location }) {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Singleton '\(type.name)' resolves to different providers for '\(first.injectableKey)' (\(Self.providerDescription(first.provider))) and '\(mismatch.injectableKey)' (\(Self.providerDescription(mismatch.provider))). A singleton has one instance, so it must have one provider across all its keys.",
+                location: mismatch.provider.location
+            ))
+            return []
+        }
+
+        let keyCount = Set(resolutions.map(\.injectableKey)).count
+        if keyCount > 1,
+           let returnTypeName = first.provider.returnTypeName,
+           returnTypeName != type.name {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Singleton '\(type.name)' is injectable under \(keyCount) keys, so its provider must return '\(type.name)' rather than '\(returnTypeName)'. One instance is shared by every key, and storage typed '\(returnTypeName)' cannot serve the others.",
+                location: first.provider.location
+            ))
+            return []
+        }
+
+        return resolutions
+    }
+
+    /// How a provider is named in a diagnostic: a factory by its own name, an
+    /// initializer as `init`.
+    static func providerDescription(_ provider: ProviderChoice) -> String {
+        provider.memberNameHint.map { "'\($0)'" } ?? "init"
     }
 
     func resolution(of type: TypeRecord,

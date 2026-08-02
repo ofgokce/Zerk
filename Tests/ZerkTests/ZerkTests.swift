@@ -57,6 +57,25 @@ struct ZerkTests {
         #expect(firstOwner.apiService === secondOwner.apiService)
     }
 
+    @Test("a singleton injectable under two keys is one instance")
+    func singletonIsSharedAcrossKeys() {
+        resetFixtureState()
+
+        let reader = Zerk<Reading>.inject()
+        let writer = Zerk<Writing>.inject()
+
+        #expect(reader === writer)
+        #expect(reader.id == writer.id)
+
+        // Resolving again through either key must not build a second instance.
+        // Compared against a captured count rather than a literal, so the
+        // assertion holds wherever this lands in the run order.
+        let built = Store.buildCount
+        #expect(Zerk<Reading>.inject() === reader)
+        #expect(Zerk<Writing>.inject() === reader)
+        #expect(Store.buildCount == built)
+    }
+
     @Test("@injected parameter generates a wired overload")
     func injectedParameterGeneratesWiredOverload() {
         resetFixtureState()

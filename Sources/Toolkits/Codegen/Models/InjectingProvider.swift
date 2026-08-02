@@ -20,6 +20,13 @@ struct InjectingProvider {
     let parameters: [ParameterRecord]
     let effects: ProviderEffects
     let location: AttributeLocation
+    /// The return type as written, or `nil` for an initializer — which can only
+    /// ever produce its own type, so there is nothing to read.
+    ///
+    /// Only `@Singleton` consults it: shared storage has to be typed, and the
+    /// provider's declared return type is the one type the construction
+    /// expression is known to produce.
+    var returnTypeName: String?
     /// Isolation domain the provider constructs in, resolved from the
     /// declaration, its enclosing type, and the ambient default at collection
     /// time.
