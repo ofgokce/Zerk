@@ -16,6 +16,9 @@ struct InjectableValueRecord {
     let name: String
     let typeKey: String
     let typeName: String
+    /// How the key is written in the generated file: the canonical spelling with
+    /// `any` as the developer wrote it. `nil` falls back to the key itself.
+    var keyDisplayName: String? = nil
     let bodyText: String?
     let location: AttributeLocation
     /// Values participate in the isolation model exactly like type providers:
@@ -37,4 +40,8 @@ struct InjectableValueRecord {
     /// Whether the source can be assigned — a `var` that is stored or has a
     /// setter. Only then does the generated member get a setter.
     var isSettable: Bool = false
+
+    /// The spelling every `Zerk<Key>` naming this value uses, so the extension
+    /// declaring the member and the expressions reading it agree.
+    var keyText: String { keyDisplayName ?? typeKey }
 }

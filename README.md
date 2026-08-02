@@ -165,7 +165,7 @@ Everything else is the plugin, for one reason: an attached macro can only see th
 
 The output is a single `ZerkGenerated/ZerkInjections.swift` in the build directory, declared as the command's only output so the build system reruns codegen exactly when a source file or `ZerkSettings.json` changes.
 
-One consequence runs through the whole design: **the plugin reads syntax, never resolved types.** It cannot see through a `typealias`, cannot follow a conformance into another module, and cannot read your build settings. That is why type keys are textual, why `@Isolated<A>` exists, and why `ZerkSettings.json` exists.
+One consequence runs through the whole design: **the plugin reads syntax, never resolved types.** It cannot see through a `typealias`, cannot follow a conformance into another module, and cannot read your build settings. That is why type keys are canonicalized only as far as syntax allows, why `@Isolated<A>` exists, and why `ZerkSettings.json` exists.
 
 ## Macro reference
 
@@ -481,7 +481,13 @@ The file governs how Zerk **reads** your source. It never governs what Zerk **wr
 
 ## Limitations
 
-**Syntax-level resolution.** The codegen parses source; it does not type-check. Consequences: type keys are textual, so `typealias` indirection, module qualification (`ModuleA.Service` vs `Service`), and spelling variations are different keys — `[String]` and `Array<String>` are distinct keys even though the compiler unifies them. A provider parameter like `seed: Int` is indistinguishable from an injectable dependency except by whether a matching injectable exists.
+**Syntax-level resolution.** The codegen parses source; it does not type-check.
+
+Spellings Swift treats as one type *are* unified into one key, because that much is decidable from syntax: `[T]`/`Array<T>`, `[K: V]`/`Dictionary<K, V>`, `T?`/`T!`/`Optional<T>`, `()`/`Void`, `(T)`/`T`, `A & B`/`B & A`, and `P`/`any P`. Canonicalization nests, so `[String]?` and `Optional<Array<String>>` are the same key.
+
+What it cannot unify needs real type resolution, and stays distinct: `typealias` indirection, and module qualification (`ModuleA.Service` vs `Service`). A provider parameter like `seed: Int` is likewise indistinguishable from an injectable dependency except by whether a matching injectable exists.
+
+`any` is a special case. Zerk cannot tell a protocol from a superclass or a struct, and `any` is only legal on an existential — so keys *match* with `any` stripped, but the generated file emits the spelling you wrote. If one declaration says `P` and another `any P`, they are one key and `any P` is what gets emitted.
 
 **Module-scoped.** Auto-resolution only sees the current module. `@Shared` makes a key's `inject()` public so another module can call it manually, but the consuming module cannot auto-resolve a foreign key: its plugin has no way to know that key's effects or isolation. Forward it explicitly with an `@Injectable` value if you want it in the graph.
 

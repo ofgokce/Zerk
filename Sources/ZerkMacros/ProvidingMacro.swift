@@ -103,8 +103,8 @@ private extension ProvidingMacro {
         )
     }
 
+    /// `()` canonicalizes to `Void`, so one comparison covers both spellings.
     static func isVoidType(_ type: TypeSyntax) -> Bool {
-        let key = type.normalizedTypeKey
-        return key == "Void" || key == "()"
+        type.normalizedTypeKey == "Void"
     }
 }

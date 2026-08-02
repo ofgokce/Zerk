@@ -103,7 +103,10 @@ public struct InjectedPropertyInfo {
         let declaredType = typeAnnotation.type.trimmedDescription
         let actualKey = typeAnnotation.type.normalizedTypeKey
         let injectedType = Self.injectedTypeName(from: declaredType)
-        let injectedKey = Self.normalizedTypeKey(injectedType)
+        // Derived from the canonical key rather than from `injectedType`, which
+        // is a spelling meant for emission. Comparing a raw spelling against a
+        // canonical one would reject `@Injected<Array<String>> var x: [String]?`.
+        let injectedKey = Self.unwrappingOptional(actualKey)
 
         if let expectedType = info.genericArguments.first {
             let expectedKey = expectedType.normalizedTypeKey
@@ -184,7 +187,14 @@ public struct InjectedPropertyInfo {
         return trimmed
     }
 
-    private static func normalizedTypeKey(_ typeName: String) -> String {
-        typeName.replacingOccurrences(of: " ", with: "")
+    /// Strips one `Optional<…>` layer from an already-canonical key.
+    ///
+    /// Canonicalization has folded `Foo?`, `Foo!` and `Optional<Foo>` into one
+    /// spelling by this point, so this is the only shape left to unwrap.
+    private static func unwrappingOptional(_ key: String) -> String {
+        guard key.hasPrefix("Optional<"), key.hasSuffix(">") else {
+            return key
+        }
+        return String(key.dropFirst("Optional<".count).dropLast())
     }
 }

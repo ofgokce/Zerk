@@ -43,7 +43,7 @@ struct ParameterClassifier {
 
         for parameter in resolution.provider.parameters {
             if let value = injectableValue(matching: parameter) {
-                let expression = "Zerk<\(value.typeName)>.\(value.name)"
+                let expression = "Zerk<\(value.keyText)>.\(value.name)"
                 if value.isolation.requiresHop(callingFrom: memberIsolation) {
                     hasCrossing = true
                     classified.append(ClassifiedParameter(

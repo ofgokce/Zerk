@@ -116,7 +116,8 @@ enum CompileFixture {
             primaryResolutions: resolution.primaryResolutions,
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: collector.injectedUses,
-            markedMembers: collector.markedMembers
+            markedMembers: collector.markedMembers,
+            keyDisplayNames: collector.keyDisplayNames
         ).build()
     }
 
@@ -138,7 +139,8 @@ enum CompileFixture {
             primaryResolutions: resolution.primaryResolutions,
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: collector.injectedUses,
-            markedMembers: collector.markedMembers
+            markedMembers: collector.markedMembers,
+            keyDisplayNames: collector.keyDisplayNames
         ).build()
 
         return (output, collector.diagnostics + resolution.diagnostics + output.diagnostics)

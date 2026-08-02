@@ -29,6 +29,15 @@ final class SourceCollector: SyntaxVisitor {
     private(set) var injectedUses: [InjectedUseRecord] = []
     /// Initializers/methods carrying `@injected` parameter markers.
     private(set) var markedMembers: [MarkedMemberRecord] = []
+    /// Injectable key -> the spelling to emit for it.
+    ///
+    /// Keys match with `any` stripped, but the generated file needs a spelling
+    /// that is legal Swift, and only the author knows whether their key is an
+    /// existential — `any` is illegal on a class or a struct, and Zerk resolves
+    /// nothing, so it can never add one. When two declarations disagree the
+    /// `any` spelling wins, since it is the one that is correct in both Swift 6
+    /// and under `ExistentialAny`.
+    private(set) var keyDisplayNames: [String: String] = [:]
 
     private let settings: ZerkSettings
     private var sourceFile: String = ""
@@ -247,8 +256,16 @@ final class SourceCollector: SyntaxVisitor {
         for attribute in injectableAttributes {
             let genericKeys = attribute.genericArgumentKeys
             let keys = genericKeys.isEmpty ? [node.declaredName] : genericKeys
-            for key in keys {
+            // Paired with `keys` by index: the same types, canonicalized with
+            // `any` kept. An unparameterized @Injectable keys on the type's own
+            // name, which is a bare identifier either way.
+            let displayKeys = genericKeys.isEmpty
+                ? [node.declaredName]
+                : attribute.genericArgumentDisplayKeys
+
+            for (offset, key) in keys.enumerated() {
                 injectableKeys[key] = location
+                recordKeyDisplayName(displayKeys[offset], for: key)
             }
         }
 
@@ -487,6 +504,11 @@ final class SourceCollector: SyntaxVisitor {
         let typeName = annotation.type.trimmedDescription
         let genericKeys = injectableAttributes.flatMap(\.genericArgumentKeys)
         let keys = genericKeys.isEmpty ? [annotation.type.normalizedTypeKey] : genericKeys
+        // Paired with `keys` by index, so a value keyed `any P` emits its `any`
+        // just as a type-backed key does.
+        let displayKeys = genericKeys.isEmpty
+            ? [annotation.type.displayTypeKey]
+            : injectableAttributes.flatMap(\.genericArgumentDisplayKeys)
         let bodyText = binding.initializer?.value.trimmedDescription ?? accessorBodyText(from: binding.accessorBlock)
         let valueLocation = location(for: Syntax(node))
 
@@ -515,12 +537,14 @@ final class SourceCollector: SyntaxVisitor {
             return
         }
 
-        for key in keys {
+        for (offset, key) in keys.enumerated() {
+            recordKeyDisplayName(displayKeys[offset], for: key)
             values.append(
                 InjectableValueRecord(
                     name: identifier.identifier.text,
                     typeKey: key,
                     typeName: typeName,
+                    keyDisplayName: displayKeys[offset],
                     bodyText: bodyText,
                     location: valueLocation,
                     isolation: isolation,
@@ -529,6 +553,23 @@ final class SourceCollector: SyntaxVisitor {
                     isSettable: isSettable(node, binding: binding)
                 )
             )
+        }
+    }
+
+    /// Records how a key should be spelled in the generated file, preferring an
+    /// `any` spelling over a bare one when declarations disagree.
+    ///
+    /// Only `@Injectable` declarations feed this: they are what *establish* a
+    /// key, and so what the `extension Zerk<Key>` is written as. A parameter or
+    /// an `@Injected` property keeps its own spelling at its own use site, which
+    /// reaches the same specialization regardless.
+    private func recordKeyDisplayName(_ displayName: String, for key: String) {
+        guard let existing = keyDisplayNames[key] else {
+            keyDisplayNames[key] = displayName
+            return
+        }
+        if !existing.hasPrefix("any ") && displayName.hasPrefix("any ") {
+            keyDisplayNames[key] = displayName
         }
     }
 
@@ -603,11 +644,14 @@ final class SourceCollector: SyntaxVisitor {
             location: valueLocation
         )
 
+        recordKeyDisplayName(annotation.type.displayTypeKey, for: annotation.type.normalizedTypeKey)
+
         values.append(
             InjectableValueRecord(
                 name: identifier.identifier.text,
                 typeKey: annotation.type.normalizedTypeKey,
                 typeName: annotation.type.trimmedDescription,
+                keyDisplayName: annotation.type.displayTypeKey,
                 bodyText: binding.initializer?.value.trimmedDescription
                     ?? accessorBodyText(from: binding.accessorBlock),
                 location: valueLocation,
@@ -636,10 +680,12 @@ final class SourceCollector: SyntaxVisitor {
                 continue
             }
 
+            // `@Injected var service: Service?` injects a `Service` — the
+            // optionality belongs to the property, not to the key. `?`, `!` and
+            // `Optional<…>` are one canonical spelling by the time we get here,
+            // so a single unwrap covers all three.
             var typeKey = annotation.type.normalizedTypeKey
-            if typeKey.hasSuffix("?") || typeKey.hasSuffix("!") {
-                typeKey = String(typeKey.dropLast())
-            } else if typeKey.hasPrefix("Optional<"), typeKey.hasSuffix(">") {
+            if typeKey.hasPrefix("Optional<"), typeKey.hasSuffix(">") {
                 typeKey = String(typeKey.dropFirst("Optional<".count).dropLast())
             }
 

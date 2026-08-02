@@ -69,7 +69,8 @@ public struct CodeGenerator {
             primaryResolutions: resolution.primaryResolutions,
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: collector.injectedUses,
-            markedMembers: collector.markedMembers
+            markedMembers: collector.markedMembers,
+            keyDisplayNames: collector.keyDisplayNames
         ).build()
 
         diagnostics += output.diagnostics

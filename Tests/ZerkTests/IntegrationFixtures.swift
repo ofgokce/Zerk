@@ -20,6 +20,26 @@ final class ApiService: ApiServicing {
     }
 }
 
+/// Registered as `[String]`, depended on as `Array<String>`. Before type keys
+/// were canonicalized these were two different dependencies, and the parameter
+/// bubbled up to the caller instead of resolving.
+@Injectable
+var tags: [String] { ["alpha", "beta"] }
+
+protocol Tagging {
+    var joined: String { get }
+}
+
+@Injectable<any Tagging>
+final class Tagger: Tagging {
+    let joined: String
+
+    @InjectableProviding
+    init(tags: Array<String>) {
+        self.joined = tags.joined(separator: ",")
+    }
+}
+
 protocol Reading: AnyObject {
     var id: Int { get }
 }

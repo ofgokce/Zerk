@@ -32,6 +32,18 @@ struct GeneratorOutputBuilder {
     var moduleAccessLevels: [String: Bool] = [:]
     var injectedUses: [InjectedUseRecord] = []
     var markedMembers: [MarkedMemberRecord] = []
+    /// Injectable key -> the spelling to emit for it, from `SourceCollector`.
+    /// Absent keys are emitted as themselves.
+    var keyDisplayNames: [String: String] = [:]
+
+    /// How a key is written in the generated file.
+    ///
+    /// Differs from the key itself only in `any`: keys match with it stripped,
+    /// because Zerk cannot tell an existential from a class, but the emitted
+    /// spelling has to be the one the developer wrote.
+    func displayName(for key: String) -> String {
+        keyDisplayNames[key] ?? key
+    }
 
     /// How to call a provider with its dependencies auto-resolved: the
     /// parameters a caller must still supply, the expressions to pass for all
@@ -143,17 +155,22 @@ struct GeneratorOutputBuilder {
             }
 
             let interjectedName = interjectedName(for: value.name)
+            // Keyed on the canonical key, exactly as a type-backed member is.
+            // Using the declared spelling instead would give a value registered
+            // as `[String]` a different `Interjecting…` protocol from a type
+            // registered as `Array<String>`, even though they are one key.
+            let valueKeyText = value.keyText
             let guardLines = { (indent: String) in
                 self.interjectionGuardLines(
-                    protocolName: self.interjectingProtocolName(for: value.typeName),
+                    protocolName: self.interjectingProtocolName(for: value.typeKey),
                     interjectedName: interjectedName,
                     callArguments: nil,
                     indent: indent
                 )
             }
 
-            output.append("extension Zerk<\(value.typeName)> {")
-            output.append("    \(value.isolation.declarationPrefix)static var \(value.name): \(value.typeName) {")
+            output.append("extension Zerk<\(valueKeyText)> {")
+            output.append("    \(value.isolation.declarationPrefix)static var \(value.name): \(valueKeyText) {")
 
             if value.injectionMethod == .referenced && value.isSettable {
                 // Only a settable source earns a setter, and only then does the
@@ -175,9 +192,9 @@ struct GeneratorOutputBuilder {
             output.append("")
 
             requirements.append(InterjectionRequirement(
-                zerkArgument: value.typeName,
+                zerkArgument: value.typeKey,
                 interjectedName: interjectedName,
-                returnTypeName: value.typeName,
+                returnTypeName: valueKeyText,
                 kind: .variable,
                 isolation: value.isolation
             ))
@@ -209,7 +226,7 @@ struct GeneratorOutputBuilder {
                     if let existing = seenMemberSignatures[signature] {
                         diagnostics.append(CodegenDiagnostic(
                             severity: .error,
-                            message: "Generated member '\(name)' for '\(provider.typeName)' collides with '\(existing)' in Zerk<\(injectableKey)>: same name, same parameters. Rename the type, or give the provider a distinct @InjectableProviding function name.",
+                            message: "Generated member '\(name)' for '\(provider.typeName)' collides with '\(existing)' in Zerk<\(displayName(for: injectableKey))>: same name, same parameters. Rename the type, or give the provider a distinct @InjectableProviding function name.",
                             location: provider.provider.location
                         ))
                     } else {
@@ -218,7 +235,7 @@ struct GeneratorOutputBuilder {
                 }
             }
 
-            output.append("extension Zerk<\(injectableKey)> {")
+            output.append("extension Zerk<\(displayName(for: injectableKey))> {")
 
             for provider in providers {
                 let classification = classifier.classify(provider)
@@ -301,6 +318,9 @@ struct GeneratorOutputBuilder {
         let ownEffects = provider.provider.effects
         let protocolName = interjectingProtocolName(for: injectableKey)
         let interjectedName = interjectedName(for: memberName)
+        // The key as it is written in the output. The protocol name above stays
+        // on the canonical key, so an `any` spelling cannot rename it.
+        let keyText = displayName(for: injectableKey)
 
         if provider.isSingleton {
             // No entry means the shared instance had no legal form and the
@@ -313,7 +333,7 @@ struct GeneratorOutputBuilder {
             requirements.append(InterjectionRequirement(
                 zerkArgument: injectableKey,
                 interjectedName: interjectedName,
-                returnTypeName: injectableKey,
+                returnTypeName: keyText,
                 kind: .variable,
                 isolation: isolation
             ))
@@ -336,7 +356,7 @@ struct GeneratorOutputBuilder {
         if usesFunctionShape {
             let signature = parameterClause(parameters: allParameters, defaults: defaults)
             let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))(\(builderArguments(allParameters, useParameterNames: true, defaults: defaults)))"
-            lines.append("    \(isolation.declarationPrefix)static func \(memberName)\(signature)\(ownEffects.declarationSuffix) -> \(injectableKey) {")
+            lines.append("    \(isolation.declarationPrefix)static func \(memberName)\(signature)\(ownEffects.declarationSuffix) -> \(keyText) {")
             lines += interjectionGuardLines(
                 protocolName: protocolName,
                 interjectedName: interjectedName,
@@ -348,13 +368,13 @@ struct GeneratorOutputBuilder {
             requirements.append(InterjectionRequirement(
                 zerkArgument: injectableKey,
                 interjectedName: interjectedName,
-                returnTypeName: injectableKey,
+                returnTypeName: keyText,
                 kind: .function(parameters: allParameters),
                 isolation: isolation
             ))
         } else {
             let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))()"
-            lines.append("    \(isolation.declarationPrefix)static var \(memberName): \(injectableKey) {")
+            lines.append("    \(isolation.declarationPrefix)static var \(memberName): \(keyText) {")
             lines += interjectionGuardLines(
                 protocolName: protocolName,
                 interjectedName: interjectedName,
@@ -366,7 +386,7 @@ struct GeneratorOutputBuilder {
             requirements.append(InterjectionRequirement(
                 zerkArgument: injectableKey,
                 interjectedName: interjectedName,
-                returnTypeName: injectableKey,
+                returnTypeName: keyText,
                 kind: .variable,
                 isolation: isolation
             ))
@@ -395,7 +415,7 @@ struct GeneratorOutputBuilder {
         .joined(separator: ", ")
 
         lines.append("")
-        lines.append("    \(isolation.declarationPrefix)static func \(memberName)\(resolvingSignature)\(resolvingEffects.declarationSuffix) -> \(returnClause(for: provider, key: injectableKey, parameters: resolvingParameters, classification: classification)) {")
+        lines.append("    \(isolation.declarationPrefix)static func \(memberName)\(resolvingSignature)\(resolvingEffects.declarationSuffix) -> \(returnClause(for: provider, key: keyText, parameters: resolvingParameters, classification: classification)) {")
         lines.append("        \(ownEffects.callPrefix)\(memberName)(\(forwardedArguments))")
         lines.append("    }")
 
@@ -557,7 +577,7 @@ struct GeneratorOutputBuilder {
                                 interjectedName: String,
                                 storage: SingletonStorage) -> [String] {
         var lines = [
-            "    \(provider.isolation.declarationPrefix)static var \(memberName): \(injectableKey) {"
+            "    \(provider.isolation.declarationPrefix)static var \(memberName): \(displayName(for: injectableKey)) {"
         ]
         lines += interjectionGuardLines(
             protocolName: protocolName,
@@ -695,7 +715,7 @@ struct GeneratorOutputBuilder {
 
         let returns = returnClause(
             for: provider,
-            key: injectableKey,
+            key: displayName(for: injectableKey),
             parameters: plan.parameters,
             classification: classification
         )
@@ -803,7 +823,7 @@ struct GeneratorOutputBuilder {
                         argumentExpressions.append(
                             overloadArgument(
                                 label: core.label,
-                                expression: "\(callEffects.callPrefix)Zerk<\(value.typeName)>.\(value.name)"
+                                expression: "\(callEffects.callPrefix)Zerk<\(value.keyText)>.\(value.name)"
                             )
                         )
                         continue
@@ -1167,9 +1187,9 @@ struct GeneratorOutputBuilder {
                 let isolation = requirement.isolation.declarationPrefix
                 switch requirement.kind {
                 case .variable:
-                    lines.append("    \(isolation)static var \(requirement.interjectedName): \(requirement.returnTypeName)? { get }")
+                    lines.append("    \(isolation)static var \(requirement.interjectedName): \(optionalOf(requirement.returnTypeName)) { get }")
                 case .function(let parameters):
-                    lines.append("    \(isolation)static func \(requirement.interjectedName)\(protocolParameterClause(parameters)) -> \(requirement.returnTypeName)?")
+                    lines.append("    \(isolation)static func \(requirement.interjectedName)\(protocolParameterClause(parameters)) -> \(optionalOf(requirement.returnTypeName))")
                 }
             }
             lines.append("}")
@@ -1188,6 +1208,39 @@ struct GeneratorOutputBuilder {
         case .function(let parameters):
             return requirement.interjectedName + protocolParameterClause(parameters)
         }
+    }
+
+    /// Makes a type optional, parenthesizing it when `?` would otherwise bind to
+    /// the wrong thing.
+    ///
+    /// `any Serving?` is a parse error — Swift reads it as `any (Serving?)` and
+    /// asks for `(any Serving)?`. The same goes for a composition (`A & B?`) and
+    /// a function type. A plain identifier, generic or not, needs no help, and
+    /// `Dictionary<String, Int>?` is already unambiguous because the space is
+    /// inside the brackets.
+    private func optionalOf(_ typeText: String) -> String {
+        hasTopLevelBreak(typeText) ? "(\(typeText))?" : "\(typeText)?"
+    }
+
+    /// Whether the spelling has a space or `&` outside any bracket, which is
+    /// what makes a trailing `?` ambiguous.
+    private func hasTopLevelBreak(_ text: String) -> Bool {
+        var depth = 0
+        for character in text {
+            switch character {
+            case "<", "(", "[":
+                depth += 1
+            case ">", ")", "]":
+                depth = max(0, depth - 1)
+            case " ", "&":
+                if depth == 0 {
+                    return true
+                }
+            default:
+                break
+            }
+        }
+        return false
     }
 
     /// Like `parameterClause`, minus defaults: a protocol requirement cannot
@@ -1304,7 +1357,7 @@ struct GeneratorOutputBuilder {
                 let hops = value.isolation.requiresHop(callingFrom: memberIsolation)
                 let callEffects = ProviderEffects(isAsync: hops, isThrowing: false)
                 effects = effects.merged(with: callEffects)
-                argumentExpressions.append("\(callEffects.callPrefix)Zerk<\(value.typeName)>.\(value.name)")
+                argumentExpressions.append("\(callEffects.callPrefix)Zerk<\(value.keyText)>.\(value.name)")
                 continue
             }
 

@@ -35,6 +35,12 @@ public extension AttributeSyntax {
         genericArgumentTypes.map(\.normalizedTypeKey)
     }
 
+    /// The same keys with `any` left as written, for the spellings that end up
+    /// in the generated file. See ``TypeSyntax/displayTypeKey``.
+    var genericArgumentDisplayKeys: [String] {
+        genericArgumentTypes.map(\.displayTypeKey)
+    }
+
     /// The call-style arguments of `@Attribute(...)`, as used by
     /// `@Injected(Zerk<T>.custom)`. Empty for attributes written without
     /// parentheses.

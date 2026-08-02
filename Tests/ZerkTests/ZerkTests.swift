@@ -57,6 +57,17 @@ struct ZerkTests {
         #expect(firstOwner.apiService === secondOwner.apiService)
     }
 
+    @Test("a dependency spelled Array<String> resolves an [String] value")
+    func canonicalizedKeysResolve() {
+        resetFixtureState()
+
+        // No argument to pass: `Array<String>` matched the `[String]` value, so
+        // inject() resolves the whole graph itself.
+        let tagger = Zerk<any Tagging>.inject()
+
+        #expect(tagger.joined == "alpha,beta")
+    }
+
     @Test("a singleton injectable under two keys is one instance")
     func singletonIsSharedAcrossKeys() {
         resetFixtureState()
