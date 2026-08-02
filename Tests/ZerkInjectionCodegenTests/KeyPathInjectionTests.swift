@@ -257,6 +257,68 @@ struct KeyPathInjectionTests {
         #expect(!result.diagnostics.contains { $0.message.contains("cannot resolve it") })
     }
 
+    @Test("a stated key is what the chain check validates, not the declared type")
+    func statedKeyDrivesTheChainCheck() {
+        // `Serving`'s primary is async, so a bare @Injected would be rejected.
+        // `@Injected<Fast>` asks for a different key, whose chain is fine.
+        let source = """
+        \(Self.graph)
+
+        protocol Serving {}
+
+        @Injectable<Serving>
+        final class Slow: Serving {
+            @InjectableProviding<Serving>
+            static func make(store: Storing) async -> Serving { Slow() }
+
+            init() {}
+        }
+
+        @Injectable
+        final class Fast: Serving {
+            @InjectableProviding
+            init() {}
+        }
+
+        struct Consumer {
+            @Injected<Fast>
+            var service: Serving
+        }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(!result.diagnostics.contains { $0.message.contains("cannot resolve it") })
+    }
+
+    @Test("a stated key with an async chain is still rejected")
+    func statedKeyWithAsyncChainIsRejected() {
+        let source = """
+        \(Self.graph)
+
+        protocol Serving {}
+
+        @Injectable<Serving>
+        final class Slow: Serving {
+            @InjectableProviding<Serving>
+            static func make(store: Storing) async -> Serving { Slow() }
+
+            init() {}
+        }
+
+        struct Consumer {
+            @Injected<Serving>
+            var service: Serving
+        }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("cannot resolve it")
+        })
+    }
+
     @Test("a plain @Injected on an async chain is still rejected")
     func plainInjectedStillChecksTheChain() {
         let source = """

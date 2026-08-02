@@ -68,6 +68,16 @@ struct ZerkTests {
         #expect(tagger.joined == "alpha,beta")
     }
 
+    @Test("@Injected<Key> resolves the stated key into a differently typed property")
+    func statedKeyResolvesIntoACompatibleProperty() {
+        resetFixtureState()
+
+        // The key is the concrete type; the property is the protocol it
+        // satisfies. Before, this was rejected as a type mismatch.
+        #expect(StatedKeyConsumer().reporter.label == "console")
+        #expect(StatedKeyOptionalConsumer().reporter?.label == "console")
+    }
+
     @Test("@Injected with a key path resolves the named member, not the primary")
     func keyPathInjectionPicksTheNamedMember() {
         resetFixtureState()

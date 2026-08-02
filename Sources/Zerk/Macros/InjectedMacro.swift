@@ -24,6 +24,24 @@ public macro Injected() = #externalMacro(
     type: "InjectedMacro"
 )
 
+/// Resolves a property from a key other than its own declared type.
+///
+/// The generic argument *is* the key, so the property can be declared as
+/// anything the resolved value satisfies — a protocol it conforms to, a class it
+/// subclasses, or an optional wrapping it:
+///
+/// ```swift
+/// @Injected<LiveService> var service: Serving
+/// ```
+///
+/// Compatibility is the compiler's to check: the generated peer assigns one to
+/// the other, so a mismatch is rejected there with both real types named.
+@attached(peer, names: prefixed(_$zerk_injection_))
+public macro Injected<T>() = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectedMacro"
+)
+
 /// Resolves a property from one named `Zerk<Key>` member rather than the key's
 /// primary.
 ///

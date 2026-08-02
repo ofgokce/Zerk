@@ -262,6 +262,33 @@ struct KeyPathLoaderConsumer {
     var loader: Loading
 }
 
+protocol Reporting {
+    var label: String { get }
+}
+
+/// Keyed under both its own type and a protocol, so a consumer can ask for
+/// either one.
+@Injectable
+@Injectable<Reporting>
+final class ConsoleReporter: Reporting {
+    let label = "console"
+
+    @InjectableProviding
+    init() {}
+}
+
+/// Resolves the *concrete* key while storing it as the protocol.
+struct StatedKeyConsumer {
+    @Injected<ConsoleReporter>
+    var reporter: Reporting
+}
+
+/// Same, with optional storage.
+struct StatedKeyOptionalConsumer {
+    @Injected<ConsoleReporter>
+    var reporter: Reporting?
+}
+
 struct EagerTokenConsumer {
     @Injected(seed: 100)
     var seededToken: SeededToken

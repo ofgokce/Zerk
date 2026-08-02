@@ -857,7 +857,9 @@ final class SourceCollector: SyntaxVisitor {
                     namesMemberDirectly = true
                 }
                 injectedUses.append(InjectedUseRecord(
-                    typeKey: typeKey,
+                    // `@Injected<Foo>` states the key; otherwise it is the
+                    // property's own type.
+                    typeKey: attribute.genericArgumentKeys.first ?? typeKey,
                     macroName: "@\(macroName)",
                     namesMemberDirectly: namesMemberDirectly,
                     location: location(for: Syntax(node))

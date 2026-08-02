@@ -300,7 +300,12 @@ For "this is nonisolated", use Swift's own `nonisolated` keyword — it is real,
 @Injected var service: ApiServicing                 // Zerk<ApiServicing>.inject()
 @Injected(seed: 100) var token: SeededToken         // forwards args to inject(seed:)
 @Injected(\.cached) var loader: Loading             // names a member instead of the primary
+@Injected<LiveService> var s: Serving               // resolve this key, store it as that type
 ```
+
+A generic argument **is** the key, so the property may be declared as anything the resolved value satisfies — a protocol it conforms to, a class it subclasses, or an optional wrapping it. Compatibility is the compiler's to check: the generated accessor assigns one to the other, so a genuine mismatch is rejected there with both real types named. It composes with the key path — `@Injected<Serving>(\.mock)` resolves `Zerk<Serving>.mock`.
+
+The type annotation is **required** in every form. `@Injected<Foo> var foo` cannot work: `var foo` is `error: type annotation missing in pattern` before any macro runs, a computed property needs an explicit type too, and no attached-macro role can rewrite the declaration it is attached to.
 
 The key-path form picks one specific `Zerk<Key>` member rather than the primary, checked by the compiler rather than by string matching. Because a key path can name a property but never a method, Zerk also generates an argument-free `static var` beside every function-shaped member whose parameters it resolves in full:
 

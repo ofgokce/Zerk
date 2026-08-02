@@ -101,23 +101,14 @@ public struct InjectedPropertyInfo {
         }
 
         let declaredType = typeAnnotation.type.trimmedDescription
-        let actualKey = typeAnnotation.type.normalizedTypeKey
-        let injectedType = Self.injectedTypeName(from: declaredType)
-        // Derived from the canonical key rather than from `injectedType`, which
-        // is a spelling meant for emission. Comparing a raw spelling against a
-        // canonical one would reject `@Injected<Array<String>> var x: [String]?`.
-        let injectedKey = Self.unwrappingOptional(actualKey)
-
-        if let expectedType = info.genericArguments.first {
-            let expectedKey = expectedType.normalizedTypeKey
-            if expectedKey != actualKey && expectedKey != injectedKey {
-                context.zerkError(
-                    attribute,
-                    "\(macroName)<\(expectedKey)> does not match declared type '\(actualKey)'."
-                )
-                return nil
-            }
-        }
+        // A generic argument names the key outright, which is what lets the
+        // property be declared as something the key merely satisfies —
+        // `@Injected<LiveService> var s: Serving`. Without one, the key is the
+        // declared type with a layer of Optional removed. Compatibility is left
+        // to the compiler: the generated peer assigns one to the other, so a
+        // mismatch is rejected there, with the two real types named.
+        let injectedType = info.genericArguments.first?.trimmedDescription
+            ?? Self.injectedTypeName(from: declaredType)
 
         // A key path names a member outright, so it replaces the `inject()`
         // call rather than adding arguments to it.
@@ -190,14 +181,4 @@ public struct InjectedPropertyInfo {
         return trimmed
     }
 
-    /// Strips one `Optional<…>` layer from an already-canonical key.
-    ///
-    /// Canonicalization has folded `Foo?`, `Foo!` and `Optional<Foo>` into one
-    /// spelling by this point, so this is the only shape left to unwrap.
-    private static func unwrappingOptional(_ key: String) -> String {
-        guard key.hasPrefix("Optional<"), key.hasSuffix(">") else {
-            return key
-        }
-        return String(key.dropFirst("Optional<".count).dropLast())
-    }
 }

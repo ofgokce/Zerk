@@ -874,6 +874,10 @@ struct GeneratorOutputBuilder {
             // provider.
             [
                 "@attached(peer, names: prefixed(_$zerk_injection_))",
+                "macro Injected<T>() = #externalMacro(module: \"ZerkMacros\", type: \"InjectedMacro\")"
+            ],
+            [
+                "@attached(peer, names: prefixed(_$zerk_injection_))",
                 "macro Injected<T>(_ keyPath: KeyPath<Zerk<T>.Type, T>) = #externalMacro(module: \"ZerkMacros\", type: \"InjectedMacro\")"
             ]
         ]
