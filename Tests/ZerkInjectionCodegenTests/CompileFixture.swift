@@ -246,7 +246,7 @@ enum CompileFixture {
     // "@InjectableProviding".
     private static let zerkAttributePrefixes = [
         "@Injectable", "@NonInjectable", "@Singleton",
-        "@Shared", "@Isolated", "@Injected"
+        "@Exported", "@Isolated", "@Injected"
     ]
 
     private static func stripZerkMacros(from source: String) -> String {

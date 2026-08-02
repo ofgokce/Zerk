@@ -213,7 +213,7 @@ private extension ProviderResolver {
             injectableKey: key,
             provider: provider,
             isTypePrimary: type.primaryKeys[key] != nil,
-            isShared: type.sharedKeys[key] != nil,
+            isExported: type.exportedKeys[key] != nil,
             isSingleton: type.isSingleton
         )
     }

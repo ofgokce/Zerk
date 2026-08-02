@@ -11,8 +11,8 @@
 /// key can have several of these — one per provider, across every type that
 /// claims it — and exactly one of them is chosen to back `inject()`.
 ///
-/// The `@Shared`/`@Singleton` flags are per *key*, not per type: a type
-/// injectable under two keys can be shared for one of them only.
+/// The `@Exported`/`@Singleton` flags are per *key*, not per type: a type
+/// injectable under two keys can be exported for one of them only.
 struct ProviderResolution {
     let typeName: String
     let injectableKey: String
@@ -20,7 +20,7 @@ struct ProviderResolution {
     /// `@Injectable(primary: true)` — this *type* wins the key when several
     /// types claim it.
     let isTypePrimary: Bool
-    let isShared: Bool
+    let isExported: Bool
     let isSingleton: Bool
 
     /// `@InjectableProviding(primary: true)` — this *provider* wins among its

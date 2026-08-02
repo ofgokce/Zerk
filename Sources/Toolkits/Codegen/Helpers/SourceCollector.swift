@@ -370,7 +370,7 @@ final class SourceCollector: SyntaxVisitor {
 
     /// Records one type's injectable keys and the providers that satisfy them.
     ///
-    /// A type can be injectable under several keys at once, and `@Shared` and
+    /// A type can be injectable under several keys at once, and `@Exported` and
     /// `@Injectable(primary:)` apply per key rather than per type, so all three
     /// are gathered as dictionaries keyed by type key.
     private func collectType(_ node: some DeclGroupSyntax, isolation typeIsolation: ProviderIsolation) {
@@ -380,7 +380,7 @@ final class SourceCollector: SyntaxVisitor {
         guard !injectableAttributes.isEmpty else { return }
 
 
-        let sharedAttributes = node.attributes.attributes(named: "Shared")
+        let exportedAttributes = node.attributes.attributes(named: "Exported")
         let isSingleton = node.attributes.hasAttribute(named: "Singleton")
         let location = self.location(for: Syntax(node))
 
@@ -426,12 +426,12 @@ final class SourceCollector: SyntaxVisitor {
             }
         }
 
-        var sharedKeys: [String: AttributeLocation] = [:]
-        for attribute in sharedAttributes {
+        var exportedKeys: [String: AttributeLocation] = [:]
+        for attribute in exportedAttributes {
             let genericKeys = attribute.genericArgumentKeys
             let keys = genericKeys.isEmpty ? Array(injectableKeys.keys) : genericKeys
             for key in keys {
-                sharedKeys[key] = location
+                exportedKeys[key] = location
             }
         }
 
@@ -574,7 +574,7 @@ final class SourceCollector: SyntaxVisitor {
             TypeRecord(
                 name: node.declaredName,
                 injectableKeys: injectableKeys,
-                sharedKeys: sharedKeys,
+                exportedKeys: exportedKeys,
                 primaryKeys: primaryKeys,
                 defaultProviders: defaultProviders,
                 typedProviders: typedProviders,

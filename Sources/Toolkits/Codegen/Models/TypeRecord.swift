@@ -14,7 +14,7 @@
 struct TypeRecord {
     let name: String
     let injectableKeys: [String: AttributeLocation]
-    let sharedKeys: [String: AttributeLocation]
+    let exportedKeys: [String: AttributeLocation]
     /// Keys this type claims with `@Injectable(primary: true)`, i.e. the ones
     /// whose `inject()` it wins when other types claim them too.
     let primaryKeys: [String: AttributeLocation]

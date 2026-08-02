@@ -25,7 +25,7 @@ struct AliasRewriter {
             TypeRecord(
                 name: type.name,
                 injectableKeys: rewrite(keyed: type.injectableKeys),
-                sharedKeys: rewrite(keyed: type.sharedKeys),
+                exportedKeys: rewrite(keyed: type.exportedKeys),
                 primaryKeys: rewrite(keyed: type.primaryKeys),
                 defaultProviders: type.defaultProviders.map(rewrite(provider:)),
                 typedProviders: rewriteProviders(type.typedProviders),

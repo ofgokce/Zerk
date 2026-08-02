@@ -332,7 +332,7 @@ struct MultipleProviderTests {
                 isPrimary: true
             )),
             isTypePrimary: true,
-            isShared: false,
+            isExported: false,
             isSingleton: false
         )
         let duplicate = ProviderResolution(
@@ -345,7 +345,7 @@ struct MultipleProviderTests {
                 location: AttributeLocation(filePath: "/tmp/B.swift", line: 1, column: 1)
             )),
             isTypePrimary: true,
-            isShared: false,
+            isExported: false,
             isSingleton: false
         )
 

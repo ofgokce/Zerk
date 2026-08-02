@@ -155,7 +155,7 @@ protocol InterjectingApiServicing {
 
 Zerk is a macro package and a build-tool plugin, and it is worth knowing which does what — because **almost none of the code generation happens in the macros.**
 
-`@Injectable`, `@InjectableProviding`, `@Shared`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a type that does not conform to the key it claims, a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<T>.inject()`) depends on nothing but the property's own type.
+`@Injectable`, `@InjectableProviding`, `@Exported`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a type that does not conform to the key it claims, a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<T>.inject()`) depends on nothing but the property's own type.
 
 Everything else is the plugin, for one reason: an attached macro can only see the declaration it is attached to, while resolving a dependency graph requires the whole module. So `ZerkPlugin` runs `ZerkCodegen` over every `.swift` file in the target, in three stages:
 
@@ -279,7 +279,20 @@ The freestanding form expands to a private, never-called function that pairs the
 
 Generic typealiases are rejected — substituting their parameters would need real type resolution. Alias a concrete instantiation instead.
 
-**`@Shared`** — makes the generated members `public`, so other modules can resolve the key. That covers `inject()` *and* the named members, so a consuming module can also reach one specific provider with `@Injected(\.staging)`. The key type itself must be `public`, otherwise the modifier is dropped with a warning. A `@Singleton`'s shared storage stays private either way; only its getter is publicized.
+**`@Exported` / `@Exported<Key1, Key2, …>`** — makes the generated members `public`, so other modules can resolve the key. That covers `inject()` *and* the named members, so a consuming module can also reach one specific provider with `@Injected(\.staging)`.
+
+Without generic arguments it exports every key the type claims; with them, only the listed ones:
+
+```swift
+@Exported<Storing>
+@Injectable<Storing, Caching>
+public final class Store: Storing, Caching { ... }
+
+// Zerk<Storing>  members are public
+// Zerk<Caching>  members stay internal
+```
+
+The key type itself must be `public`, otherwise the marker is dropped with a warning. A `@Singleton`'s shared storage stays private either way; only its getter is exported.
 
 **`@Isolated<A>`** — tells Zerk which global actor a declaration is isolated to, when the build plugin cannot see it. It is **corrective, not declarative**: it restates what the compiler already believes so the generated members mirror the right isolation. Claiming something untrue produces generated code that will not compile. Two cases need it — a custom global actor whose name does not end in `Actor` (Zerk's attribute heuristic misses it), and isolation inherited through a conformance (invisible to a syntax-only plugin):
 
@@ -595,9 +608,9 @@ What it cannot unify needs real type resolution, and stays distinct: module qual
 
 `any` is a special case. Zerk cannot tell a protocol from a superclass or a struct, and `any` is only legal on an existential — so keys *match* with `any` stripped, but the generated file emits the spelling you wrote. If one declaration says `P` and another `any P`, they are one key and `any P` is what gets emitted.
 
-**Module-scoped.** Auto-resolution only sees the current module. `@Shared` makes a key's generated members public so another module can call them manually, but the consuming module cannot auto-resolve a foreign key: its plugin has no way to know that key's effects or isolation. Forward it explicitly with an `@Injectable` value if you want it in the graph.
+**Module-scoped.** Auto-resolution only sees the current module. `@Exported` makes a key's generated members public so another module can call them manually, but the consuming module cannot auto-resolve a foreign key: its plugin has no way to know that key's effects or isolation. Forward it explicitly with an `@Injectable` value if you want it in the graph.
 
-A target that declares no injectables needs no plugin and can still use `@Injected`: `@Shared` publicizes the key's members, so it can resolve the primary with a bare `@Injected` or name one with `@Injected(\.staging)`. Without `@Shared`, generated members are `internal` and invisible across the boundary.
+A target that declares no injectables needs no plugin and can still use `@Injected`: `@Exported` publicizes the key's members, so it can resolve the primary with a bare `@Injected` or name one with `@Injected(\.staging)`. Without `@Exported`, generated members are `internal` and invisible across the boundary.
 
 **Conformances must be written on the declaration.** `@Injectable<Key>` checks that the type lists `Key` in its own inheritance clause. A conformance added in an extension, inherited transitively, or declared in another module is invisible to a syntax-only plugin.
 
@@ -629,7 +642,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Exported` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

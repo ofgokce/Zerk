@@ -112,15 +112,15 @@ struct ProviderResolverTests {
         let record = makeTypeRecord(
             name: "LiveService",
             injectableKeys: ["Service", "LiveService"],
-            sharedKeys: ["Service"],
+            exportedKeys: ["Service"],
             defaultProviders: [makeInitializerProvider()]
         )
 
         let result = ProviderResolver(types: [record]).resolve()
 
         #expect(result.diagnostics.isEmpty)
-        #expect(result.resolutions.contains { $0.injectableKey == "Service" && $0.isShared })
-        #expect(result.resolutions.contains { $0.injectableKey == "LiveService" && !$0.isShared })
+        #expect(result.resolutions.contains { $0.injectableKey == "Service" && $0.isExported })
+        #expect(result.resolutions.contains { $0.injectableKey == "LiveService" && !$0.isExported })
     }
 
     @Test("injectable type with synthesized empty initializer is inferred as a provider")
@@ -643,13 +643,13 @@ struct GeneratorOutputBuilderTests {
         #expect(result.diagnostics.contains { $0.message.contains("Circular dependency detected") })
     }
 
-    @Test("@Shared on a non-public key clamps access and warns")
+    @Test("@Exported on a non-public key clamps access and warns")
     func sharedOnInternalKeyClampsAccess() {
         let service = makeResolution(
             typeName: "LiveService",
             injectableKey: "Service",
             provider: .explicit(makeStaticProvider(name: "live")),
-            isShared: true
+            isExported: true
         )
 
         let result = buildOutput(
@@ -659,7 +659,7 @@ struct GeneratorOutputBuilderTests {
             moduleAccessLevels: ["Service": false]
         )
 
-        #expect(result.diagnostics.contains { $0.severity == .warning && $0.message.contains("@Shared has no effect") })
+        #expect(result.diagnostics.contains { $0.severity == .warning && $0.message.contains("@Exported has no effect") })
         #expect(result.output.contains("public ") == false)
         #expect(result.output.contains("nonisolated static func inject() -> Service"))
     }
@@ -931,14 +931,14 @@ struct GeneratorOutputBuilderTests {
     @Test("shared injectables publicize their named members as well as inject()")
     func sharedInjectablesPublicizeNamedMembers() {
         // A consuming module reaching one specific member — `@Injected(\\.live)`
-        // — needs to see it, so @Shared covers every member for the key rather
+        // — needs to see it, so @Exported covers every member for the key rather
         // than inject() alone.
         let sharedService = makeResolution(
             typeName: "LiveService",
             injectableKey: "Service",
             provider: .explicit(makeStaticProvider(name: "live")),
             isTypePrimary: true,
-            isShared: true
+            isExported: true
         )
 
         let result = buildOutput(types: [], values: [], resolutions: [sharedService])
@@ -962,14 +962,14 @@ struct GeneratorOutputBuilderTests {
         #expect(!result.output.contains("public static"))
     }
 
-    @Test("@Shared on a non-public key publicizes nothing and warns")
+    @Test("@Exported on a non-public key publicizes nothing and warns")
     func sharedOnNonPublicKeyWarns() {
         let sharedService = makeResolution(
             typeName: "LiveService",
             injectableKey: "Service",
             provider: .explicit(makeStaticProvider(name: "live")),
             isTypePrimary: true,
-            isShared: true
+            isExported: true
         )
 
         let result = buildOutput(
@@ -981,7 +981,7 @@ struct GeneratorOutputBuilderTests {
 
         #expect(!result.output.contains("public static"))
         #expect(result.diagnostics.contains {
-            $0.severity == .warning && $0.message.contains("@Shared has no effect")
+            $0.severity == .warning && $0.message.contains("@Exported has no effect")
         })
     }
 
@@ -1221,18 +1221,18 @@ struct ParameterInjectionTests {
 
 private func makeTypeRecord(name: String,
                             injectableKeys: [String],
-                            sharedKeys: [String] = [],
+                            exportedKeys: [String] = [],
                             primaryKeys: [String] = [],
                             defaultProviders: [InjectingProvider] = [],
                             typedProviders: [String: [InjectingProvider]] = [:],
                             initializers: [InitializerRecord] = [],
-                            isShared: Bool = false,
+                            isExported: Bool = false,
                             isSingleton: Bool = false) -> TypeRecord {
     TypeRecord(
         name: name,
         injectableKeys: Dictionary(uniqueKeysWithValues: injectableKeys.map { ($0, makeLocation()) }),
-        sharedKeys: Dictionary(
-            uniqueKeysWithValues: (isShared ? injectableKeys : sharedKeys).map { ($0, makeLocation()) }
+        exportedKeys: Dictionary(
+            uniqueKeysWithValues: (isExported ? injectableKeys : exportedKeys).map { ($0, makeLocation()) }
         ),
         primaryKeys: Dictionary(uniqueKeysWithValues: primaryKeys.map { ($0, makeLocation()) }),
         defaultProviders: defaultProviders,
@@ -1276,14 +1276,14 @@ private func makeResolution(typeName: String,
                             injectableKey: String,
                             provider: ProviderChoice,
                             isTypePrimary: Bool = false,
-                            isShared: Bool = false,
+                            isExported: Bool = false,
                             isSingleton: Bool = false) -> ProviderResolution {
     ProviderResolution(
         typeName: typeName,
         injectableKey: injectableKey,
         provider: provider,
         isTypePrimary: isTypePrimary,
-        isShared: isShared,
+        isExported: isExported,
         isSingleton: isSingleton
     )
 }

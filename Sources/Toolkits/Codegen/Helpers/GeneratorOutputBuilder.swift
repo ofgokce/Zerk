@@ -363,7 +363,7 @@ struct GeneratorOutputBuilder {
         // The key as it is written in the output. The protocol name above stays
         // on the canonical key, so an `any` spelling cannot rename it.
         let keyText = displayName(for: injectableKey)
-        let access = sharedAccessPrefix(for: provider, injectableKey: injectableKey)
+        let access = exportedAccessPrefix(for: provider, injectableKey: injectableKey)
 
         if provider.isSingleton {
             // No entry means the shared instance had no legal form and the
@@ -477,15 +477,15 @@ struct GeneratorOutputBuilder {
         return lines
     }
 
-    /// `public ` when `@Shared` asked for it and the key can carry it.
+    /// `public ` when `@Exported` asked for it and the key can carry it.
     ///
-    /// `@Shared` publicises every generated member for the key, not just
+    /// `@Exported` publicises every generated member for the key, not just
     /// `inject()`: a consuming module that wants one specific member — through
     /// `@Injected(\.staging)`, say — needs to see it. The key type itself has to
     /// be public, since a public member cannot expose an internal type.
-    private func sharedAccessPrefix(for provider: ProviderResolution,
+    private func exportedAccessPrefix(for provider: ProviderResolution,
                                     injectableKey: String) -> String {
-        guard provider.isShared, moduleAccessLevels[injectableKey] != false else {
+        guard provider.isExported, moduleAccessLevels[injectableKey] != false else {
             return ""
         }
         return "public "
@@ -813,11 +813,11 @@ struct GeneratorOutputBuilder {
              provider.provider.effects.isAsync ||
              provider.provider.effects.isThrowing)
 
-        let accessPrefix = sharedAccessPrefix(for: provider, injectableKey: injectableKey)
-        if provider.isShared, accessPrefix.isEmpty {
+        let accessPrefix = exportedAccessPrefix(for: provider, injectableKey: injectableKey)
+        if provider.isExported, accessPrefix.isEmpty {
             diagnostics.append(CodegenDiagnostic(
                 severity: .warning,
-                message: "@Shared has no effect: '\(injectableKey)' is not public, so the generated members cannot be public.",
+                message: "@Exported has no effect: '\(injectableKey)' is not public, so the generated members cannot be public.",
                 location: provider.provider.location
             ))
         }
