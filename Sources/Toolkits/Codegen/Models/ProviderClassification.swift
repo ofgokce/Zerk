@@ -67,6 +67,14 @@ struct ProviderClassification {
     /// returned as `sending`.
     let singletonDependencies: [String]
 
+    /// Parameters marked `@autoinjected` that nothing in the module can satisfy.
+    ///
+    /// Carried out rather than reported here, because `classify` runs several
+    /// times per provider — for the member, for `inject()`, and recursively for
+    /// anything depending on it — and each run would report the same parameter
+    /// again. `GeneratorOutputBuilder` emits them once.
+    var unresolvedAutoInjected: [ParameterRecord] = []
+
     /// **E** — parameters the caller must supply, which become the generated
     /// member's own parameters.
     var externals: [ParameterRecord] {

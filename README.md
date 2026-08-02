@@ -312,6 +312,29 @@ final class Consumer {
 }
 ```
 
+**`@autoinjected` (lowercase) — states which provider parameters Zerk resolves.**
+
+By default a provider's parameters are auto-resolved wherever Zerk can, and the rest become parameters of the generated member. That is convenient but inferred: adding a type to the graph can turn a caller-supplied parameter into a resolved one without anyone touching the provider.
+
+Marking any parameter switches that provider to **explicit mode** — marked parameters are resolved, unmarked ones are always the caller's, and a marked parameter Zerk cannot resolve is a build error on that parameter's line:
+
+```swift
+@Injectable
+final class Checkout {
+    @InjectableProviding
+    init(@autoinjected payments: PaymentServicing, orderID: String) { ... }
+}
+
+// generated: `payments` resolved, `orderID` left to the caller
+// static func inject(orderID: String) -> Checkout
+```
+
+With nothing marked, the provider keeps the inferred behaviour, so this is opt-in per declaration. It applies to an implicitly adopted initializer too. A marked parameter whose own provider needs arguments is still resolved, with those arguments bubbling up to `inject(...)`.
+
+Marking a parameter somewhere Zerk never resolves — a second initializer, an ordinary method, a static function without `@InjectableProviding`, or a type that is not `@Injectable` — is a **warning**, not an error. The marker is inert there rather than wrong, so the build still succeeds; but a mark being silently ignored is the one thing explicit resolution exists to prevent, so it is never passed over in silence.
+
+Distinct from `@injected` below, which generates an overload of the *enclosing member*. They compose — `@injected @autoinjected` does both.
+
 **`@injected` (lowercase) — parameter injection.** Marks an initializer or method parameter; the build plugin generates an overload with every marked parameter omitted and filled via `Zerk<T>.inject()`:
 
 ```swift
@@ -536,7 +559,7 @@ What it cannot unify needs real type resolution, and stays distinct: module qual
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

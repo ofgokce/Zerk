@@ -68,6 +68,18 @@ struct ZerkTests {
         #expect(tagger.joined == "alpha,beta")
     }
 
+    @Test("@autoinjected resolves marked parameters and leaves the rest alone")
+    func autoInjectedSelectsWhatIsResolved() {
+        resetFixtureState()
+
+        // `baseURL` is required despite being resolvable — the signature itself
+        // is the assertion, since inject() would take no arguments otherwise.
+        let consumer = Zerk<ExplicitConsumer>.inject(baseURL: "supplied-by-caller")
+
+        #expect(consumer.host == "https://api.example.com")
+        #expect(consumer.suffix == "supplied-by-caller")
+    }
+
     @Test("a @ZerkAlias key resolves from the underlying key's provider")
     func aliasedKeyResolves() {
         resetFixtureState()

@@ -8,7 +8,7 @@
 import SwiftSyntax
 
 extension FunctionParameterListSyntax {
-    var parameterRecords: [ParameterRecord] {
-        map(\.parameterRecord)
+    func parameterRecords(locatedBy locator: ((Syntax) -> AttributeLocation)? = nil) -> [ParameterRecord] {
+        map { $0.parameterRecord(locatedBy: locator) }
     }
 }

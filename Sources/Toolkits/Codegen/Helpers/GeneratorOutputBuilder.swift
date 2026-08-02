@@ -94,6 +94,7 @@ struct GeneratorOutputBuilder {
         var diagnostics: [CodegenDiagnostic] = []
         var requirements: [InterjectionRequirement] = []
         var sendabilityChecks: [SendabilityCheck] = []
+        var reportedAutoInjected = Set<String>()
 
         let classifier = self.classifier
 
@@ -239,6 +240,21 @@ struct GeneratorOutputBuilder {
 
             for provider in providers {
                 let classification = classifier.classify(provider)
+
+                // Deduped by parameter position: a provider serving two keys is
+                // classified once per key, and the parameter is unresolvable in
+                // both — but the developer wrote it once.
+                for parameter in classification.unresolvedAutoInjected {
+                    let identity = "\(provider.typeName)|\(parameter.name)|\(parameter.location.map(String.init(describing:)) ?? "")"
+                    guard reportedAutoInjected.insert(identity).inserted else {
+                        continue
+                    }
+                    diagnostics.append(CodegenDiagnostic(
+                        severity: .error,
+                        message: "@autoinjected parameter '\(parameter.name)' cannot be resolved: '\(parameter.typeKey)' is not injectable in this module. Declare it @Injectable, or drop @autoinjected and pass it in.",
+                        location: parameter.location ?? provider.provider.location
+                    ))
+                }
 
                 sendabilityChecks += classification.crossDomainSingletonDependencies.map {
                     SendabilityCheck(
@@ -1352,7 +1368,18 @@ struct GeneratorOutputBuilder {
         var argumentExpressions: [String] = []
         var effects = resolution.provider.effects
 
+        // Explicit mode applies here too. `inject()` flattens the whole subtree,
+        // so without this an unmarked parameter would still be resolved behind
+        // the caller's back — the exact thing marking asks Zerk not to do.
+        let isExplicit = resolution.provider.parameters.contains(where: \.isAutoInjected)
+
         for parameter in resolution.provider.parameters {
+            if isExplicit, !parameter.isAutoInjected {
+                parameters = mergeParameters(parameters, with: [parameter])
+                argumentExpressions.append(parameter.name)
+                continue
+            }
+
             if let value = classifier.injectableValue(matching: parameter) {
                 let hops = value.isolation.requiresHop(callingFrom: memberIsolation)
                 let callEffects = ProviderEffects(isAsync: hops, isThrowing: false)

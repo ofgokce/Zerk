@@ -56,6 +56,21 @@ final class ArchiveConsumer {
     }
 }
 
+/// `apiService` is marked, `baseURL` is not — and `baseURL: String` would
+/// otherwise match the `@Injectable var baseURL` value by key *and* name, so
+/// this only stays caller-supplied because the provider is in explicit mode.
+@Injectable
+final class ExplicitConsumer {
+    let host: String
+    let suffix: String
+
+    @InjectableProviding
+    init(@autoinjected apiService: ApiServicing, baseURL: String) {
+        self.host = apiService.host
+        self.suffix = baseURL
+    }
+}
+
 protocol Reading: AnyObject {
     var id: Int { get }
 }

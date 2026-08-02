@@ -153,12 +153,12 @@ private extension AliasRewriter {
         return rewritten
     }
 
+    /// Mutates a copy rather than rebuilding the record: this pass is about the
+    /// key and nothing else, and listing the fields again would silently drop
+    /// whatever gets added to `ParameterRecord` next.
     func rewrite(parameter: ParameterRecord) -> ParameterRecord {
-        ParameterRecord(
-            label: parameter.label,
-            name: parameter.name,
-            typeKey: aliases.representative(for: parameter.typeKey),
-            typeName: parameter.typeName
-        )
+        var rewritten = parameter
+        rewritten.typeKey = aliases.representative(for: parameter.typeKey)
+        return rewritten
     }
 }

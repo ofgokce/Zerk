@@ -101,8 +101,12 @@ public struct CodeGenerator {
             ))
         }
 
+        // Emitted unconditionally, not only on failure: a warning that is
+        // dropped whenever the build succeeds is a warning nobody ever sees,
+        // which is every case it was written for.
+        emitDiagnostics(diagnostics)
+
         if diagnostics.contains(where: { $0.severity == .error }) {
-            emitDiagnostics(diagnostics)
             throw Failure()
         }
 

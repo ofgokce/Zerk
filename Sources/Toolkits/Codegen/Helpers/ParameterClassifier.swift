@@ -38,10 +38,33 @@ struct ParameterClassifier {
         var classified: [ClassifiedParameter] = []
         var crossDomainSingletons: [String] = []
         var singletons: [String] = []
+        var unresolvedAutoInjected: [ParameterRecord] = []
         var hasCrossing = false
         var isolatedDefault = false
 
+        // `@autoinjected` on any parameter switches the provider to explicit
+        // mode: Zerk resolves what was marked and nothing else. Unmarked, the
+        // provider keeps the inferred behaviour, so this stays opt-in.
+        let isExplicit = resolution.provider.parameters.contains(where: \.isAutoInjected)
+
         for parameter in resolution.provider.parameters {
+            if isExplicit, !parameter.isAutoInjected {
+                // Deliberately unmarked: the caller supplies it even when Zerk
+                // could have resolved it. That is the point of asking.
+                classified.append(ClassifiedParameter(parameter: parameter, binding: .external))
+                continue
+            }
+
+            if isExplicit,
+               injectableValue(matching: parameter) == nil,
+               primaryResolutions[parameter.typeKey] == nil,
+               !visiting.contains(parameter.typeKey) {
+                // Marked, but nothing in the module can satisfy it. Reported
+                // against the parameter; a cycle is excluded because it is
+                // reported on its own terms.
+                unresolvedAutoInjected.append(parameter)
+            }
+
             if let value = injectableValue(matching: parameter) {
                 let expression = "Zerk<\(value.keyText)>.\(value.name)"
                 if value.isolation.requiresHop(callingFrom: memberIsolation) {
@@ -120,7 +143,8 @@ struct ParameterClassifier {
             crossDomainSingletonDependencies: uniqued(crossDomainSingletons),
             hasIsolationCrossing: hasCrossing,
             usesIsolatedDefaultArgument: isolatedDefault,
-            singletonDependencies: uniqued(singletons)
+            singletonDependencies: uniqued(singletons),
+            unresolvedAutoInjected: unresolvedAutoInjected
         )
     }
 

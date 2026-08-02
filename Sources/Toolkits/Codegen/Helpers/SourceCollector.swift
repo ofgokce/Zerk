@@ -122,6 +122,7 @@ final class SourceCollector: SyntaxVisitor {
         let isolation = resolveTypeIsolation(node)
         collectType(node, isolation: isolation)
         collectMarkedMembers(node, typeKind: typeKind, typeIsGeneric: isGeneric)
+        reportInertAutoInjected(node)
         typeStack.append(
             TypeContext(
                 name: node.declaredName,
@@ -187,6 +188,78 @@ final class SourceCollector: SyntaxVisitor {
                 severity: .error,
                 message: "@Isolated<\(marker)> contradicts the '@\(actor)' annotation on the same declaration.",
                 location: location
+            ))
+        }
+    }
+
+    /// Warns about `@autoinjected` on a declaration that is not a provider,
+    /// where it silently does nothing.
+    ///
+    /// A warning rather than an error: the marker is inert here, not wrong, and
+    /// the code still builds and behaves correctly. What it must not do is stay
+    /// quiet — the whole point of marking is to state the resolution explicitly,
+    /// so a mark that is being ignored is exactly the situation the developer
+    /// wrote it to rule out.
+    ///
+    /// One warning per declaration, positioned at its first marked parameter:
+    /// the reason is a property of the declaration, and the fix — mark it
+    /// `@InjectableProviding`, or move the parameters — is the same for all of
+    /// them.
+    private func reportInertAutoInjected(_ node: some DeclGroupSyntax) {
+        let typeName = node.declaredName
+        let isInjectable = !node.attributes.attributes(named: "Injectable").isEmpty
+
+        var initializerCount = 0
+        var hasExplicitProvider = false
+        for member in node.memberBlock.members {
+            if let initializer = member.decl.as(InitializerDeclSyntax.self) {
+                initializerCount += 1
+                hasExplicitProvider = hasExplicitProvider
+                    || initializer.attributes.hasAttribute(named: "InjectableProviding")
+            } else if let function = member.decl.as(FunctionDeclSyntax.self) {
+                hasExplicitProvider = hasExplicitProvider
+                    || function.attributes.hasAttribute(named: "InjectableProviding")
+            }
+        }
+
+        for member in node.memberBlock.members {
+            let parameters: FunctionParameterListSyntax
+            let isProvider: Bool
+            let subject: String
+
+            if let initializer = member.decl.as(InitializerDeclSyntax.self) {
+                parameters = initializer.signature.parameterClause.parameters
+                // A sole initializer is adopted implicitly, but only while the
+                // type declares no provider of its own.
+                isProvider = initializer.attributes.hasAttribute(named: "InjectableProviding")
+                    || (!hasExplicitProvider && initializerCount == 1)
+                subject = "this initializer"
+            } else if let function = member.decl.as(FunctionDeclSyntax.self) {
+                parameters = function.signature.parameterClause.parameters
+                isProvider = function.attributes.hasAttribute(named: "InjectableProviding")
+                    && function.modifiers.isStatic
+                subject = "'\(function.name.text)'"
+            } else {
+                continue
+            }
+
+            guard let marked = parameters.first(where: {
+                $0.attributes.hasAttribute(named: "autoinjected")
+            }) else {
+                continue
+            }
+            guard !isProvider || !isInjectable else {
+                continue
+            }
+
+            let reason = isInjectable
+                ? "\(subject) is not '\(typeName)'s provider. Mark it @InjectableProviding, or move the marked parameters to the provider."
+                : "'\(typeName)' is not @Injectable, so it has no provider whose parameters Zerk resolves."
+
+            diagnostics.append(CodegenDiagnostic(
+                severity: .warning,
+                message: "@autoinjected has no effect here: \(reason)",
+                location: location(for: Syntax(marked))
             ))
         }
     }
@@ -272,6 +345,13 @@ final class SourceCollector: SyntaxVisitor {
                 CodegenDiagnostic(
                     severity: .error,
                     message: "@injected is a parameter marker and cannot be applied to a property. Use @Injected for properties.",
+                    location: location(for: Syntax(node))))
+        }
+        if node.attributes.hasAttribute(named: "autoinjected") {
+            diagnostics.append(
+                CodegenDiagnostic(
+                    severity: .error,
+                    message: "@autoinjected is a provider-parameter marker and cannot be applied to a property. Use @Injected for properties.",
                     location: location(for: Syntax(node))))
         }
         return .skipChildren
@@ -361,7 +441,8 @@ final class SourceCollector: SyntaxVisitor {
 
         for member in node.memberBlock.members {
             if let initializer = member.decl.as(InitializerDeclSyntax.self) {
-                let parameters = initializer.signature.parameterClause.parameters.parameterRecords
+                let parameters = initializer.signature.parameterClause.parameters
+                    .parameterRecords(locatedBy: { self.location(for: $0) })
                 let effects = ProviderEffects(from: initializer.signature.effectSpecifiers?.trimmedDescription)
                 let initializerLocation = self.location(for: Syntax(initializer))
                 let initializerStated = statedIsolation(
@@ -444,7 +525,8 @@ final class SourceCollector: SyntaxVisitor {
 
                 let provider = InjectingProvider(
                     kind: .staticFunction(name: function.name.text),
-                    parameters: function.signature.parameterClause.parameters.parameterRecords,
+                    parameters: function.signature.parameterClause.parameters
+                        .parameterRecords(locatedBy: { self.location(for: $0) }),
                     effects: ProviderEffects(from: function.signature.effectSpecifiers?.trimmedDescription),
                     location: functionLocation,
                     returnTypeName: returnType.isEmpty ? nil : returnType,
