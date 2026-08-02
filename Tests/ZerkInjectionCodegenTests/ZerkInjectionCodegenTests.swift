@@ -928,8 +928,11 @@ struct GeneratorOutputBuilderTests {
         #expect(result.output.contains("        live"))
     }
 
-    @Test("shared injectables generate a public inject wrapper without publicizing internal members")
-    func sharedInjectablesGeneratePublicInjectOnly() {
+    @Test("shared injectables publicize their named members as well as inject()")
+    func sharedInjectablesPublicizeNamedMembers() {
+        // A consuming module reaching one specific member — `@Injected(\\.live)`
+        // — needs to see it, so @Shared covers every member for the key rather
+        // than inject() alone.
         let sharedService = makeResolution(
             typeName: "LiveService",
             injectableKey: "Service",
@@ -941,9 +944,45 @@ struct GeneratorOutputBuilderTests {
         let result = buildOutput(types: [], values: [], resolutions: [sharedService])
 
         #expect(result.diagnostics.isEmpty)
-        #expect(result.output.contains("static var live: Service"))
-        #expect(result.output.contains("public static var live: Service") == false)
+        #expect(result.output.contains("public static var live: Service"))
         #expect(result.output.contains("public static func inject() -> Service"))
+    }
+
+    @Test("an unshared injectable keeps its members internal")
+    func unsharedInjectableKeepsMembersInternal() {
+        let service = makeResolution(
+            typeName: "LiveService",
+            injectableKey: "Service",
+            provider: .explicit(makeStaticProvider(name: "live")),
+            isTypePrimary: true
+        )
+
+        let result = buildOutput(types: [], values: [], resolutions: [service])
+
+        #expect(!result.output.contains("public static"))
+    }
+
+    @Test("@Shared on a non-public key publicizes nothing and warns")
+    func sharedOnNonPublicKeyWarns() {
+        let sharedService = makeResolution(
+            typeName: "LiveService",
+            injectableKey: "Service",
+            provider: .explicit(makeStaticProvider(name: "live")),
+            isTypePrimary: true,
+            isShared: true
+        )
+
+        let result = buildOutput(
+            types: [],
+            values: [],
+            resolutions: [sharedService],
+            moduleAccessLevels: ["Service": false]
+        )
+
+        #expect(!result.output.contains("public static"))
+        #expect(result.diagnostics.contains {
+            $0.severity == .warning && $0.message.contains("@Shared has no effect")
+        })
     }
 
     @Test("async throwing providers generate async throwing wrappers")

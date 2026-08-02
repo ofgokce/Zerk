@@ -363,6 +363,7 @@ struct GeneratorOutputBuilder {
         // The key as it is written in the output. The protocol name above stays
         // on the canonical key, so an `any` spelling cannot rename it.
         let keyText = displayName(for: injectableKey)
+        let access = sharedAccessPrefix(for: provider, injectableKey: injectableKey)
 
         if provider.isSingleton {
             // No entry means the shared instance had no legal form and the
@@ -382,6 +383,7 @@ struct GeneratorOutputBuilder {
             return singletonLines(
                 for: provider,
                 injectableKey: injectableKey,
+                access: access,
                 memberName: memberName,
                 protocolName: protocolName,
                 interjectedName: interjectedName,
@@ -398,7 +400,7 @@ struct GeneratorOutputBuilder {
         if usesFunctionShape {
             let signature = parameterClause(parameters: allParameters, defaults: defaults)
             let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))(\(builderArguments(allParameters, useParameterNames: true, defaults: defaults)))"
-            lines.append("    \(isolation.declarationPrefix)static func \(memberName)\(signature)\(ownEffects.declarationSuffix) -> \(keyText) {")
+            lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(signature)\(ownEffects.declarationSuffix) -> \(keyText) {")
             lines += interjectionGuardLines(
                 protocolName: protocolName,
                 interjectedName: interjectedName,
@@ -419,6 +421,7 @@ struct GeneratorOutputBuilder {
                 lines += keyPathReachableVariantLines(
                     memberName: memberName,
                     keyText: keyText,
+                    access: access,
                     isolation: isolation,
                     ownEffects: ownEffects,
                     classification: classification
@@ -426,7 +429,7 @@ struct GeneratorOutputBuilder {
             }
         } else {
             let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))()"
-            lines.append("    \(isolation.declarationPrefix)static var \(memberName): \(keyText) {")
+            lines.append("    \(isolation.declarationPrefix)\(access)static var \(memberName): \(keyText) {")
             lines += interjectionGuardLines(
                 protocolName: protocolName,
                 interjectedName: interjectedName,
@@ -467,11 +470,25 @@ struct GeneratorOutputBuilder {
         .joined(separator: ", ")
 
         lines.append("")
-        lines.append("    \(isolation.declarationPrefix)static func \(memberName)\(resolvingSignature)\(resolvingEffects.declarationSuffix) -> \(returnClause(for: provider, key: keyText, parameters: resolvingParameters, classification: classification)) {")
+        lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(resolvingSignature)\(resolvingEffects.declarationSuffix) -> \(returnClause(for: provider, key: keyText, parameters: resolvingParameters, classification: classification)) {")
         lines.append("        \(ownEffects.callPrefix)\(memberName)(\(forwardedArguments))")
         lines.append("    }")
 
         return lines
+    }
+
+    /// `public ` when `@Shared` asked for it and the key can carry it.
+    ///
+    /// `@Shared` publicises every generated member for the key, not just
+    /// `inject()`: a consuming module that wants one specific member — through
+    /// `@Injected(\.staging)`, say — needs to see it. The key type itself has to
+    /// be public, since a public member cannot expose an internal type.
+    private func sharedAccessPrefix(for provider: ProviderResolution,
+                                    injectableKey: String) -> String {
+        guard provider.isShared, moduleAccessLevels[injectableKey] != false else {
+            return ""
+        }
+        return "public "
     }
 
     /// Emits an argument-free `static var` alongside a function-shaped member
@@ -495,6 +512,7 @@ struct GeneratorOutputBuilder {
     ///   the two names would collide.
     private func keyPathReachableVariantLines(memberName: String,
                                               keyText: String,
+                                              access: String,
                                               isolation: ProviderIsolation,
                                               ownEffects: ProviderEffects,
                                               classification: ProviderClassification) -> [String] {
@@ -507,7 +525,7 @@ struct GeneratorOutputBuilder {
 
         return [
             "",
-            "    \(isolation.declarationPrefix)static var \(memberName): \(keyText) {",
+            "    \(isolation.declarationPrefix)\(access)static var \(memberName): \(keyText) {",
             "        \(memberName)()",
             "    }"
         ]
@@ -663,12 +681,13 @@ struct GeneratorOutputBuilder {
     /// singleton never builds the real instance at all.
     private func singletonLines(for provider: ProviderResolution,
                                 injectableKey: String,
+                                access: String,
                                 memberName: String,
                                 protocolName: String,
                                 interjectedName: String,
                                 storage: SingletonStorage) -> [String] {
         var lines = [
-            "    \(provider.isolation.declarationPrefix)static var \(memberName): \(displayName(for: injectableKey)) {"
+            "    \(provider.isolation.declarationPrefix)\(access)static var \(memberName): \(displayName(for: injectableKey)) {"
         ]
         lines += interjectionGuardLines(
             protocolName: protocolName,
@@ -794,14 +813,13 @@ struct GeneratorOutputBuilder {
              provider.provider.effects.isAsync ||
              provider.provider.effects.isThrowing)
 
-        var accessPrefix = provider.isShared ? "public " : ""
-        if provider.isShared, moduleAccessLevels[injectableKey] == false {
+        let accessPrefix = sharedAccessPrefix(for: provider, injectableKey: injectableKey)
+        if provider.isShared, accessPrefix.isEmpty {
             diagnostics.append(CodegenDiagnostic(
                 severity: .warning,
-                message: "@Shared has no effect: '\(injectableKey)' is not public, so the generated inject() cannot be public.",
+                message: "@Shared has no effect: '\(injectableKey)' is not public, so the generated members cannot be public.",
                 location: provider.provider.location
             ))
-            accessPrefix = ""
         }
 
         let returns = returnClause(

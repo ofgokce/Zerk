@@ -169,6 +169,62 @@ struct KeyPathInjectionTests {
         #expect(result.didCompile, Comment(rawValue: result.compilerOutput))
     }
 
+    @Test("@Shared publicizes the members a key path would name, and type-checks")
+    func sharedPublicizesKeyPathTargets() throws {
+        // Without this a consuming module can call inject() but cannot name a
+        // member, so `@Injected(\.staging)` has nothing to point at across a
+        // module boundary.
+        let source = """
+        public protocol ApiServicing: AnyObject {}
+
+        @Shared
+        @Injectable<ApiServicing>
+        public final class ApiService: ApiServicing {
+            @InjectableProviding<ApiServicing>(primary: true)
+            public static func live() -> ApiServicing { ApiService() }
+
+            @InjectableProviding<ApiServicing>
+            public static func staging() -> ApiServicing { ApiService() }
+
+            public init() {}
+        }
+        """
+
+        let result = try CompileFixture.run(source: source)
+
+        #expect(result.generated.contains("public static var live: ApiServicing"))
+        #expect(result.generated.contains("public static var staging: ApiServicing"))
+        #expect(result.generated.contains("public static func inject() -> ApiServicing"))
+
+        try #require(!result.skipped, "no usable Swift compiler; case not verified")
+        #expect(result.didCompile, Comment(rawValue: result.compilerOutput))
+    }
+
+    @Test("a shared singleton exposes its getter but not its storage")
+    func sharedSingletonKeepsStoragePrivate() throws {
+        let source = """
+        public protocol Storing: AnyObject {}
+
+        @Singleton
+        @Shared
+        @Injectable<Storing>
+        public final class Store: Storing {
+            @InjectableProviding
+            public init() {}
+        }
+        """
+
+        let result = try CompileFixture.run(source: source)
+
+        #expect(result.generated.contains("public static var store: Storing"))
+        // The shared instance lives in the private namespace either way.
+        #expect(result.generated.contains("private enum _$zerk_singletons {"))
+        #expect(!result.generated.contains("public static let store"))
+
+        try #require(!result.skipped, "no usable Swift compiler; case not verified")
+        #expect(result.didCompile, Comment(rawValue: result.compilerOutput))
+    }
+
     @Test("a key-path use is not checked against the primary's chain")
     func keyPathUseSkipsTheChainCheck() {
         // The primary is async, so a plain @Injected would be rejected. A key

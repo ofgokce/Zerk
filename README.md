@@ -279,7 +279,7 @@ The freestanding form expands to a private, never-called function that pairs the
 
 Generic typealiases are rejected — substituting their parameters would need real type resolution. Alias a concrete instantiation instead.
 
-**`@Shared`** — makes the generated `inject()` `public`, so other modules can resolve the key. The key type itself must be `public`, otherwise the modifier is dropped with a warning.
+**`@Shared`** — makes the generated members `public`, so other modules can resolve the key. That covers `inject()` *and* the named members, so a consuming module can also reach one specific provider with `@Injected(\.staging)`. The key type itself must be `public`, otherwise the modifier is dropped with a warning. A `@Singleton`'s shared storage stays private either way; only its getter is publicized.
 
 **`@Isolated<A>`** — tells Zerk which global actor a declaration is isolated to, when the build plugin cannot see it. It is **corrective, not declarative**: it restates what the compiler already believes so the generated members mirror the right isolation. Claiming something untrue produces generated code that will not compile. Two cases need it — a custom global actor whose name does not end in `Actor` (Zerk's attribute heuristic misses it), and isolation inherited through a conformance (invisible to a syntax-only plugin):
 
@@ -590,9 +590,9 @@ What it cannot unify needs real type resolution, and stays distinct: module qual
 
 `any` is a special case. Zerk cannot tell a protocol from a superclass or a struct, and `any` is only legal on an existential — so keys *match* with `any` stripped, but the generated file emits the spelling you wrote. If one declaration says `P` and another `any P`, they are one key and `any P` is what gets emitted.
 
-**Module-scoped.** Auto-resolution only sees the current module. `@Shared` makes a key's `inject()` public so another module can call it manually, but the consuming module cannot auto-resolve a foreign key: its plugin has no way to know that key's effects or isolation. Forward it explicitly with an `@Injectable` value if you want it in the graph.
+**Module-scoped.** Auto-resolution only sees the current module. `@Shared` makes a key's generated members public so another module can call them manually, but the consuming module cannot auto-resolve a foreign key: its plugin has no way to know that key's effects or isolation. Forward it explicitly with an `@Injectable` value if you want it in the graph.
 
-`@Shared` publicises `inject()` and nothing else — named members stay `internal`, so `@Injected(\.member)` cannot reach across a module boundary. A target that declares no injectables needs no plugin and can still use `@Injected`, resolving a `@Shared` key's primary or a `Zerk<Key>` member it declares itself.
+A target that declares no injectables needs no plugin and can still use `@Injected`: `@Shared` publicizes the key's members, so it can resolve the primary with a bare `@Injected` or name one with `@Injected(\.staging)`. Without `@Shared`, generated members are `internal` and invisible across the boundary.
 
 **Conformances must be written on the declaration.** `@Injectable<Key>` checks that the type lists `Key` in its own inheritance clause. A conformance added in an extension, inherited transitively, or declared in another module is invisible to a syntax-only plugin.
 
