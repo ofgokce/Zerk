@@ -310,8 +310,9 @@ struct AutoInjectedTests {
         let result = CompileFixture.generateWithResolution(source: source)
 
         #expect(result.diagnostics.isEmpty)
-        // `seed` comes from Token's own provider; `label` is unmarked.
-        #expect(result.output.output.contains("static func inject(seed: Int, label: String) -> Consumer"))
+        // `label` is the provider's own and keeps its place; `seed` comes from
+        // Token's provider and is appended after it.
+        #expect(result.output.output.contains("static func inject(label: String, seed: Int) -> Consumer"))
     }
 
     @Test("@injected and @autoinjected compose")

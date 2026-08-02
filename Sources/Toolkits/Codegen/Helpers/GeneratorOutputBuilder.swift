@@ -52,6 +52,10 @@ struct GeneratorOutputBuilder {
         let parameters: [ParameterRecord]
         let argumentExpressions: [String]
         let effects: ProviderEffects
+        /// Bubbled requirements that clash with a parameter the provider already
+        /// declares. Carried out rather than reported in place, because
+        /// `wrapperPlan` runs many times per provider.
+        var collisions: [BubbleResolver.Collision] = []
     }
 
     /// One `@Singleton`'s shared instance, as it appears in `_$zerk_singletons`.
@@ -240,6 +244,18 @@ struct GeneratorOutputBuilder {
 
             for provider in providers {
                 let classification = classifier.classify(provider)
+
+                for collision in wrapperPlan(for: provider).collisions {
+                    let identity = "collision|\(provider.typeName)|\(collision.own.name)|\(collision.requirement.typeKey)"
+                    guard reportedAutoInjected.insert(identity).inserted else {
+                        continue
+                    }
+                    diagnostics.append(CodegenDiagnostic(
+                        severity: .error,
+                        message: "Resolving '\(collision.dependencyName)' needs '\(collision.requirement.name): \(collision.requirement.typeName)', which collides with '\(provider.typeName)'s own '\(collision.own.name)' parameter. Mark it @injectable to feed the same value to both.",
+                        location: collision.own.location ?? provider.provider.location
+                    ))
+                }
 
                 // Deduped by parameter position: a provider serving two keys is
                 // classified once per key, and the parameter is unresolvable in
@@ -813,8 +829,20 @@ struct GeneratorOutputBuilder {
             for record in grouped[typeName]! {
                 var argumentExpressions: [String] = []
                 var overloadParameterParts: [String] = []
+                var requests: [BubbleResolver.Request] = []
+                var dependencyCalls: [String: (prefix: String, key: String, label: String?)] = [:]
                 var effects = record.effects
                 var failed = false
+
+                // The member's own parameters, indexed for the bubbling step. An
+                // @injected parameter is resolved rather than passed in, so it
+                // cannot feed anything and is excluded.
+                let ownParameters = Dictionary(
+                    record.parameters
+                        .filter { !$0.isMarked }
+                        .map { ($0.parameter.resolutionIdentity, $0.parameter) },
+                    uniquingKeysWith: { first, _ in first }
+                )
 
                 for markedParameter in record.parameters {
                     let core = markedParameter.parameter
@@ -847,26 +875,20 @@ struct GeneratorOutputBuilder {
 
                     if let unique = primaryResolutions[core.typeKey] {
                         let plan = wrapperPlan(for: unique)
-                        if plan.parameters.isEmpty {
-                            let hops = unique.isolation.requiresHop(callingFrom: record.isolation.dependencyCallContext)
-                            let callEffects = plan.effects
-                                .merged(with: ProviderEffects(isAsync: hops, isThrowing: false))
-                            effects = effects.merged(with: callEffects)
-                            argumentExpressions.append(
-                                overloadArgument(
-                                    label: core.label,
-                                    expression: "\(callEffects.callPrefix)Zerk<\(core.typeName)>.inject()"
-                                )
-                            )
-                            continue
-                        }
-                        diagnostics.append(CodegenDiagnostic(
-                            severity: .error,
-                            message: "@injected parameter '\(core.name)' cannot be auto-filled: 'Zerk<\(core.typeKey)>.inject' requires arguments. Pass the value explicitly or make the provider argument-free.",
-                            location: record.location
+                        let hops = unique.isolation.requiresHop(callingFrom: record.isolation.dependencyCallContext)
+                        let callEffects = plan.effects
+                            .merged(with: ProviderEffects(isAsync: hops, isThrowing: false))
+                        effects = effects.merged(with: callEffects)
+
+                        // Deferred: what each dependency is called with depends
+                        // on how *every* dependency's requirements fold together.
+                        requests.append(BubbleResolver.Request(
+                            sourceName: core.name,
+                            requirements: plan.parameters
                         ))
-                        failed = true
-                        break
+                        dependencyCalls[core.name] = (callEffects.callPrefix, core.typeName, core.label)
+                        argumentExpressions.append("\u{0}\(core.name)")
+                        continue
                     }
 
                     diagnostics.append(CodegenDiagnostic(
@@ -880,6 +902,41 @@ struct GeneratorOutputBuilder {
 
                 if failed {
                     continue
+                }
+
+                let bubble = BubbleResolver.resolve(requests, ownExternals: ownParameters)
+
+                for collision in bubble.collisions {
+                    diagnostics.append(CodegenDiagnostic(
+                        severity: .error,
+                        message: "Resolving @injected parameter '\(collision.dependencyName)' needs '\(collision.requirement.name): \(collision.requirement.typeName)', which collides with this member's own '\(collision.own.name)' parameter. Mark it @injectable to feed the same value to both.",
+                        location: collision.own.location ?? record.location
+                    ))
+                }
+                if !bubble.collisions.isEmpty {
+                    continue
+                }
+
+                // Bubbled parameters go after the member's own, in the order
+                // their sources appear.
+                overloadParameterParts += bubble.parameters.map { parameter in
+                    let label = parameter.label ?? "_"
+                    return label == parameter.name
+                        ? "\(label): \(parameter.typeName)"
+                        : "\(label) \(parameter.name): \(parameter.typeName)"
+                }
+
+                argumentExpressions = argumentExpressions.map { expression in
+                    guard expression.hasPrefix("\u{0}") else {
+                        return expression
+                    }
+                    let source = String(expression.dropFirst())
+                    let call = dependencyCalls[source]!
+                    let arguments = bubble.arguments[source] ?? []
+                    let resolved = arguments.isEmpty
+                        ? "\(call.prefix)Zerk<\(call.key)>.inject()"
+                        : "\(call.prefix)Zerk<\(call.key)>.inject(\(arguments.joined(separator: ", ")))"
+                    return overloadArgument(label: call.label, expression: resolved)
                 }
 
                 let accessPrefix = record.isPublic ? "public " : ""
@@ -1364,18 +1421,42 @@ struct GeneratorOutputBuilder {
         let memberIsolation = resolution.isolation
         let classifier = self.classifier
 
-        var parameters: [ParameterRecord] = []
+        var ownParameters: [ParameterRecord] = []
         var argumentExpressions: [String] = []
         var effects = resolution.provider.effects
+        // Gathered first, resolved together: sharing and disambiguation are
+        // decisions about the whole set, not about one dependency at a time.
+        var requests: [BubbleResolver.Request] = []
+        var dependencyCalls: [String: (prefix: String, key: String)] = [:]
 
         // Explicit mode applies here too. `inject()` flattens the whole subtree,
         // so without this an unmarked parameter would still be resolved behind
         // the caller's back — the exact thing marking asks Zerk not to do.
         let isExplicit = resolution.provider.parameters.contains(where: \.isAutoInjected)
 
+        // Which parameters this provider exposes itself, computed up front: a
+        // dependency may bubble a requirement before the parameter that would
+        // feed it has been reached. Mirrors the branches of the loop below.
+        var ownExternals: [String: ParameterRecord] = [:]
         for parameter in resolution.provider.parameters {
-            if isExplicit, !parameter.isAutoInjected {
-                parameters = mergeParameters(parameters, with: [parameter])
+            let staysExternal: Bool
+            if isExplicit ? !parameter.isAutoInjected : parameter.isNonInjected {
+                staysExternal = true
+            } else if classifier.injectableValue(matching: parameter) != nil {
+                staysExternal = false
+            } else if primaryResolutions[parameter.typeKey] != nil {
+                staysExternal = false
+            } else {
+                staysExternal = true
+            }
+            if staysExternal {
+                ownExternals[parameter.resolutionIdentity] = parameter
+            }
+        }
+
+        for parameter in resolution.provider.parameters {
+            if isExplicit ? !parameter.isAutoInjected : parameter.isNonInjected {
+                ownParameters = mergeParameters(ownParameters, with: [parameter])
                 argumentExpressions.append(parameter.name)
                 continue
             }
@@ -1394,26 +1475,41 @@ struct GeneratorOutputBuilder {
                 let callEffects = dependencyPlan.effects
                     .merged(with: ProviderEffects(isAsync: hops, isThrowing: false))
                 effects = effects.merged(with: callEffects)
-                parameters = mergeParameters(parameters, with: dependencyPlan.parameters)
 
-                let call: String
-                if dependencyPlan.parameters.isEmpty {
-                    call = "\(callEffects.callPrefix)Zerk<\(parameter.typeName)>.inject()"
-                } else {
-                    call = "\(callEffects.callPrefix)Zerk<\(parameter.typeName)>.inject(\(dependencyPlan.parameters.map(callArgument).joined(separator: ", ")))"
-                }
-                argumentExpressions.append(call)
+                // Placeholder: the call cannot be written until every
+                // dependency's requirements have been folded together.
+                requests.append(BubbleResolver.Request(
+                    sourceName: parameter.name,
+                    requirements: dependencyPlan.parameters
+                ))
+                dependencyCalls[parameter.name] = (callEffects.callPrefix, parameter.typeName)
+                argumentExpressions.append("\u{0}\(parameter.name)")
                 continue
             }
 
-            parameters = mergeParameters(parameters, with: [parameter])
+            ownParameters = mergeParameters(ownParameters, with: [parameter])
             argumentExpressions.append(parameter.name)
         }
 
+        let bubble = BubbleResolver.resolve(requests, ownExternals: ownExternals)
+
+        // Bubbled parameters go after the provider's own, in the order their
+        // sources appear — the same shape the @injected overload uses.
         return WrapperPlan(
-            parameters: parameters,
-            argumentExpressions: argumentExpressions,
-            effects: effects
+            parameters: ownParameters + bubble.parameters,
+            argumentExpressions: argumentExpressions.map { expression in
+                guard expression.hasPrefix("\u{0}") else {
+                    return expression
+                }
+                let source = String(expression.dropFirst())
+                let call = dependencyCalls[source]!
+                let arguments = bubble.arguments[source] ?? []
+                return arguments.isEmpty
+                    ? "\(call.prefix)Zerk<\(call.key)>.inject()"
+                    : "\(call.prefix)Zerk<\(call.key)>.inject(\(arguments.joined(separator: ", ")))"
+            },
+            effects: effects,
+            collisions: bubble.collisions
         )
     }
 

@@ -228,6 +228,18 @@ enum CompileFixture {
         public var wrappedValue: Value
         public init(wrappedValue: Value) { self.wrappedValue = wrappedValue }
     }
+
+    @propertyWrapper
+    public struct noninjected<Value> {
+        public var wrappedValue: Value
+        public init(wrappedValue: Value) { self.wrappedValue = wrappedValue }
+    }
+
+    @propertyWrapper
+    public struct injectable<Value> {
+        public var wrappedValue: Value
+        public init(wrappedValue: Value) { self.wrappedValue = wrappedValue }
+    }
     """
 
     // Prefix matches, so "@Injectable" also covers "@InjectableValues" and

@@ -28,6 +28,8 @@ extension FunctionParameterSyntax {
             typeKey: type.normalizedTypeKey,
             typeName: type.trimmedDescription,
             isAutoInjected: attributes.hasAttribute(named: "autoinjected"),
+            isNonInjected: attributes.hasAttribute(named: "noninjected"),
+            feedsDependencies: attributes.hasAttribute(named: "injectable"),
             location: locator.map { $0(Syntax(self)) })
     }
 }

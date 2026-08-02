@@ -243,6 +243,17 @@ final class SourceCollector: SyntaxVisitor {
                 continue
             }
 
+            // Contradictory on its face, and no reading of it is safe to guess.
+            for parameter in parameters
+            where parameter.attributes.hasAttribute(named: "autoinjected")
+                && parameter.attributes.hasAttribute(named: "noninjected") {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "'\(parameter.secondName?.text ?? parameter.firstName.text)' is marked both @autoinjected and @noninjected. Keep the one you meant.",
+                    location: location(for: Syntax(parameter))
+                ))
+            }
+
             guard let marked = parameters.first(where: {
                 $0.attributes.hasAttribute(named: "autoinjected")
             }) else {
@@ -976,14 +987,11 @@ final class SourceCollector: SyntaxVisitor {
                 }
             }
 
-            let firstName = parameter.firstName.text
+            // Built through `parameterRecord`, not by hand: the markers and the
+            // location live there, and restating the fields would drop whatever
+            // is added to `ParameterRecord` next.
             collected.append(MarkedParameter(
-                parameter: ParameterRecord(
-                    label: firstName == "_" ? nil : firstName,
-                    name: parameter.secondName?.text ?? firstName,
-                    typeKey: parameter.type.normalizedTypeKey,
-                    typeName: parameter.type.trimmedDescription
-                ),
+                parameter: parameter.parameterRecord(locatedBy: { self.location(for: $0) }),
                 isMarked: isMarked,
                 defaultText: parameter.defaultValue?.value.trimmedDescription
             ))

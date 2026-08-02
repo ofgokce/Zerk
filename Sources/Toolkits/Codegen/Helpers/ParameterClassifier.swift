@@ -48,9 +48,11 @@ struct ParameterClassifier {
         let isExplicit = resolution.provider.parameters.contains(where: \.isAutoInjected)
 
         for parameter in resolution.provider.parameters {
-            if isExplicit, !parameter.isAutoInjected {
-                // Deliberately unmarked: the caller supplies it even when Zerk
-                // could have resolved it. That is the point of asking.
+            if isExplicit ? !parameter.isAutoInjected : parameter.isNonInjected {
+                // Either deliberately unmarked while the provider is being
+                // explicit, or explicitly opted out while it is inferring. The
+                // caller supplies it even where Zerk could have resolved it,
+                // which is the point of saying so.
                 classified.append(ClassifiedParameter(parameter: parameter, binding: .external))
                 continue
             }

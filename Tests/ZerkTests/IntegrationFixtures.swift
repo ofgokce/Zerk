@@ -71,6 +71,30 @@ final class ExplicitConsumer {
     }
 }
 
+/// `SeededToken`'s provider needs a `seed`, so resolving `token` bubbles that
+/// requirement up. `@injectable` says this member's own `seed` supplies it, so
+/// one parameter serves both instead of being declared twice.
+final class SeedSharingConsumer {
+    let tokenValue: Int
+    let seed: Int
+
+    init(@injected token: SeededToken, @injectable seed: Int) {
+        self.tokenValue = token.value
+        self.seed = seed
+    }
+}
+
+/// `retries` would resolve from `RetryPolicy.retryLimit`, but is marked out.
+@Injectable
+final class RetryHolder {
+    let retryLimit: Int
+
+    @InjectableProviding
+    init(@noninjected retryLimit: Int) {
+        self.retryLimit = retryLimit
+    }
+}
+
 protocol Reading: AnyObject {
     var id: Int { get }
 }

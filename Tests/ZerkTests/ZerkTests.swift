@@ -68,6 +68,28 @@ struct ZerkTests {
         #expect(tagger.joined == "alpha,beta")
     }
 
+    @Test("@injectable feeds one parameter to both the member and its dependency")
+    func injectableSharesAParameter() {
+        resetFixtureState()
+
+        // One `seed`: it reaches SeededToken's provider and the member itself.
+        let consumer = SeedSharingConsumer(seed: 100)
+
+        #expect(consumer.seed == 100)
+        #expect(consumer.tokenValue == 101)
+    }
+
+    @Test("@noninjected keeps a resolvable parameter caller-supplied")
+    func nonInjectedOptsOut() {
+        resetFixtureState()
+
+        // `RetryPolicy.retryLimit` is injectable and matches by name and type,
+        // so without the marker this would take no arguments at all.
+        let holder = Zerk<RetryHolder>.inject(retryLimit: 9)
+
+        #expect(holder.retryLimit == 9)
+    }
+
     @Test("@autoinjected resolves marked parameters and leaves the rest alone")
     func autoInjectedSelectsWhatIsResolved() {
         resetFixtureState()

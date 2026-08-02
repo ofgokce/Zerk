@@ -312,6 +312,56 @@ final class Consumer {
 }
 ```
 
+**`@noninjected` (lowercase) — keeps a parameter out of resolution.** The inverse of `@autoinjected`, for a provider that is mostly happy inferring: mark the exceptions rather than every parameter.
+
+```swift
+@InjectableProviding
+init(payments: PaymentServicing, @noninjected retries: Int) { ... }
+// `retries` stays on the generated member even though an
+// `@Injectable var retries: Int` exists in the module
+```
+
+A provider that marks something `@autoinjected` already excludes everything unmarked, so `@noninjected` is redundant there — it is accepted without complaint, since stating every parameter's intent is a fair style. Marking one parameter both ways is a contradiction and is reported.
+
+**`@injectable` (lowercase) — feeds one of this member's parameters into a dependency Zerk resolves for it.**
+
+When a resolved dependency's own provider needs arguments, those bubble up and become parameters of the generated member. If the member already declares a parameter that would satisfy one, `@injectable` says so, and the single parameter serves both:
+
+```swift
+@Injectable
+final class Foo {
+    init(value: Value) { ... }
+}
+
+final class Bar {
+    init(@injected foo: Foo, @injectable value: Value) { ... }
+}
+
+// generated:
+// extension Bar {
+//     convenience init(value: Value) {
+//         self.init(foo: Zerk<Foo>.inject(value: value), value: value)
+//     }
+// }
+```
+
+Without it the same `value` would be declared twice — once as `Bar`'s own parameter, once bubbled up for `Foo` — which is a build error rather than a silent merge, so sharing is always something you wrote down. Matched by name *and* type, the rule an `@Injectable` value already follows; a differently named parameter does not match and the requirement bubbles on its own. Works with `@injected` on any member and with `@autoinjected` on a provider.
+
+**How bubbled parameters are ordered and combined.** The rules are the same on both paths:
+
+- Your own parameters keep their relative order, and everything bubbled is appended **after** them, in the order of the parameters that pulled them in.
+- Two dependencies needing the same parameter *name and type* share one parameter, however many asked for it.
+- Two needing the same name but **different** types keep the label they were declared with and take distinct inner names, since a signature cannot bind one name twice:
+
+```swift
+@InjectableProviding
+init(@autoinjected a: FooA, @autoinjected b: FooB) {}   // FooA needs value: ValueA, FooB needs value: ValueB
+
+// static func inject(value valueA: ValueA, value valueB: ValueB) -> Consumer
+```
+
+The suffix is the parameter that pulled the requirement in. The same renaming applies when a bubbled name would clash with one of your own parameters of a different type — yours keeps its name.
+
 **`@autoinjected` (lowercase) — states which provider parameters Zerk resolves.**
 
 By default a provider's parameters are auto-resolved wherever Zerk can, and the rest become parameters of the generated member. That is convenient but inferred: adding a type to the graph can turn a caller-supplied parameter into a resolved one without anyone touching the provider.
@@ -335,7 +385,7 @@ Marking a parameter somewhere Zerk never resolves — a second initializer, an o
 
 Distinct from `@injected` below, which generates an overload of the *enclosing member*. They compose — `@injected @autoinjected` does both.
 
-**`@injected` (lowercase) — parameter injection.** Marks an initializer or method parameter; the build plugin generates an overload with every marked parameter omitted and filled via `Zerk<T>.inject()`:
+**`@injected` (lowercase) — parameter injection.** Marks an initializer or method parameter; the build plugin generates an overload with every marked parameter omitted and filled via `Zerk<T>.inject()`. When the resolved dependency's own provider still needs arguments, those bubble up onto the overload — see `@injectable` above to feed one from a parameter the member already has:
 
 ```swift
 final class AuditTrail {
@@ -559,7 +609,7 @@ What it cannot unify needs real type resolution, and stays distinct: module qual
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Shared` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

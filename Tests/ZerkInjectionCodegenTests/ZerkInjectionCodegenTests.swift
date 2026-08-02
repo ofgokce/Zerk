@@ -1114,8 +1114,10 @@ struct ParameterInjectionTests {
         #expect(result.diagnostics.contains { $0.message.contains("is not injectable in this module") })
     }
 
-    @Test("marked parameter backed by a parametric provider emits an error")
-    func parametricMarkedParameterEmitsError() {
+    @Test("marked parameter backed by a parametric provider bubbles its arguments")
+    func parametricMarkedParameterBubbles() {
+        // Used to be an error. The dependency's own requirements now surface on
+        // the overload instead, matching how @autoinjected treats the same case.
         let result = generate("""
         @Injectable
         struct Token {
@@ -1128,7 +1130,9 @@ struct ParameterInjectionTests {
         }
         """)
 
-        #expect(result.diagnostics.contains { $0.message.contains("requires arguments") })
+        #expect(result.diagnostics.isEmpty)
+        #expect(result.output.contains("convenience init(seed: Int)"))
+        #expect(result.output.contains("self.init(token: Zerk<Token>.inject(seed: seed))"))
     }
 
     @Test("marked parameter with a default value emits an error")
