@@ -65,7 +65,21 @@ public struct CodeGenerator {
         let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
 
         let resolution = ProviderResolver(types: types, aliases: aliases).resolve()
-        var diagnostics = collector.diagnostics + resolution.diagnostics
+
+        // Imports join the primaries only: they satisfy parameters, and emit no
+        // members, because what they resolve is built in another module.
+        let imports = ImportedInjectableMerger(
+            records: collector.importedInjectables.map {
+                var record = $0
+                record.typeKey = aliases.representative(for: $0.typeKey)
+                return record
+            }
+        ).merged(
+            into: resolution.primaryResolutions,
+            localKeys: Set(resolution.resolutions.map(\.injectableKey))
+        )
+
+        var diagnostics = collector.diagnostics + resolution.diagnostics + imports.diagnostics
 
         if diagnostics.contains(where: { $0.severity == .error }) {
             emitDiagnostics(diagnostics)
@@ -76,7 +90,7 @@ public struct CodeGenerator {
             types: types,
             values: values,
             resolutions: resolution.resolutions,
-            primaryResolutions: resolution.primaryResolutions,
+            primaryResolutions: imports.primaries,
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: injectedUses,
             markedMembers: markedMembers,

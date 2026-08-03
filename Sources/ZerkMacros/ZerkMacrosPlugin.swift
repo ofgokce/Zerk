@@ -33,6 +33,7 @@ struct ZerkMacrosPlugin: CompilerPlugin {
         IsolatedMacro.self,
         ZerkAliasMacro.self,
         ZerkImportMacro.self,
+        ImportedInjectableMacro.self,
         ZerkAliasDeclarationMacro.self,
     ]
 }

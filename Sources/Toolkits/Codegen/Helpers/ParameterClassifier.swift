@@ -122,7 +122,9 @@ struct ParameterClassifier {
                 }
             }
 
-            let call = "\(effects.callPrefix)Zerk<\(parameter.typeName)>.inject()"
+            let call = "\(effects.callPrefix)"
+                + (dependency.provider.resolutionExpression(arguments: [])
+                    ?? "Zerk<\(parameter.typeName)>.inject()")
             if effects == .none {
                 // No effects means no hop, so member and dependency share a
                 // domain: an isolated dependency here is exactly the SE-0411

@@ -264,6 +264,36 @@ The two `primary` flags are independent axes: `@Injectable(primary:)` picks the 
 
 Like every Zerk attribute it applies per key, so `@Injectable<A>(primary: true) @Injectable<B>` claims `A` only. It is a *type*-only argument: a value is the sole provider for its key, so `primary` on one is an error.
 
+**`@ImportedInjectable`** — declares a key that lives in another module, so this module's graph can resolve against it.
+
+Zerk resolves within one module. `@Exported` makes a key's members public, but the consuming module still has no idea the key exists, what it needs, or what effects and isolation it carries. This states all of that:
+
+```swift
+private enum ZerkImports {
+    @ImportedInjectable
+    static func session(baseURL: URL) -> Session
+
+    @ImportedInjectable
+    @MainActor
+    static func router() throws -> Routing
+}
+```
+
+Only the shape matters. The return type is the key, the parameters are what the foreign provider needs, and `async`/`throws`/global-actor annotations state its effects and isolation. The declaration's name, visibility, and whether it is global, `static`, or an instance method make no difference — **nothing ever calls it**.
+
+Written **without a body**, the macro synthesises `Zerk<Key>.inject(…)`, and that expansion is the check: if the key is not exported, or its signature differs, the declaration itself fails to compile.
+
+Written **with a body**, the body names which member the key resolves through instead of the primary. It must be a single `Zerk` expression and nothing else, because Zerk inlines it at every use site:
+
+```swift
+@ImportedInjectable
+static func session() -> Session { Zerk<Session>.staging }
+```
+
+An imported key satisfies local parameters and generates **no members** — what it resolves is built in the other module, so `extension Zerk<Key>` and `inject()` belong there. One import per key; a key that is both imported and declared `@Injectable` locally is an error, as is importing one twice.
+
+Pair it with `#ZerkImport` so the generated file can see the foreign types.
+
 **`#ZerkImport(module: "…")`** — adds `import` statements to the generated file.
 
 Zerk generates a file that imports `Zerk` and nothing else, because the plugin reads syntax and cannot tell which module a name came from. That is fine while every type in the graph is local, and breaks the moment one is not — a provider parameter typed `Date` is emitted into a file where `Date` does not exist:
@@ -652,7 +682,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Exported` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Exported` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

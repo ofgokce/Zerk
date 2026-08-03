@@ -114,11 +114,21 @@ enum CompileFixture {
             types: rewriter.rewrite(types: collector.types),
             aliases: aliases
         ).resolve()
+        let imports = ImportedInjectableMerger(
+            records: collector.importedInjectables.map {
+                var record = $0
+                record.typeKey = aliases.representative(for: $0.typeKey)
+                return record
+            }
+        ).merged(
+            into: resolution.primaryResolutions,
+            localKeys: Set(resolution.resolutions.map(\.injectableKey))
+        )
         return GeneratorOutputBuilder(
             types: rewriter.rewrite(types: collector.types),
             values: rewriter.rewrite(values: collector.values),
             resolutions: resolution.resolutions,
-            primaryResolutions: resolution.primaryResolutions,
+            primaryResolutions: imports.primaries,
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
             markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
@@ -143,11 +153,21 @@ enum CompileFixture {
             types: rewriter.rewrite(types: collector.types),
             aliases: aliases
         ).resolve()
+        let imports = ImportedInjectableMerger(
+            records: collector.importedInjectables.map {
+                var record = $0
+                record.typeKey = aliases.representative(for: $0.typeKey)
+                return record
+            }
+        ).merged(
+            into: resolution.primaryResolutions,
+            localKeys: Set(resolution.resolutions.map(\.injectableKey))
+        )
         let output = GeneratorOutputBuilder(
             types: rewriter.rewrite(types: collector.types),
             values: rewriter.rewrite(values: collector.values),
             resolutions: resolution.resolutions,
-            primaryResolutions: resolution.primaryResolutions,
+            primaryResolutions: imports.primaries,
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
             markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
@@ -155,7 +175,7 @@ enum CompileFixture {
             importedModules: collector.importedModules
         ).build()
 
-        return (output, collector.diagnostics + resolution.diagnostics + output.diagnostics)
+        return (output, collector.diagnostics + resolution.diagnostics + imports.diagnostics + output.diagnostics)
     }
 
     // MARK: - Compilation
@@ -247,7 +267,7 @@ enum CompileFixture {
     // Prefix matches, so "@Injectable" also covers "@InjectableValues" and
     // "@InjectableProviding".
     private static let zerkAttributePrefixes = [
-        "@Injectable", "@NonInjectable", "@Singleton",
+        "@Injectable", "@NonInjectable", "@Singleton", "@ImportedInjectable",
         "@Exported", "@Isolated", "@Injected"
     ]
 

@@ -44,6 +44,9 @@ final class SourceCollector: SyntaxVisitor {
     /// Modules `#ZerkImport` asked the generated file to import, from anywhere
     /// in the module. Emitted deduplicated and sorted.
     private(set) var importedModules: Set<String> = []
+    /// `@ImportedInjectable` declarations: keys from other modules this one may
+    /// resolve against.
+    private(set) var importedInjectables: [ImportedInjectableRecord] = []
 
     private let settings: ZerkSettings
     private var sourceFile: String = ""
@@ -355,6 +358,48 @@ final class SourceCollector: SyntaxVisitor {
                 location: location(for: syntax)
             )
         )
+    }
+
+    /// `@ImportedInjectable func session(…) -> Session` — a key from another
+    /// module, described well enough to resolve against.
+    ///
+    /// Nothing calls the declaration, so where it sits and how visible it is do
+    /// not matter: only the return type, parameters, effects, isolation, and the
+    /// expression to resolve through. Visiting every function rather than only a
+    /// type's members is deliberate — these are as likely to be global.
+    override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {
+        guard node.attributes.hasAttribute(named: "ImportedInjectable"),
+              let returnType = node.signature.returnClause?.type else {
+            return .skipChildren
+        }
+
+        let location = self.location(for: Syntax(node))
+        let typeName = returnType.trimmedDescription
+        let stated = statedIsolation(modifiers: node.modifiers, attributes: node.attributes)
+        validateStatedIsolation(
+            stated,
+            modifiers: node.modifiers,
+            attributes: node.attributes,
+            location: location
+        )
+
+        importedInjectables.append(
+            ImportedInjectableRecord(
+                typeKey: returnType.normalizedTypeKey,
+                typeName: typeName,
+                parameters: node.signature.parameterClause.parameters
+                    .parameterRecords(locatedBy: { self.location(for: $0) }),
+                effects: ProviderEffects(from: node.signature.effectSpecifiers?.trimmedDescription),
+                isolation: stated.resolved(default: ambientIsolation),
+                // A written body named the member to resolve through; without
+                // one it is the key's own primary. The macro has already refused
+                // a body that is not a single Zerk expression.
+                callee: node.importedResolutionCallee ?? "Zerk<\(typeName)>.inject",
+                resolvesAsProperty: node.importedResolutionIsProperty,
+                location: location
+            )
+        )
+        return .skipChildren
     }
 
     /// Protocols are recorded for their access level alone. A protocol is an

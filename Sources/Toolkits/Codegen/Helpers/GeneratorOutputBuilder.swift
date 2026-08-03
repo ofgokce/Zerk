@@ -925,7 +925,7 @@ struct GeneratorOutputBuilder {
                 var argumentExpressions: [String] = []
                 var overloadParameterParts: [String] = []
                 var requests: [BubbleResolver.Request] = []
-                var dependencyCalls: [String: (prefix: String, key: String, label: String?)] = [:]
+                var dependencyCalls: [String: (prefix: String, dependency: ProviderResolution, typeName: String, label: String?)] = [:]
                 var effects = record.effects
                 var failed = false
 
@@ -981,7 +981,7 @@ struct GeneratorOutputBuilder {
                             sourceName: core.name,
                             requirements: plan.parameters
                         ))
-                        dependencyCalls[core.name] = (callEffects.callPrefix, core.typeName, core.label)
+                        dependencyCalls[core.name] = (callEffects.callPrefix, unique, core.typeName, core.label)
                         argumentExpressions.append("\u{0}\(core.name)")
                         continue
                     }
@@ -1028,9 +1028,11 @@ struct GeneratorOutputBuilder {
                     let source = String(expression.dropFirst())
                     let call = dependencyCalls[source]!
                     let arguments = bubble.arguments[source] ?? []
-                    let resolved = arguments.isEmpty
-                        ? "\(call.prefix)Zerk<\(call.key)>.inject()"
-                        : "\(call.prefix)Zerk<\(call.key)>.inject(\(arguments.joined(separator: ", ")))"
+                    let expression = call.dependency.provider.resolutionExpression(arguments: arguments)
+                        ?? (arguments.isEmpty
+                            ? "Zerk<\(call.typeName)>.inject()"
+                            : "Zerk<\(call.typeName)>.inject(\(arguments.joined(separator: ", ")))")
+                    let resolved = "\(call.prefix)\(expression)"
                     return overloadArgument(label: call.label, expression: resolved)
                 }
 
@@ -1259,6 +1261,11 @@ struct GeneratorOutputBuilder {
             case .staticFunction(let name):
                 return "\(resolution.typeName).\(name)"
             }
+        case .imported(let record):
+            // Never reached while imports stay out of `resolutions`: they build
+            // nothing here, so no member is emitted for them. Answering with the
+            // resolving expression keeps this total rather than fatal.
+            return record.callee
         case .implicit:
             return resolution.typeName
         }
@@ -1522,7 +1529,7 @@ struct GeneratorOutputBuilder {
         // Gathered first, resolved together: sharing and disambiguation are
         // decisions about the whole set, not about one dependency at a time.
         var requests: [BubbleResolver.Request] = []
-        var dependencyCalls: [String: (prefix: String, key: String)] = [:]
+        var dependencyCalls: [String: (prefix: String, dependency: ProviderResolution, typeName: String)] = [:]
 
         // Explicit mode applies here too. `inject()` flattens the whole subtree,
         // so without this an unmarked parameter would still be resolved behind
@@ -1577,7 +1584,9 @@ struct GeneratorOutputBuilder {
                     sourceName: parameter.name,
                     requirements: dependencyPlan.parameters
                 ))
-                dependencyCalls[parameter.name] = (callEffects.callPrefix, parameter.typeName)
+                // An import resolves through the expression it named; everything else
+                // through this module's own inject().
+                dependencyCalls[parameter.name] = (callEffects.callPrefix, dependency, parameter.typeName)
                 argumentExpressions.append("\u{0}\(parameter.name)")
                 continue
             }
@@ -1599,9 +1608,11 @@ struct GeneratorOutputBuilder {
                 let source = String(expression.dropFirst())
                 let call = dependencyCalls[source]!
                 let arguments = bubble.arguments[source] ?? []
-                return arguments.isEmpty
-                    ? "\(call.prefix)Zerk<\(call.key)>.inject()"
-                    : "\(call.prefix)Zerk<\(call.key)>.inject(\(arguments.joined(separator: ", ")))"
+                let resolved = call.dependency.provider.resolutionExpression(arguments: arguments)
+                    ?? (arguments.isEmpty
+                        ? "Zerk<\(call.typeName)>.inject()"
+                        : "Zerk<\(call.typeName)>.inject(\(arguments.joined(separator: ", ")))")
+                return "\(call.prefix)\(resolved)"
             },
             effects: effects,
             collisions: bubble.collisions
