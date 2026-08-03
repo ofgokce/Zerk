@@ -47,6 +47,10 @@ final class SourceCollector: SyntaxVisitor {
     /// `@ImportedInjectable` declarations: keys from other modules this one may
     /// resolve against.
     private(set) var importedInjectables: [ImportedInjectableRecord] = []
+    /// `@ImportedInjectableValue` declarations: values from other modules this
+    /// one may resolve parameters from. Kept apart from `importedInjectables`
+    /// because they are matched by name as well as key.
+    private(set) var importedValues: [ImportedInjectableValueRecord] = []
 
     private let settings: ZerkSettings
     private var sourceFile: String = ""
@@ -129,13 +133,19 @@ final class SourceCollector: SyntaxVisitor {
         collectType(node, isolation: isolation)
         collectMarkedMembers(node, typeKind: typeKind, typeIsGeneric: isGeneric)
         reportInertAutoInjected(node)
+
+        let sweep = node.attributes.firstAttribute(named: "InjectableValues")
+        if sweep?.publicArgument == .nonLiteral {
+            diagnostics.append(
+                nonLiteralPublicDiagnostic(named: "@InjectableValues", at: location(for: Syntax(node))))
+        }
+
         typeStack.append(
             TypeContext(
                 name: node.declaredName,
                 isolation: isolation,
-                sweptValueMethod: node.attributes
-                    .firstAttribute(named: "InjectableValues")
-                    .map { statedValueMethod($0) ?? settings.valueInjectionMethod }
+                sweptValueMethod: sweep.map { statedValueMethod($0) ?? settings.valueInjectionMethod },
+                sweptValuesArePublic: sweep?.publicArgument.isTrue ?? false
             )
         )
     }
@@ -232,6 +242,11 @@ final class SourceCollector: SyntaxVisitor {
             let parameters: FunctionParameterListSyntax
             let isProvider: Bool
             let subject: String
+            /// A parametric `@InjectableValue` resolves its own parameters
+            /// whatever encloses it: the type is a namespace, not the thing
+            /// being built, so it need not be `@Injectable` for the mark to
+            /// mean something.
+            var resolvesItsOwnParameters = false
 
             if let initializer = member.decl.as(InitializerDeclSyntax.self) {
                 parameters = initializer.signature.parameterClause.parameters
@@ -244,6 +259,8 @@ final class SourceCollector: SyntaxVisitor {
                 parameters = function.signature.parameterClause.parameters
                 isProvider = function.attributes.hasAttribute(named: "InjectableProviding")
                     && function.modifiers.isStatic
+                resolvesItsOwnParameters = function.attributes.hasAttribute(named: "InjectableValue")
+                    && function.signature.returnClause != nil
                 subject = "'\(function.name.text)'"
             } else {
                 continue
@@ -263,6 +280,9 @@ final class SourceCollector: SyntaxVisitor {
             guard let marked = parameters.first(where: {
                 $0.attributes.hasAttribute(named: "autoinjected")
             }) else {
+                continue
+            }
+            guard !resolvesItsOwnParameters else {
                 continue
             }
             guard !isProvider || !isInjectable else {
@@ -368,6 +388,8 @@ final class SourceCollector: SyntaxVisitor {
     /// expression to resolve through. Visiting every function rather than only a
     /// type's members is deliberate — these are as likely to be global.
     override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {
+        collectParametricValue(node)
+
         guard node.attributes.hasAttribute(named: "ImportedInjectable"),
               let returnType = node.signature.returnClause?.type else {
             return .skipChildren
@@ -409,10 +431,11 @@ final class SourceCollector: SyntaxVisitor {
         return .skipChildren
     }
 
-    /// A property may be an `@Injectable` value, an `@Injected` use, or a
+    /// A property may be an `@InjectableValue`, an `@Injected` use, or a
     /// misuse of the `@injected` parameter marker. Children are skipped —
     /// nothing nested inside a property declaration can be any of those.
     override func visit(_ node: VariableDeclSyntax) -> SyntaxVisitorContinueKind {
+        collectImportedValue(node)
         collectValue(node)
         collectInjectedUse(node)
         if node.attributes.hasAttribute(named: "injected") {
@@ -434,17 +457,16 @@ final class SourceCollector: SyntaxVisitor {
 
     /// Records one type's injectable keys and the providers that satisfy them.
     ///
-    /// A type can be injectable under several keys at once, and `@Exported` and
-    /// `@Injectable(primary:)` apply per key rather than per type, so all three
-    /// are gathered as dictionaries keyed by type key.
+    /// A type can be injectable under several keys at once, and both
+    /// `@Injectable(primary:)` and `@Injectable(public:)` apply per key rather
+    /// than per type, so all three are gathered as dictionaries keyed by type
+    /// key.
     private func collectType(_ node: some DeclGroupSyntax, isolation typeIsolation: ProviderIsolation) {
         moduleAccessLevels[node.declaredName] = node.modifiers.isPublic
 
         let injectableAttributes = node.attributes.attributes(named: "Injectable")
         guard !injectableAttributes.isEmpty else { return }
 
-
-        let exportedAttributes = node.attributes.attributes(named: "Exported")
         let isSingleton = node.attributes.hasAttribute(named: "Singleton")
         let location = self.location(for: Syntax(node))
 
@@ -462,6 +484,9 @@ final class SourceCollector: SyntaxVisitor {
                     message: "@Injectable(primary:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression.",
                     location: location
                 ))
+            }
+            if attribute.publicArgument == .nonLiteral {
+                diagnostics.append(nonLiteralPublicDiagnostic(named: "@Injectable", at: location))
             }
         }
 
@@ -490,10 +515,13 @@ final class SourceCollector: SyntaxVisitor {
             }
         }
 
+        // `public:` rides on the attribute that names the key, exactly as
+        // `primary:` does, so `@Injectable<A>(public: true) @Injectable<B>`
+        // exports A and leaves B internal.
         var exportedKeys: [String: AttributeLocation] = [:]
-        for attribute in exportedAttributes {
+        for attribute in injectableAttributes where attribute.publicArgument.isTrue {
             let genericKeys = attribute.genericArgumentKeys
-            let keys = genericKeys.isEmpty ? Array(injectableKeys.keys) : genericKeys
+            let keys = genericKeys.isEmpty ? [node.declaredName] : genericKeys
             for key in keys {
                 exportedKeys[key] = location
             }
@@ -502,7 +530,7 @@ final class SourceCollector: SyntaxVisitor {
         // `@Injectable<A>(primary: true) @Injectable<B>` claims A only: primacy
         // rides on the attribute that names the key, not on the declaration.
         var primaryKeys: [String: AttributeLocation] = [:]
-        for attribute in injectableAttributes where attribute.primaryArgument.isPrimary {
+        for attribute in injectableAttributes where attribute.primaryArgument.isTrue {
             let genericKeys = attribute.genericArgumentKeys
             let keys = genericKeys.isEmpty ? [node.declaredName] : genericKeys
             for key in keys {
@@ -559,7 +587,7 @@ final class SourceCollector: SyntaxVisitor {
                             location: initializerLocation,
                             returnTypeName: nil,
                             isolation: initializerIsolation,
-                            isPrimary: attribute.primaryArgument.isPrimary
+                            isPrimary: attribute.primaryArgument.isTrue
                         )
                     )
                 }
@@ -606,7 +634,7 @@ final class SourceCollector: SyntaxVisitor {
                     location: functionLocation,
                     returnTypeName: returnType.isEmpty ? nil : returnType,
                     isolation: functionStated.resolved(default: typeIsolation),
-                    isPrimary: attribute.primaryArgument.isPrimary
+                    isPrimary: attribute.primaryArgument.isTrue
                 )
 
                 let genericKeys = attribute.genericArgumentKeys
@@ -649,6 +677,124 @@ final class SourceCollector: SyntaxVisitor {
         )
     }
 
+    /// `@InjectableValue static func greeting(name: String) -> String` — a value
+    /// computed from parameters.
+    ///
+    /// The return type is the key and the declaration's name is what a parameter
+    /// must be called to match it, exactly as for the property form. What is
+    /// different is the parameters: they behave as an `@InjectableProviding`
+    /// provider's do, so they are collected the same way, markers included, and
+    /// classified by the same machinery.
+    private func collectParametricValue(_ node: FunctionDeclSyntax) {
+        let attributes = node.attributes.attributes(named: "InjectableValue")
+        guard let returnType = node.signature.returnClause?.type else {
+            return
+        }
+        // Annotated, or swept up by an enclosing `@InjectableValues`. A swept
+        // member that cannot be injected is skipped rather than reported: the
+        // marker is a statement about the type, not a promise about every
+        // member — the same rule the property sweep follows.
+        if attributes.isEmpty {
+            guard typeStack.last?.sweptValueMethod != nil,
+                  !node.attributes.hasAttribute(named: "NonInjectable"),
+                  node.modifiers.isStatic,
+                  node.modifiers.accessRank > .fileprivate,
+                  node.genericParameterClause == nil,
+                  node.body != nil,
+                  returnType.normalizedTypeKey != "Void" else {
+                return
+            }
+        }
+
+        let location = self.location(for: Syntax(node))
+
+        for attribute in attributes where attribute.publicArgument == .nonLiteral {
+            diagnostics.append(nonLiteralPublicDiagnostic(named: "@InjectableValue", at: location))
+        }
+
+        let stated = statedIsolation(modifiers: node.modifiers, attributes: node.attributes)
+        validateStatedIsolation(
+            stated,
+            modifiers: node.modifiers,
+            attributes: node.attributes,
+            location: location
+        )
+
+        let genericKeys = attributes.flatMap(\.genericArgumentKeys)
+        let keys = genericKeys.isEmpty ? [returnType.normalizedTypeKey] : genericKeys
+        let displayKeys = genericKeys.isEmpty
+            ? [returnType.displayTypeKey]
+            : attributes.flatMap(\.genericArgumentDisplayKeys)
+
+        let isExported = attributes
+            .map(\.publicArgument)
+            .first { $0 != .absent }
+            .map(\.isTrue)
+            ?? (typeStack.last?.sweptValuesArePublic ?? false)
+
+        for (offset, key) in keys.enumerated() {
+            recordKeyDisplayName(displayKeys[offset], for: key)
+            values.append(
+                InjectableValueRecord(
+                    name: node.name.text,
+                    typeKey: key,
+                    typeName: returnType.trimmedDescription,
+                    keyDisplayName: displayKeys[offset],
+                    // The generated member calls the declaration rather than
+                    // reproducing its body, so there is nothing to copy.
+                    bodyText: nil,
+                    location: location,
+                    isolation: stated.resolved(default: ambientIsolation),
+                    injectionMethod: .referenced,
+                    enclosingTypePath: enclosingTypePath,
+                    parameters: node.signature.parameterClause.parameters
+                        .parameterRecords(locatedBy: { self.location(for: $0) }),
+                    effects: ProviderEffects(from: node.signature.effectSpecifiers?.trimmedDescription),
+                    isExported: isExported
+                )
+            )
+        }
+    }
+
+    /// `@ImportedInjectableValue var apiKey: String { Zerk<String>.apiKey }` — a
+    /// value from another module, matched here by key *and* name.
+    ///
+    /// Nothing calls the declaration, so where it sits and how visible it is do
+    /// not matter: only the annotation (the key), the declaration's own name
+    /// (what parameters must be called), and the expression to read through.
+    /// The macro has already refused every shape this cannot read, so anything
+    /// incomplete is simply skipped rather than reported twice.
+    private func collectImportedValue(_ node: VariableDeclSyntax) {
+        guard node.attributes.hasAttribute(named: "ImportedInjectableValue"),
+              let binding = node.bindings.first,
+              node.bindings.count == 1,
+              let identifier = binding.pattern.as(IdentifierPatternSyntax.self),
+              let annotation = binding.typeAnnotation,
+              let expression = binding.importedValueExpression else {
+            return
+        }
+
+        let location = self.location(for: Syntax(node))
+        let stated = statedIsolation(modifiers: node.modifiers, attributes: node.attributes)
+        validateStatedIsolation(
+            stated,
+            modifiers: node.modifiers,
+            attributes: node.attributes,
+            location: location
+        )
+
+        importedValues.append(
+            ImportedInjectableValueRecord(
+                typeKey: annotation.type.normalizedTypeKey,
+                typeName: annotation.type.trimmedDescription,
+                name: identifier.identifier.text,
+                expression: expression,
+                isolation: stated.resolved(default: ambientIsolation),
+                location: location
+            )
+        )
+    }
+
     /// Records an `@Injectable` *value*: a static property registered so that
     /// parameters can be satisfied by a constant rather than by constructing a
     /// type.
@@ -666,6 +812,18 @@ final class SourceCollector: SyntaxVisitor {
         CodegenDiagnostic(
             severity: .error,
             message: "@InjectableProviding(primary:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression.",
+            location: location
+        )
+    }
+
+    /// `public:` is read from source rather than evaluated, for the same reason
+    /// `primary:` is — so an unreadable expression has to be reported instead of
+    /// quietly resolving to "not exported".
+    private func nonLiteralPublicDiagnostic(named attributeName: String,
+                                            at location: AttributeLocation) -> CodegenDiagnostic {
+        CodegenDiagnostic(
+            severity: .error,
+            message: "\(attributeName)(public:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression.",
             location: location
         )
     }
@@ -703,12 +861,13 @@ final class SourceCollector: SyntaxVisitor {
     }
 
     private func collectValue(_ node: VariableDeclSyntax) {
-        let injectableAttributes = node.attributes.attributes(named: "Injectable")
+        let injectableAttributes = node.attributes.attributes(named: "InjectableValue")
         let sweptMethod = typeStack.last?.sweptValueMethod
+        let sweptIsExported = typeStack.last?.sweptValuesArePublic ?? false
 
         guard !injectableAttributes.isEmpty else {
             if let sweptMethod {
-                collectSweptValue(node, method: sweptMethod)
+                collectSweptValue(node, method: sweptMethod, isExported: sweptIsExported)
             }
             return
         }
@@ -718,7 +877,7 @@ final class SourceCollector: SyntaxVisitor {
               let annotation = binding.typeAnnotation else {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "@Injectable values must declare a single named binding with an explicit type.",
+                message: "@InjectableValue must declare a single named binding with an explicit type.",
                 location: location(for: Syntax(node))
             ))
             return
@@ -732,7 +891,8 @@ final class SourceCollector: SyntaxVisitor {
         let displayKeys = genericKeys.isEmpty
             ? [annotation.type.displayTypeKey]
             : injectableAttributes.flatMap(\.genericArgumentDisplayKeys)
-        let bodyText = binding.initializer?.value.trimmedDescription ?? accessorBodyText(from: binding.accessorBlock)
+        let bodyText = binding.valueBodyText
+        let effects = ProviderEffects(from: binding.getterEffectSpecifiers)
         let valueLocation = location(for: Syntax(node))
 
         for attribute in injectableAttributes where attribute.primaryArgument != .absent {
@@ -743,9 +903,22 @@ final class SourceCollector: SyntaxVisitor {
             ))
         }
 
+        for attribute in injectableAttributes where attribute.publicArgument == .nonLiteral {
+            diagnostics.append(nonLiteralPublicDiagnostic(named: "@InjectableValue", at: valueLocation))
+        }
+
         let method = injectableAttributes.compactMap(statedValueMethod).first
             ?? sweptMethod
             ?? settings.valueInjectionMethod
+
+        // Written on the declaration, `public:` answers for it — including
+        // `public: false` against an enclosing `@InjectableValues(public: true)`.
+        // Saying nothing is what defers to the sweep.
+        let isExported = injectableAttributes
+            .map(\.publicArgument)
+            .first { $0 != .absent }
+            .map(\.isTrue)
+            ?? sweptIsExported
 
         let stated = statedIsolation(modifiers: node.modifiers, attributes: node.attributes)
         validateStatedIsolation(
@@ -773,7 +946,9 @@ final class SourceCollector: SyntaxVisitor {
                     isolation: isolation,
                     injectionMethod: method,
                     enclosingTypePath: enclosingTypePath,
-                    isSettable: isSettable(node, binding: binding)
+                    effects: effects,
+                    isSettable: isSettable(node, binding: binding),
+                    isExported: isExported
                 )
             )
         }
@@ -831,7 +1006,9 @@ final class SourceCollector: SyntaxVisitor {
     /// member qualifies. The one exception is a missing type annotation, which
     /// almost always means the author expected the member to be injected: the
     /// type is the injection key and syntax alone cannot infer it.
-    private func collectSweptValue(_ node: VariableDeclSyntax, method: ValueInjectionMethod) {
+    private func collectSweptValue(_ node: VariableDeclSyntax,
+                                   method: ValueInjectionMethod,
+                                   isExported: Bool) {
         guard !node.attributes.hasAttribute(named: "NonInjectable") else {
             return
         }
@@ -875,13 +1052,14 @@ final class SourceCollector: SyntaxVisitor {
                 typeKey: annotation.type.normalizedTypeKey,
                 typeName: annotation.type.trimmedDescription,
                 keyDisplayName: annotation.type.displayTypeKey,
-                bodyText: binding.initializer?.value.trimmedDescription
-                    ?? accessorBodyText(from: binding.accessorBlock),
+                bodyText: binding.valueBodyText,
                 location: valueLocation,
                 isolation: stated.resolved(default: ambientIsolation),
                 injectionMethod: method,
                 enclosingTypePath: enclosingTypePath,
-                isSettable: isSettable(node, binding: binding)
+                effects: ProviderEffects(from: binding.getterEffectSpecifiers),
+                isSettable: isSettable(node, binding: binding),
+                isExported: isExported
             )
         )
     }
@@ -1123,19 +1301,4 @@ final class SourceCollector: SyntaxVisitor {
 
     /// The source inside a computed property's braces, with the braces removed.
     ///
-    /// Re-emitted verbatim into the generated member, which is what makes an
-    /// `@Injectable` value recompute on each resolution rather than being
-    /// captured once.
-    private func accessorBodyText(from accessorBlock: AccessorBlockSyntax?) -> String? {
-        guard let accessorBlock else {
-            return nil
-        }
-
-        let text = accessorBlock.trimmedDescription
-        guard text.first == "{", text.last == "}" else {
-            return text
-        }
-
-        return String(text.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 }

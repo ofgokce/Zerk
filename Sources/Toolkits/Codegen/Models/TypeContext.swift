@@ -22,4 +22,8 @@ struct TypeContext {
     /// members inherit. Deliberately not inherited by nested types — sweeping
     /// stops at the marked declaration's own members.
     var sweptValueMethod: ValueInjectionMethod? = nil
+    /// Set when that `@InjectableValues` carries `public: true`, so every member
+    /// it sweeps up is exported. A member with its own `@Injectable(public:)`
+    /// states its own answer and overrides this.
+    var sweptValuesArePublic: Bool = false
 }

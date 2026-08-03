@@ -148,7 +148,7 @@ struct ZerkAliasTests {
         @ZerkAlias
         typealias Names = [String]
 
-        @Injectable
+        @InjectableValue
         var names: Names { ["a"] }
         """
 
@@ -299,6 +299,99 @@ struct ZerkAliasTests {
         #expect(KeyAliases.empty.isEmpty)
         #expect(KeyAliases.empty.representative(for: "Storing") == "Storing")
     }
+
+    // MARK: - The rewriting pass carries every field
+
+    @Test("the rewriting pass carries every TypeRecord field it does not rewrite")
+    func rewritingPassPreservesEveryField() {
+        // Regression guard for the shape, not for one field. `AliasRewriter`
+        // rebuilt each `ParameterRecord` field by field once and dropped
+        // `isAutoInjected`; `rewrite(types:)` had the same shape, and the
+        // memberwise initializer only *requires* the fields without defaults —
+        // so a future `var x: T = default` on `TypeRecord` could be forgotten
+        // and still compile.
+        //
+        // The aliases below are non-empty, so the pass runs rather than
+        // short-circuiting, but relate keys this record never mentions. Nothing
+        // is therefore eligible for rewriting and the output must equal the
+        // input, field for field. Reflection rather than an explicit list: a
+        // hand-written list of fields is the very thing that goes stale.
+        let aliases = KeyAliases(declarations: [
+            AliasDeclaration(keys: ["Persisting", "Storing"], aliasKey: "Persisting", location: aliasLocation())
+        ])
+
+        let original = populatedTypeRecord()
+        let rewritten = AliasRewriter(aliases: aliases).rewrite(types: [original])
+
+        try! #require(rewritten.count == 1)
+
+        let before = fieldDescriptions(of: original)
+        let after = fieldDescriptions(of: rewritten[0])
+
+        #expect(before.keys.sorted() == after.keys.sorted())
+        for (field, value) in before {
+            #expect(after[field] == value, "'\(field)' did not survive the rewriting pass")
+        }
+    }
+}
+
+/// A `TypeRecord` with every field set to something distinguishable, keyed on
+/// names no alias group in these tests touches.
+///
+/// Single-entry dictionaries and single-element arrays keep `String(describing:)`
+/// deterministic — a multi-entry dictionary's description order is not stable
+/// across runs, which would make the comparison flaky rather than strict.
+private func populatedTypeRecord() -> TypeRecord {
+    let location = aliasLocation()
+    let parameter = ParameterRecord(
+        label: "with",
+        name: "seed",
+        typeKey: "Int",
+        typeName: "Int",
+        isAutoInjected: true,
+        feedsDependencies: true,
+        location: location
+    )
+    let provider = InjectingProvider(
+        kind: .staticFunction(name: "live"),
+        parameters: [parameter],
+        effects: .none,
+        location: location,
+        returnTypeName: "Unrelated",
+        isolation: .globalActor("MainActor"),
+        isPrimary: true
+    )
+
+    return TypeRecord(
+        name: "Unrelated",
+        injectableKeys: ["Unrelated": location],
+        exportedKeys: ["Unrelated": location],
+        primaryKeys: ["Unrelated": location],
+        defaultProviders: [provider],
+        typedProviders: ["Unrelated": [provider]],
+        initializers: [InitializerRecord(
+            parameters: [parameter],
+            effects: .none,
+            location: location,
+            isolation: .globalActor("MainActor")
+        )],
+        isSingleton: true,
+        isolation: .globalActor("MainActor")
+    )
+}
+
+/// Every stored property of a record, by label, rendered as text.
+///
+/// Comparing descriptions avoids conforming the whole model graph to
+/// `Equatable` for one test, and a field added later is picked up with no change
+/// here — which is the point.
+private func fieldDescriptions(of record: TypeRecord) -> [String: String] {
+    var fields: [String: String] = [:]
+    for child in Mirror(reflecting: record).children {
+        guard let label = child.label else { continue }
+        fields[label] = String(describing: child.value)
+    }
+    return fields
 }
 
 private func aliasLocation() -> AttributeLocation {

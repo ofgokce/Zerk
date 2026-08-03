@@ -23,6 +23,9 @@ public struct InjectableValuesMacro: PeerMacro {
             )
             return []
         }
+        if node.publicArgument == .nonLiteral {
+            context.zerkError(node, InjectableMacro.nonLiteralPublicMessage(for: "@InjectableValues"))
+        }
         return []
     }
 }
@@ -35,10 +38,10 @@ public struct NonInjectableMacro: PeerMacro {
                                  providingPeersOf declaration: some DeclSyntaxProtocol,
                                  in context: some MacroExpansionContext) throws -> [DeclSyntax] {
         if declaration.as(VariableDeclSyntax.self)?
-            .attributes.hasAttribute(named: ZerkMacroNames.injectableAttributeName) == true {
+            .attributes.hasAttribute(named: ZerkMacroNames.injectableValueAttributeName) == true {
             context.zerkError(
                 node,
-                "@NonInjectable contradicts @Injectable on the same declaration."
+                "@NonInjectable contradicts @InjectableValue on the same declaration."
             )
         }
         return []

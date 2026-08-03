@@ -1,6 +1,6 @@
 import Zerk
 
-@Injectable
+@InjectableValue
 var baseURL: String {
     "https://api.example.com"
 }
@@ -23,7 +23,7 @@ final class ApiService: ApiServicing {
 /// Registered as `[String]`, depended on as `Array<String>`. Before type keys
 /// were canonicalized these were two different dependencies, and the parameter
 /// bubbled up to the caller instead of resolving.
-@Injectable
+@InjectableValue
 var tags: [String] { ["alpha", "beta"] }
 
 protocol Tagging {
@@ -227,8 +227,94 @@ final class NullLoader: Loading {
 /// the real macros: the non-generic `primary:` forms, and the value-only
 /// `ValueInjectionMethod` form.
 enum RetryPolicy {
-    @Injectable(.referenced)
+    @InjectableValue(.referenced)
     nonisolated(unsafe) static var retryLimit: Int = 3
+}
+
+// MARK: - Effectful and parametric values
+
+/// An effectful value against the real macros. `@Injected` and key paths cannot
+/// reach it — the same limits an effectful provider carries — so it is resolved
+/// through a provider parameter.
+@InjectableValue
+var sessionToken: String {
+    get async throws {
+        try await Task.sleep(nanoseconds: 1_000)
+        return "session-token"
+    }
+}
+
+@Injectable
+final class TokenHolder {
+    let token: String
+
+    @InjectableProviding
+    init(sessionToken: String) {
+        self.token = sessionToken
+    }
+}
+
+/// A parametric value: `logger` resolves from the graph, `label` bubbles to the
+/// consumer's `inject(label:)`.
+enum Formatting {
+    @InjectableValue
+    static func caption(logger: Logger, label: String) -> String {
+        "\(label)#\(logger.serial)"
+    }
+}
+
+@Injectable
+final class CaptionHolder {
+    let caption: String
+
+    @InjectableProviding
+    init(caption: String) {
+        self.caption = caption
+    }
+}
+
+/// Exercises `@ImportedInjectableValue` against the real macro. Named so that
+/// nothing resolves through it — the point here is that the attribute parses and
+/// expands, and that the getter type-checks against a member that exists. Its
+/// cross-module behaviour is covered by `ImportedInjectableValueTests`.
+private enum ZerkImports {
+    @ImportedInjectableValue
+    static var importedRetryLimit: Int { Zerk<Int>.retryLimit }
+}
+
+// MARK: - public:
+
+public protocol Exporting: AnyObject {
+    var name: String { get }
+}
+
+/// Every `public:` overload against the real macros — `public` has to survive
+/// as an argument label through parsing, macro overload resolution, and the
+/// plugin's own reading of the attribute.
+@Injectable<Exporting>(primary: true, public: true)
+public final class ExportedService: Exporting {
+    public let name = "exported"
+
+    @InjectableProviding
+    public init() {}
+}
+
+@Injectable(public: true)
+public final class BareExportedService {
+    @InjectableProviding
+    public init() {}
+}
+
+@InjectableValue(.copied, public: true)
+public let exportedBanner: String = "banner"
+
+@InjectableValues(public: true)
+public enum ExportedConstants {
+    public static let exportedLimit: Int = 7
+
+    /// States its own answer, so the sweep does not apply.
+    @InjectableValue(public: false)
+    public static let unexportedTag: String = "tag"
 }
 
 @Injectable(primary: true)

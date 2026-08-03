@@ -311,7 +311,7 @@ struct ParameterMarkerTests {
     @Test("@noninjected keeps a resolvable parameter caller-supplied")
     func nonInjectedOptsOut() {
         let source = """
-        @Injectable
+        @InjectableValue
         var retries: Int { 3 }
 
         @Injectable
@@ -331,7 +331,7 @@ struct ParameterMarkerTests {
     @Test("without the marker the same parameter resolves")
     func withoutNonInjectedItResolves() {
         let source = """
-        @Injectable
+        @InjectableValue
         var retries: Int { 3 }
 
         @Injectable
@@ -352,7 +352,7 @@ struct ParameterMarkerTests {
         // Explicit mode already excludes everything unmarked, so this says
         // nothing new — but stating every parameter's intent is a fair style.
         let source = """
-        @Injectable
+        @InjectableValue
         var retries: Int { 3 }
 
         \(Self.graph)
@@ -372,7 +372,7 @@ struct ParameterMarkerTests {
     @Test("marking one parameter both ways is an error")
     func contradictoryMarkersAreRejected() {
         let source = """
-        @Injectable
+        @InjectableValue
         var retries: Int { 3 }
 
         @Injectable

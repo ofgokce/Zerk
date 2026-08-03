@@ -293,7 +293,7 @@ struct ProviderResolverTests {
             init() {}
         }
 
-        @Injectable
+        @InjectableValue
         var baseURL: String { "https://example.com" }
         """
 
@@ -367,7 +367,7 @@ struct ProviderResolverTests {
         let source = """
         final class SettingsStore {
             @Published
-            @Injectable<String>
+            @InjectableValue<String>
             var apiKey: String = "secret"
         }
         """
@@ -379,7 +379,10 @@ struct ProviderResolverTests {
         #expect(collector.values.count == 1)
         #expect(collector.values[0].name == "apiKey")
         #expect(collector.values[0].typeKey == "String")
-        #expect(collector.values[0].bodyText == #""secret""#)
+        // Statement form, `return` included: a body may have several statements,
+        // and the generated getter opens with the interjection guard so Swift's
+        // implicit return no longer applies.
+        #expect(collector.values[0].bodyText == #"return "secret""#)
     }
 
     @Test("injectable struct with bindable wrapped property keeps synthesized memberwise parameter")
@@ -643,7 +646,7 @@ struct GeneratorOutputBuilderTests {
         #expect(result.diagnostics.contains { $0.message.contains("Circular dependency detected") })
     }
 
-    @Test("@Exported on a non-public key clamps access and warns")
+    @Test("@Injectable(public:) on a non-public key clamps access and warns")
     func sharedOnInternalKeyClampsAccess() {
         let service = makeResolution(
             typeName: "LiveService",
@@ -659,7 +662,7 @@ struct GeneratorOutputBuilderTests {
             moduleAccessLevels: ["Service": false]
         )
 
-        #expect(result.diagnostics.contains { $0.severity == .warning && $0.message.contains("@Exported has no effect") })
+        #expect(result.diagnostics.contains { $0.severity == .warning && $0.message.contains("@Injectable(public: true) has no effect") })
         #expect(result.output.contains("public ") == false)
         #expect(result.output.contains("nonisolated static func inject() -> Service"))
     }
@@ -931,7 +934,7 @@ struct GeneratorOutputBuilderTests {
     @Test("shared injectables publicize their named members as well as inject()")
     func sharedInjectablesPublicizeNamedMembers() {
         // A consuming module reaching one specific member — `@Injected(\\.live)`
-        // — needs to see it, so @Exported covers every member for the key rather
+        // — needs to see it, so @Injectable(public: true) covers every member for the key rather
         // than inject() alone.
         let sharedService = makeResolution(
             typeName: "LiveService",
@@ -962,7 +965,7 @@ struct GeneratorOutputBuilderTests {
         #expect(!result.output.contains("public static"))
     }
 
-    @Test("@Exported on a non-public key publicizes nothing and warns")
+    @Test("@Injectable(public:) on a non-public key publicizes nothing and warns")
     func sharedOnNonPublicKeyWarns() {
         let sharedService = makeResolution(
             typeName: "LiveService",
@@ -981,7 +984,7 @@ struct GeneratorOutputBuilderTests {
 
         #expect(!result.output.contains("public static"))
         #expect(result.diagnostics.contains {
-            $0.severity == .warning && $0.message.contains("@Exported has no effect")
+            $0.severity == .warning && $0.message.contains("@Injectable(public: true) has no effect")
         })
     }
 

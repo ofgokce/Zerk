@@ -19,20 +19,22 @@ struct AliasRewriter {
 
     let aliases: KeyAliases
 
+    /// Mutates a copy rather than rebuilding the record, for the reason spelled
+    /// out on ``rewrite(parameter:)``: this pass is about keys and nothing else,
+    /// and re-listing the fields is what silently drops whatever gets added to
+    /// `TypeRecord` next. Pinned by
+    /// `ZerkAliasTests."the rewriting pass carries every TypeRecord field it does not rewrite"`.
     func rewrite(types: [TypeRecord]) -> [TypeRecord] {
         guard !aliases.isEmpty else { return types }
         return types.map { type in
-            TypeRecord(
-                name: type.name,
-                injectableKeys: rewrite(keyed: type.injectableKeys),
-                exportedKeys: rewrite(keyed: type.exportedKeys),
-                primaryKeys: rewrite(keyed: type.primaryKeys),
-                defaultProviders: type.defaultProviders.map(rewrite(provider:)),
-                typedProviders: rewriteProviders(type.typedProviders),
-                initializers: type.initializers.map(rewrite(initializer:)),
-                isSingleton: type.isSingleton,
-                isolation: type.isolation
-            )
+            var rewritten = type
+            rewritten.injectableKeys = rewrite(keyed: type.injectableKeys)
+            rewritten.exportedKeys = rewrite(keyed: type.exportedKeys)
+            rewritten.primaryKeys = rewrite(keyed: type.primaryKeys)
+            rewritten.defaultProviders = type.defaultProviders.map(rewrite(provider:))
+            rewritten.typedProviders = rewriteProviders(type.typedProviders)
+            rewritten.initializers = type.initializers.map(rewrite(initializer:))
+            return rewritten
         }
     }
 
@@ -42,6 +44,10 @@ struct AliasRewriter {
             let representative = aliases.representative(for: value.typeKey)
             var rewritten = value
             rewritten.typeKey = representative
+            // A parametric value's parameters are a provider's, and fold like
+            // one's — without this an aliased dependency of a parametric value
+            // would bubble to the caller instead of resolving.
+            rewritten.parameters = value.parameters.map(rewrite(parameter:))
 
             // The emitted spelling has to follow the key. A value declared
             // `var names: Names` keys on `Array<String>` once the alias is
@@ -53,6 +59,18 @@ struct AliasRewriter {
                     ? "any \(representative)"
                     : representative
             }
+            return rewritten
+        }
+    }
+
+    /// Imported values fold onto representatives like local ones, but keep their
+    /// `keyDisplayName` as written: it names a member in *another* module, whose
+    /// spelling this module's alias groups have no say over.
+    func rewrite(importedValues: [ImportedInjectableValueRecord]) -> [ImportedInjectableValueRecord] {
+        guard !aliases.isEmpty else { return importedValues }
+        return importedValues.map { value in
+            var rewritten = value
+            rewritten.typeKey = aliases.representative(for: value.typeKey)
             return rewritten
         }
     }

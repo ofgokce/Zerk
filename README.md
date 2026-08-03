@@ -28,7 +28,7 @@ For an app using Zerk 1.x, migrate one module at a time:
 2. Delete central registration code (`Zerk.store`, `AutoStoring`, `transient`, `scoped`, and `singleton` chains). The graph now comes from declarations in the source files themselves.
 3. Mark injectable implementations with `@Injectable` or `@Injectable<Protocol>`. Use `@Singleton` for the old singleton lifetime, and leave non-singletons unmarked for transient factory-style construction.
 4. Mark each initializer or static factory Zerk may call with `@InjectableProviding`. If there is exactly one initializer and no provider is marked, Zerk infers it. A key with several providers needs one of them marked `@InjectableProviding(primary: true)`.
-5. Convert registered constants or configuration values into `@Injectable` values, or group static constants under `@InjectableValues`.
+5. Convert registered constants or configuration values into `@InjectableValue` declarations, or group static members under `@InjectableValues`. Note that values have their own marker: `@Injectable` registers a *type*.
 6. Replace manual restores with `Zerk<Key>.inject()`. Replace property injection with `@Injected var dependency: Key` when the dependency can be resolved synchronously.
 7. For initializer or method parameters that should be filled automatically, use lowercase `@injected` on the parameter and call the generated overload.
 8. Move tests from container mutation to interjection: `@testable import` the declaring module and conform `Zerk` to the generated `Interjecting<Key>` protocol for the member you want to override.
@@ -99,7 +99,7 @@ The plugin generates the injectors **and** the `Interjecting<Key>` protocols int
 import Zerk
 
 // 1. A value the graph can use to satisfy parameters of matching type
-@Injectable
+@InjectableValue
 var baseURL: String {
     "https://api.example.com"
 }
@@ -155,7 +155,7 @@ protocol InterjectingApiServicing {
 
 Zerk is a macro package and a build-tool plugin, and it is worth knowing which does what — because **almost none of the code generation happens in the macros.**
 
-`@Injectable`, `@InjectableProviding`, `@Exported`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a type that does not conform to the key it claims, a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<T>.inject()`) depends on nothing but the property's own type.
+`@Injectable`, `@InjectableProviding`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a type that does not conform to the key it claims, a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<T>.inject()`) depends on nothing but the property's own type.
 
 Everything else is the plugin, for one reason: an attached macro can only see the declaration it is attached to, while resolving a dependency graph requires the whole module. So `ZerkPlugin` runs `ZerkCodegen` over every `.swift` file in the target, in three stages:
 
@@ -171,12 +171,16 @@ One consequence runs through the whole design: **the plugin reads syntax, never 
 
 ### Declaring injectables
 
-**`@Injectable` / `@Injectable<Key1, Key2, …>`** — marks a class, struct, enum, actor, or a typed variable as injectable. Without generic arguments the type itself is the key; with them, each listed type (typically a protocol) is a key. On a variable, the declared type is the key and the body becomes the injected value:
+**`@Injectable` / `@Injectable<Key1, Key2, …>`** — marks a class, struct, enum, or actor as injectable. Without generic arguments the type itself is the key; with them, each listed type (typically a protocol) is a key.
+
+**`@InjectableValue` / `@InjectableValue<Key1, Key2, …>`** — marks a *value*. On a variable the declared type is the key and the body becomes the injected value:
 
 ```swift
-@Injectable
+@InjectableValue
 var timeout: TimeInterval { 30 }
 ```
+
+The two are separate markers because they are different things. A type is **built** by a provider and matched by its key, so one of them wins `inject()`. A value is **read** from a declaration and matched by key *and name* together — nothing about `inject()`, `primary:`, or `@InjectableProviding` applies to it. Applying either marker to the other's declaration is an error naming the replacement.
 
 Values participate in resolution: any provider parameter whose type matches a uniquely-declared value is filled in automatically. A value declared inside a type must be `static`, and values are matched by type **and name** together — which is what stops two unrelated `String` values from being interchangeable.
 
@@ -184,7 +188,7 @@ Values participate in resolution: any provider parameter whose type matches a un
 
 ```swift
 enum Settings {
-    @Injectable(.referenced)
+    @InjectableValue(.referenced)
     nonisolated(unsafe) static var baseURL: String = "api.example.com"
 }
 
@@ -194,6 +198,31 @@ Zerk<String>.baseURL = "x"  // writes back to Settings.baseURL
 ```
 
 A settable source produces a settable member; a `let` or a get-only computed property stays read-only. The source must be at least `internal`, since the generated file has to see it — a `private` value can only be copied. The default is `.copied`, and `valueInjectionMethod` in `ZerkSettings.json` changes it globally.
+
+**Effectful values.** A getter may be `async`, `throwing`, or both, and the resolution propagates them exactly as an effectful provider's do:
+
+```swift
+@InjectableValue
+var token: String {
+    get async throws { try await keychain.token() }
+}
+```
+
+An effectful value is read-only — Swift has no effectful setter — and cannot be reached by `@Injected` or a key path, the same limits an effectful provider already carries.
+
+**Parametric values.** Applied to a function, the return type is the key and the parameters behave exactly as an `@InjectableProviding` provider's: resolved from the graph where they can be, bubbled to the consumer where they cannot, and honouring `@autoinjected`, `@noninjected` and `@injectable`.
+
+```swift
+enum Formatting {
+    @InjectableValue
+    static func caption(logger: Logger, label: String) -> String { "\(label)#\(logger.serial)" }
+}
+
+Zerk<String>.caption(label: "x")     // `logger` resolved, `label` supplied
+Zerk<Holder>.inject(label: "x")      // `label` bubbles all the way up
+```
+
+It is still a *value*: matched by name, so it never wins `inject()` for its key. The generated member calls your function rather than copying it, and `ValueInjectionMethod` does not apply — there is no declaration to read through to, only a body.
 
 **`@InjectableValues`** — registers every eligible static property of a type, so a constants namespace does not need an attribute per member:
 
@@ -208,7 +237,7 @@ enum AppConstants {
 }
 ```
 
-A property is swept up when it is `static`, at least `internal`, and declares an explicit type — the type *is* the injection key, and a syntax-only plugin cannot infer it, so a missing annotation is an error rather than a silent skip. `private` and `fileprivate` members, instance properties, methods, and nested types are left alone. An individual property may carry its own `@Injectable(...)` to override the method, or **`@NonInjectable`** to opt out entirely.
+Functions are swept too, becoming parametric values: a `static func` with a return type is picked up on the same terms, and skipped when it is generic, returns `Void`, or is an instance method. A property is swept up when it is `static`, at least `internal`, and declares an explicit type — the type *is* the injection key, and a syntax-only plugin cannot infer it, so a missing annotation is an error rather than a silent skip. `private` and `fileprivate` members, instance properties, methods, and nested types are left alone. An individual property may carry its own `@Injectable(...)` to override the method, or **`@NonInjectable`** to opt out entirely.
 
 **`@InjectableProviding`** — marks a way to build the type. Place on an initializer or a `static` factory function. `@InjectableProviding<Key>` binds a provider to one specific key when a type is injectable under several; a bare `@InjectableProviding` serves every key the type claims. The two **combine** rather than shadowing each other, so a key can be served by both at once.
 
@@ -243,7 +272,7 @@ Zerk<Loading>.inject()   // live, because it is primary
 
 Providers that share a member name are fine as long as their parameters differ — two marked initializers are both named after their type, and the generated overloads are told apart exactly as the initializers are.
 
-Provider parameters are resolved in this order: a uniquely matching `@Injectable` value → a uniquely resolvable injectable key (recursively) → otherwise the parameter is exposed on the generated member and on `inject(...)` for the caller to supply ("parametric injection").
+Provider parameters are resolved in this order: a uniquely matching `@InjectableValue` → a uniquely resolvable injectable key (recursively) → otherwise the parameter is exposed on the generated member and on `inject(...)` for the caller to supply ("parametric injection").
 
 **`@Singleton`** — one shared instance per *type*, created lazily and thread-safely on first access. A type injectable under several keys is built once and every key returns that same instance. Reference types (class/actor) only. Singleton providers cannot be `async`/`throws` and cannot require external arguments, and a singleton must resolve to one provider across all of its keys — one instance cannot be built two ways.
 
@@ -264,9 +293,43 @@ The two `primary` flags are independent axes: `@Injectable(primary:)` picks the 
 
 Like every Zerk attribute it applies per key, so `@Injectable<A>(primary: true) @Injectable<B>` claims `A` only. It is a *type*-only argument: a value is the sole provider for its key, so `primary` on one is an error.
 
+**`@Injectable(public:)`** — makes the generated members `public`, so other modules can resolve the key. That covers `inject()` *and* the named members, so a consuming module can also reach one specific provider with `@Injected(\.staging)`. Zerk generates `internal` members by default, which keeps a module's graph its own business.
+
+Like `primary`, it rides on the attribute that names the key, so a type injectable under several can export some of them:
+
+```swift
+@Injectable<Storing>(public: true)
+@Injectable<Caching>
+public final class Store: Storing, Caching { ... }
+
+// Zerk<Storing>  members are public
+// Zerk<Caching>  members stay internal
+```
+
+Unlike `primary`, it applies to values too, and `@InjectableValues(public:)` exports a whole constants namespace at once:
+
+```swift
+@InjectableValue(public: true)
+public let apiKey: String = "…"
+
+@InjectableValues(public: true)
+public enum AppConstants {
+    public static let baseURL: String = "api.example.com"
+
+    @InjectableValue(public: false)
+    public static let internalTag: String = "…"   // stays internal
+}
+```
+
+Stating `public:` on a member is what overrides the sweep; a bare `@Injectable` says nothing about access and inherits it.
+
+The key type itself must be `public` — a public member cannot expose an internal type — otherwise the request is dropped with a warning. A value's *own* declaration may stay internal, since only the key appears in the generated member's signature and the accessor reads the source from its body. A `@Singleton`'s shared storage stays private either way; only its getter is exported.
+
+Both `primary` and `public` must be written as `true`/`false` literals — Zerk reads them from source and cannot evaluate an expression.
+
 **`@ImportedInjectable`** — declares a key that lives in another module, so this module's graph can resolve against it.
 
-Zerk resolves within one module. `@Exported` makes a key's members public, but the consuming module still has no idea the key exists, what it needs, or what effects and isolation it carries. This states all of that:
+Zerk resolves within one module. `@Injectable(public: true)` makes a key's members public, but the consuming module still has no idea the key exists, what it needs, or what effects and isolation it carries. This states all of that:
 
 ```swift
 private enum ZerkImports {
@@ -282,6 +345,32 @@ private enum ZerkImports {
 Only the shape matters. The return type is the key, the parameters are what the foreign provider needs, and `async`/`throws`/global-actor annotations state its effects and isolation. The declaration's name, visibility, and whether it is global, `static`, or an instance method make no difference — **nothing ever calls it**.
 
 Written **without a body**, the macro synthesises `Zerk<Key>.inject(…)`, and that expansion is the check: if the key is not exported, or its signature differs, the declaration itself fails to compile.
+
+**`@ImportedInjectableValue`** — the same for an `@Injectable` **value**.
+
+Values are matched by key *and name* together, which is what stops two unrelated `String`s from being interchangeable. `@ImportedInjectable` registers its key's primary and so would discard the name, letting one imported `String` answer for every `String` parameter in the module — hence a separate marker, on a property rather than a function:
+
+```swift
+private enum ZerkImports {
+    @ImportedInjectableValue
+    static var baseURL: String { Zerk<String>.baseURL }
+
+    @ImportedInjectableValue
+    static var apiKey: String { Zerk<String>.apiKey }
+}
+```
+
+Both are imported under the one key `String` and stay distinct, because a parameter has to be *named* `baseURL` to match the first. Importing as many values of a type as you like is the normal case; only a repeated **name** is a conflict.
+
+The type annotation is the key, the declaration's own name is what parameters must be called, and the getter names the foreign member. Since those last two are separate, an import can be **renamed**:
+
+```swift
+@ImportedInjectableValue
+static var apiBaseURL: String { Zerk<String>.baseURL }   // matches `apiBaseURL:`
+```
+
+The getter is required — unlike the key form there is nothing to synthesise, because there is no "primary `String`" to fall back on — and must be a single `Zerk` expression, since Zerk inlines it at every use site. That getter is also the check: naming a value the other module did not export fails to compile right at the declaration. Imported values are **read-only**, and `= Zerk<String>.baseURL` is refused because it would capture the value once instead of reading it per resolution.
+
 
 Written **with a body**, the body names which member the key resolves through instead of the primary. It must be a single `Zerk` expression and nothing else, because Zerk inlines it at every use site:
 
@@ -319,21 +408,6 @@ The freestanding form expands to a private, never-called function that pairs the
 
 Generic typealiases are rejected — substituting their parameters would need real type resolution. Alias a concrete instantiation instead.
 
-**`@Exported` / `@Exported<Key1, Key2, …>`** — makes the generated members `public`, so other modules can resolve the key. That covers `inject()` *and* the named members, so a consuming module can also reach one specific provider with `@Injected(\.staging)`.
-
-Without generic arguments it exports every key the type claims; with them, only the listed ones:
-
-```swift
-@Exported<Storing>
-@Injectable<Storing, Caching>
-public final class Store: Storing, Caching { ... }
-
-// Zerk<Storing>  members are public
-// Zerk<Caching>  members stay internal
-```
-
-The key type itself must be `public`, otherwise the marker is dropped with a warning. A `@Singleton`'s shared storage stays private either way; only its getter is exported.
-
 **`@Isolated<A>`** — tells Zerk which global actor a declaration is isolated to, when the build plugin cannot see it. It is **corrective, not declarative**: it restates what the compiler already believes so the generated members mirror the right isolation. Claiming something untrue produces generated code that will not compile. Two cases need it — a custom global actor whose name does not end in `Actor` (Zerk's attribute heuristic misses it), and isolation inherited through a conformance (invisible to a syntax-only plugin):
 
 ```swift
@@ -343,7 +417,7 @@ The key type itself must be `public`, otherwise the marker is dropped with a war
 final class FileStore: Storing { init() {} }
 ```
 
-For "this is nonisolated", use Swift's own `nonisolated` keyword — it is real, and Zerk reads it. `@Isolated` may be attached to a type, an initializer, an `@InjectableProviding` factory, or an `@Injectable` value; the innermost annotation wins, exactly as Swift's own isolation inference works.
+For "this is nonisolated", use Swift's own `nonisolated` keyword — it is real, and Zerk reads it. `@Isolated` may be attached to a type, an initializer, an `@InjectableProviding` factory, or an `@InjectableValue`; the innermost annotation wins, exactly as Swift's own isolation inference works.
 
 ### Consuming injectables
 
@@ -389,7 +463,7 @@ final class Consumer {
 @InjectableProviding
 init(payments: PaymentServicing, @noninjected retries: Int) { ... }
 // `retries` stays on the generated member even though an
-// `@Injectable var retries: Int` exists in the module
+// `@InjectableValue var retries: Int` exists in the module
 ```
 
 A provider that marks something `@autoinjected` already excludes everything unmarked, so `@noninjected` is redundant there — it is accepted without complaint, since stating every parameter's intent is a fair style. Marking one parameter both ways is a contradiction and is reported.
@@ -416,7 +490,7 @@ final class Bar {
 // }
 ```
 
-Without it the same `value` would be declared twice — once as `Bar`'s own parameter, once bubbled up for `Foo` — which is a build error rather than a silent merge, so sharing is always something you wrote down. Matched by name *and* type, the rule an `@Injectable` value already follows; a differently named parameter does not match and the requirement bubbles on its own. Works with `@injected` on any member and with `@autoinjected` on a provider.
+Without it the same `value` would be declared twice — once as `Bar`'s own parameter, once bubbled up for `Foo` — which is a build error rather than a silent merge, so sharing is always something you wrote down. Matched by name *and* type, the rule an `@InjectableValue` already follows; a differently named parameter does not match and the requirement bubbles on its own. Works with `@injected` on any member and with `@autoinjected` on a provider.
 
 **How bubbled parameters are ordered and combined.** The rules are the same on both paths:
 
@@ -614,7 +688,7 @@ When a singleton is injected across an isolation boundary, Zerk emits a `Sendabl
   //   "nonisolated" | "MainActor" | any custom global actor name
   "defaultActorIsolation": "nonisolated",
 
-  // How @Injectable values reach their value when the declaration does not say.
+  // How @InjectableValue declarations reach their value when they do not say.
   // Mirrors no build setting — it is Zerk's own default, overridden per value
   // by @Injectable(.copied) / @Injectable(.referenced).
   //   "copied" | "referenced"
@@ -648,9 +722,9 @@ What it cannot unify needs real type resolution, and stays distinct: module qual
 
 `any` is a special case. Zerk cannot tell a protocol from a superclass or a struct, and `any` is only legal on an existential — so keys *match* with `any` stripped, but the generated file emits the spelling you wrote. If one declaration says `P` and another `any P`, they are one key and `any P` is what gets emitted.
 
-**Module-scoped.** Auto-resolution only sees the current module. `@Exported` makes a key's generated members public so another module can call them manually, but the consuming module cannot auto-resolve a foreign key: its plugin has no way to know that key's effects or isolation. Forward it explicitly with an `@Injectable` value if you want it in the graph.
+**Module-scoped.** Auto-resolution only sees the current module. `@Injectable(public: true)` makes a key's generated members public so another module can call them manually, but the consuming module cannot auto-resolve a foreign key: its plugin has no way to know that key's effects or isolation. Forward it explicitly with an `@InjectableValue` if you want it in the graph.
 
-A target that declares no injectables needs no plugin and can still use `@Injected`: `@Exported` publicizes the key's members, so it can resolve the primary with a bare `@Injected` or name one with `@Injected(\.staging)`. Without `@Exported`, generated members are `internal` and invisible across the boundary.
+A target that declares no injectables needs no plugin and can still use `@Injected`: exporting a key publicizes its members, so it can resolve the primary with a bare `@Injected` or name one with `@Injected(\.staging)`. Without `public: true`, generated members are `internal` and invisible across the boundary.
 
 **Conformances must be written on the declaration.** `@Injectable<Key>` checks that the type lists `Key` in its own inheritance clause. A conformance added in an extension, inherited transitively, or declared in another module is invisible to a syntax-only plugin.
 
@@ -682,7 +756,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Exported` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, an imported value colliding with a local one of the same name, the same value name imported twice, two values sharing a key and a name, a value whose member name collides with a provider's, an `@ImportedInjectableValue` without a getter or with one that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Injectable(public:)` on a non-public key (warning), a non-literal `primary:` or `public:`, `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

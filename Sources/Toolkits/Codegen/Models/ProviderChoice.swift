@@ -19,6 +19,10 @@ enum ProviderChoice {
     /// nothing locally — resolving it is a call into the other module — so it
     /// never becomes a generated member, only a way to satisfy a parameter.
     case imported(ImportedInjectableRecord)
+    /// A parametric `@InjectableValue` function. It is a value — matched by key
+    /// *and* name, and never the key's primary — but everything about *building*
+    /// it is a provider's job, so it travels the provider path to be emitted.
+    case value(InjectableValueRecord)
 
     var parameters: [ParameterRecord] {
         switch self {
@@ -27,6 +31,8 @@ enum ProviderChoice {
         case .implicit(let initializer):
             initializer.parameters
         case .imported(let record):
+            record.parameters
+        case .value(let record):
             record.parameters
         }
     }
@@ -39,6 +45,8 @@ enum ProviderChoice {
             initializer.location
         case .imported(let record):
             record.location
+        case .value(let record):
+            record.location
         }
     }
 
@@ -50,6 +58,8 @@ enum ProviderChoice {
             initializer.effects
         case .imported(let record):
             record.effects
+        case .value(let record):
+            record.effects
         }
     }
     
@@ -60,6 +70,8 @@ enum ProviderChoice {
                 return name
             }
             return nil
+        case .value(let record):
+            return record.name
         case .implicit, .imported:
             return nil
         }
@@ -72,6 +84,8 @@ enum ProviderChoice {
         case .implicit(let initializer):
             initializer.isolation
         case .imported(let record):
+            record.isolation
+        case .value(let record):
             record.isolation
         }
     }
@@ -86,6 +100,8 @@ enum ProviderChoice {
             nil
         case .imported(let record):
             record.typeName
+        case .value(let record):
+            record.typeName
         }
     }
 
@@ -96,15 +112,23 @@ enum ProviderChoice {
     /// have named a property — `Zerk<Session>.staging` — which takes no
     /// parentheses however many parameters were declared.
     func resolutionExpression(arguments: [String]) -> String? {
-        guard case .imported(let record) = self else {
+        switch self {
+        case .imported(let record):
+            if record.resolvesAsProperty {
+                return record.callee
+            }
+            return arguments.isEmpty
+                ? "\(record.callee)()"
+                : "\(record.callee)(\(arguments.joined(separator: ", ")))"
+        case .value(let record):
+            // Named, not `inject()`: a value never wins its key, so the only way
+            // to reach it is by the name it was declared under.
+            return arguments.isEmpty
+                ? "Zerk<\(record.keyText)>.\(record.name)()"
+                : "Zerk<\(record.keyText)>.\(record.name)(\(arguments.joined(separator: ", ")))"
+        case .explicit, .implicit:
             return nil
         }
-        if record.resolvesAsProperty {
-            return record.callee
-        }
-        return arguments.isEmpty
-            ? "\(record.callee)()"
-            : "\(record.callee)(\(arguments.joined(separator: ", ")))"
     }
 
     /// An implicit initializer is never marked: it is adopted only when the
@@ -113,7 +137,7 @@ enum ProviderChoice {
         switch self {
         case .explicit(let provider):
             provider.isPrimary
-        case .implicit, .imported:
+        case .implicit, .imported, .value:
             false
         }
     }

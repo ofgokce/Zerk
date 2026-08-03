@@ -219,7 +219,7 @@ struct MultipleProviderTests {
     func primaryIsRejectedOnAValue() {
         let source = """
         enum Config {
-            @Injectable(primary: true)
+            @InjectableValue(primary: true)
             static let retries: Int = 3
         }
         """

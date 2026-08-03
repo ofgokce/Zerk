@@ -138,7 +138,7 @@ struct TypeKeyCanonicalizationPipelineTests {
     @Test("a value and a parameter spelled differently now resolve")
     func differentSpellingsResolve() {
         let source = """
-        @Injectable
+        @InjectableValue
         var names: [String] { ["a"] }
 
         protocol Serving {}

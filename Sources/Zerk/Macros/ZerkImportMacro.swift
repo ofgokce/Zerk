@@ -9,7 +9,7 @@
 /// syntax and has no idea which module a name came from. That is fine while
 /// every type in the graph is declared locally, and breaks as soon as one is
 /// not: a provider parameter typed `URL`, a key from another module, an
-/// `@Injectable` value of a foreign type — all are emitted into a file that
+/// `@InjectableValue` of a foreign type — all are emitted into a file that
 /// cannot see them.
 ///
 /// ```swift

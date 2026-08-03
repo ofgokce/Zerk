@@ -19,9 +19,18 @@ struct ParameterClassifier {
     /// parameters of that type fall back to **E**.
     let primaryResolutions: [String: ProviderResolution]
 
+    /// Parametric values by `"key|name"`. A value is matched by name, so it
+    /// cannot be found through `primaryResolutions` — but building one is a
+    /// provider's job, so it needs a resolution to recurse into.
+    let parametricResolutions: [String: ProviderResolution]
+
     init(values: [InjectableValueRecord], primaryResolutions: [String: ProviderResolution]) {
         self.values = values
         self.primaryResolutions = primaryResolutions
+        self.parametricResolutions = Dictionary(
+            values.filter(\.isParametric).map { ($0.matchIdentity, $0.providerResolution) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     /// `visiting` holds the injectable keys currently on the resolution stack.
@@ -68,14 +77,44 @@ struct ParameterClassifier {
             }
 
             if let value = injectableValue(matching: parameter) {
-                let expression = "Zerk<\(value.keyText)>.\(value.name)"
-                if value.isolation.requiresHop(callingFrom: memberIsolation) {
-                    hasCrossing = true
+                let hop = value.isolation.requiresHop(callingFrom: memberIsolation)
+                let expression: String
+                var effects = value.effects.merged(
+                    with: ProviderEffects(isAsync: hop, isThrowing: false))
+
+                if value.isParametric {
+                    // A parametric value is built, not read, so its own
+                    // parameters have to be settled first — exactly as for a
+                    // provider dependency, and with the same fallback when they
+                    // cannot be: the caller supplies it, and `inject()` bubbles.
+                    let inner = classify(value.providerResolution, visiting: nextVisiting)
+                    guard !visiting.contains(parameter.typeKey), inner.isFullyResolvable else {
+                        classified.append(ClassifiedParameter(parameter: parameter, binding: .external))
+                        continue
+                    }
+                    effects = effects.merged(with: inner.dependencyEffects)
+                    hasCrossing = hasCrossing || inner.hasIsolationCrossing
+                    isolatedDefault = isolatedDefault || inner.usesIsolatedDefaultArgument
+                    singletons += inner.singletonDependencies
+                    crossDomainSingletons += inner.crossDomainSingletonDependencies
+                    // Called bare: the emitted member defaults every parameter,
+                    // which is what `isFullyResolvable` just established.
+                    expression = value.providerResolution.provider
+                        .resolutionExpression(arguments: []) ?? value.resolutionExpression
+                } else {
+                    expression = value.resolutionExpression
+                }
+
+                if effects != .none {
+                    hasCrossing = hasCrossing || hop
+                    // A default argument cannot `try` or `await`, so anything
+                    // effectful resolves in the body and the member takes the
+                    // effects on.
                     classified.append(ClassifiedParameter(
                         parameter: parameter,
                         binding: .bodyResolved(
-                            expression: "await \(expression)",
-                            effects: ProviderEffects(isAsync: true, isThrowing: false)
+                            expression: "\(effects.callPrefix)\(expression)",
+                            effects: effects
                         )
                     ))
                 } else {
@@ -164,7 +203,7 @@ struct ParameterClassifier {
         resolution.provider.effects.merged(with: classify(resolution).dependencyEffects)
     }
 
-    /// An `@Injectable` value satisfies a parameter when both its key and its
+    /// An `@InjectableValue` satisfies a parameter when both its key and its
     /// name match — the name match is what keeps two `String` values from
     /// being interchangeable.
     func injectableValue(matching parameter: ParameterRecord) -> InjectableValueRecord? {

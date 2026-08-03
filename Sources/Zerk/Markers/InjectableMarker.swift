@@ -34,7 +34,7 @@
 /// silently merged, so sharing is always something you wrote down.
 ///
 /// Matched by name *and* type, the same rule that decides whether an
-/// `@Injectable` value satisfies a provider parameter. A parameter whose name
+/// `@InjectableValue` satisfies a provider parameter. A parameter whose name
 /// differs from the requirement's does not match, and the requirement bubbles up
 /// on its own.
 ///

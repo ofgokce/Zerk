@@ -7,7 +7,8 @@
 /// can resolve against it.
 ///
 /// Zerk resolves within one module: its plugin reads this module's source and
-/// knows nothing about another's. `@Exported` makes a key's members public, but
+/// knows nothing about another's. `@Injectable(public: true)` makes a key's
+/// members public, but
 /// the consuming module still has no idea the key exists, its effects, or its
 /// isolation. This states all of that, in a form the compiler checks.
 ///

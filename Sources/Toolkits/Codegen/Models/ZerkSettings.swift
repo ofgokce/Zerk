@@ -28,7 +28,7 @@ struct ZerkSettings: Equatable {
         case complete
     }
 
-    /// How `@Injectable` values reach their value when the declaration says
+    /// How `@InjectableValue` declarations reach their value when the declaration says
     /// `.default`. Has no build-setting counterpart — it is Zerk's own default.
     var valueInjectionMethod: ValueInjectionMethod = .copied
     /// Ambient isolation applied to declarations that state none. Mirrors the

@@ -24,16 +24,17 @@ import SwiftSyntaxMacros
 struct ZerkMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         InjectableMacro.self,
+        InjectableValueMacro.self,
         InjectableValuesMacro.self,
         NonInjectableMacro.self,
         InjectedMacro.self,
         ProvidingMacro.self,
-        ExportedMacro.self,
         SingletonMacro.self,
         IsolatedMacro.self,
         ZerkAliasMacro.self,
         ZerkImportMacro.self,
         ImportedInjectableMacro.self,
+        ImportedInjectableValueMacro.self,
         ZerkAliasDeclarationMacro.self,
     ]
 }

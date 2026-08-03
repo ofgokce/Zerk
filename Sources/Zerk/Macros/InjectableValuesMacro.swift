@@ -22,10 +22,18 @@
 /// skipped, since the generated file could not see it. Anything else in the
 /// body — methods, nested types, instance properties — is left alone.
 ///
+/// `public: true` exports every property the sweep picks up, exactly as
+/// ``Injectable(public:)`` does for one — the generated `Zerk<String>.baseURL`
+/// becomes public so another module can read it.
+///
 /// An individual property may carry its own `@Injectable(...)` to override the
-/// method chosen here, or ``NonInjectable()`` to opt out entirely.
+/// method or the access level chosen here, or ``NonInjectable()`` to opt out
+/// entirely. Overriding means stating the argument: `@Injectable(public: false)`
+/// keeps a property internal inside a `public: true` sweep, while a bare
+/// `@Injectable` says nothing about access and inherits the sweep's answer.
 @attached(peer)
-public macro InjectableValues(_ method: ValueInjectionMethod = .default) = #externalMacro(
+public macro InjectableValues(_ method: ValueInjectionMethod = .default,
+                              public: Bool = false) = #externalMacro(
     module: "ZerkMacros",
     type: "InjectableValuesMacro"
 )

@@ -35,7 +35,7 @@ struct ValueInjectionMethodTests {
     @Test("copied is the default, and inlines the body")
     func copiedIsDefault() {
         let output = CompileFixture.generate(source: """
-        @Injectable
+        @InjectableValue
         var timeout: Int { 30 }
         """)
 
@@ -47,7 +47,7 @@ struct ValueInjectionMethodTests {
     func explicitMethodOverridesSettings() {
         let source = """
         enum Constants {
-            @Injectable(.copied)
+            @InjectableValue(.copied)
             static let retries: Int = 3
         }
         """
@@ -62,7 +62,7 @@ struct ValueInjectionMethodTests {
     func settingsDefaultApplies() {
         let source = """
         enum Constants {
-            @Injectable
+            @InjectableValue
             static let retries: Int = 3
         }
         """
@@ -79,7 +79,7 @@ struct ValueInjectionMethodTests {
     func referencedLetIsReadOnly() {
         let output = CompileFixture.generate(source: """
         enum Constants {
-            @Injectable(.referenced)
+            @InjectableValue(.referenced)
             static let retries: Int = 3
         }
         """)
@@ -92,7 +92,7 @@ struct ValueInjectionMethodTests {
     func referencedVarIsSettable() {
         let output = CompileFixture.generate(source: """
         enum Constants {
-            @Injectable(.referenced)
+            @InjectableValue(.referenced)
             nonisolated(unsafe) static var baseUrl: String = "a"
         }
         """)
@@ -106,7 +106,7 @@ struct ValueInjectionMethodTests {
     func referencedComputedVarIsReadOnly() {
         let output = CompileFixture.generate(source: """
         enum Constants {
-            @Injectable(.referenced)
+            @InjectableValue(.referenced)
             static var derived: Int { 7 }
         }
         """)
@@ -118,7 +118,7 @@ struct ValueInjectionMethodTests {
     @Test("a top-level referenced value goes through a file-scope thunk")
     func topLevelReferencedUsesThunk() {
         let output = CompileFixture.generate(source: """
-        @Injectable(.referenced)
+        @InjectableValue(.referenced)
         nonisolated(unsafe) var timeout: Int = 30
         """)
 
@@ -133,7 +133,7 @@ struct ValueInjectionMethodTests {
     func thunksCarryIsolation() {
         let output = CompileFixture.generate(source: """
         @MainActor
-        @Injectable(.referenced)
+        @InjectableValue(.referenced)
         var theme: String { "dark" }
         """)
 
@@ -213,7 +213,7 @@ struct ValueInjectionMethodTests {
         enum AppConstants {
             static let referencedOne: Int = 1
 
-            @Injectable(.copied)
+            @InjectableValue(.copied)
             static let copiedOne: Int = 2
         }
         """)
@@ -245,7 +245,7 @@ struct ValueInjectionMethodTests {
     func privateValueCannotBeReferenced() {
         let collector = collect("""
         enum Constants {
-            @Injectable(.referenced)
+            @InjectableValue(.referenced)
             private static let secret: String = "s"
         }
         """)
@@ -258,7 +258,7 @@ struct ValueInjectionMethodTests {
     func privateValueCanBeCopied() {
         let collector = collect("""
         enum Constants {
-            @Injectable(.copied)
+            @InjectableValue(.copied)
             private static let secret: String = "s"
         }
         """)
@@ -298,7 +298,7 @@ struct ValueInjectionMethodTests {
     @Test("a top-level referenced value type-checks through its thunk")
     func topLevelReferencedCompiles() throws {
         let source = """
-        @Injectable(.referenced)
+        @InjectableValue(.referenced)
         nonisolated(unsafe) var timeout: Int = 30
         """
 

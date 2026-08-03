@@ -58,13 +58,24 @@ public extension AttributeSyntax {
     }
 
     /// The attribute's `primary:` argument.
+    var primaryArgument: LiteralBoolArgument {
+        boolArgument(labeled: "primary")
+    }
+
+    /// The attribute's `public:` argument — how `@Injectable` and
+    /// `@InjectableValues` ask for the generated members to be `public`.
+    var publicArgument: LiteralBoolArgument {
+        boolArgument(labeled: "public")
+    }
+
+    /// Reads a `Bool` argument by label.
     ///
     /// Zerk reads syntax and never evaluates it, so only a `true`/`false`
     /// literal can be honoured — `primary: isDebug` has no readable value.
     /// `nonLiteral` exists so that case is reported rather than silently
     /// treated as `false`.
-    var primaryArgument: PrimaryArgument {
-        for argument in labeledArguments where argument.label?.text == "primary" {
+    func boolArgument(labeled label: String) -> LiteralBoolArgument {
+        for argument in labeledArguments where argument.label?.text == label {
             guard let literal = argument.expression.as(BooleanLiteralExprSyntax.self) else {
                 return .nonLiteral
             }
@@ -80,9 +91,13 @@ public extension AttributeSyntax {
     }
 }
 
-/// The three states a `primary:` argument can be in. See
-/// ``AttributeSyntax/primaryArgument``.
-public enum PrimaryArgument: Equatable {
+/// The three states a `Bool` attribute argument can be in. See
+/// ``AttributeSyntax/boolArgument(labeled:)``.
+///
+/// `absent` is distinct from `literal(false)` on purpose: an
+/// `@InjectableValues(public: true)` sweep is overridden by a member that says
+/// `public: false`, but not by one that says nothing at all.
+public enum LiteralBoolArgument: Equatable {
     case absent
     case literal(Bool)
     case nonLiteral
@@ -90,7 +105,7 @@ public enum PrimaryArgument: Equatable {
     /// The claimed value, defaulting to `false` for anything unreadable. The
     /// unreadable case is reported separately, so this only decides what the
     /// generated code does while the build is already failing.
-    public var isPrimary: Bool {
+    public var isTrue: Bool {
         self == .literal(true)
     }
 }

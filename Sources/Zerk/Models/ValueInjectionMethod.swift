@@ -3,7 +3,7 @@
 //  Zerk
 //
 
-/// How an `@Injectable` value reaches the value it injects.
+/// How an `@InjectableValue` reaches the value it injects.
 ///
 /// This only affects values — a `var` or `let` registered as an injectable.
 /// Type providers are unaffected.

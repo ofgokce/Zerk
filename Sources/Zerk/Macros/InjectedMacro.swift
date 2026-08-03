@@ -15,7 +15,7 @@
 ///
 /// So this declaration is what a target *without* the plugin uses, and it is not
 /// redundant: a module that declares no injectables of its own can still write
-/// `@Injected var service: ApiServicing` against an `@Exported` key from another
+/// `@Injected var service: ApiServicing` against an exported key from another
 /// module, because that key's members are public and this is the only
 /// `@Injected` in scope there.
 @attached(peer, names: prefixed(_$zerk_injection_))
@@ -52,8 +52,8 @@ public macro Injected<T>() = #externalMacro(
 /// passed to macro expansion that takes no arguments".
 ///
 /// A target that exports nothing of its own can still name a member of another
-/// module's `@Exported` key, since `@Exported` publicizes them all — or one it
-/// declares itself:
+/// module's exported key, since `@Injectable(public: true)` publicizes them all
+/// — or one it declares itself:
 ///
 /// ```swift
 /// extension Zerk<ApiServicing> {

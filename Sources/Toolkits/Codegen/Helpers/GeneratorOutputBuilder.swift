@@ -40,6 +40,19 @@ struct GeneratorOutputBuilder {
     /// came from.
     var importedModules: Set<String> = []
 
+    /// Parametric values, as resolutions to emit members for.
+    ///
+    /// They join what is emitted but never `primaryResolutions`: a value is
+    /// reached by name, so it never becomes a key's `inject()`.
+    var parametricResolutions: [ProviderResolution] {
+        values.filter(\.isParametric).filter { !$0.isImported }.map(\.providerResolution)
+    }
+
+    /// Every member to emit: providers plus parametric values.
+    var emittedResolutions: [ProviderResolution] {
+        resolutions + parametricResolutions
+    }
+
     /// How a key is written in the generated file.
     ///
     /// Differs from the key itself only in `any`: keys match with it stripped,
@@ -110,6 +123,7 @@ struct GeneratorOutputBuilder {
         let classifier = self.classifier
 
         diagnostics += cycleDiagnostics()
+        diagnostics += duplicateValueDiagnostics()
 
         // Built up front: the storage is per type while the members reading it
         // are per key, so it cannot be assembled from inside the per-key loop.
@@ -145,6 +159,21 @@ struct GeneratorOutputBuilder {
         var emittedThunks = Set<String>()
 
         for value in values.sorted(by: { $0.name < $1.name }) {
+            // An import matches parameters but declares nothing: the member, and
+            // the interjection requirement that goes with it, belong to the
+            // module that owns the value.
+            guard !value.isImported else {
+                continue
+            }
+            if value.isParametric {
+                // Emitted through the provider path instead; only its thunk, if
+                // it needs one, belongs to this loop.
+                if emittedThunks.insert(value.name).inserted {
+                    thunkLines += parametricThunkLines(for: value)
+                }
+                continue
+            }
+
             let readExpression: String
             switch value.injectionMethod {
             case .copied:
@@ -158,7 +187,10 @@ struct GeneratorOutputBuilder {
                 }
                 readExpression = bodyText
             case .referenced:
-                readExpression = referenceRead(for: value)
+                // A copied body carries its own `try`/`await` verbatim; a
+                // reference is a bare read, so the effects go on here. Wrapped
+                // in `return` to match the statement form a copied body is in.
+                readExpression = "return \(value.effects.callPrefix)\(referenceRead(for: value))"
                 // A value registered under several keys yields one record per
                 // key, all naming the same source, so thunks dedupe by name.
                 if emittedThunks.insert(value.name).inserted {
@@ -181,22 +213,42 @@ struct GeneratorOutputBuilder {
                 )
             }
 
+            let access = exportedAccessPrefix(isExported: value.isExported, injectableKey: value.typeKey)
+            if value.isExported, access.isEmpty {
+                diagnostics.append(inertPublicDiagnostic(
+                    injectableKey: value.typeKey,
+                    plural: false,
+                    location: value.location
+                ))
+            }
+
             output.append("extension Zerk<\(valueKeyText)> {")
-            output.append("    \(value.isolation.declarationPrefix)static var \(value.name): \(valueKeyText) {")
+            output.append("    \(value.isolation.declarationPrefix)\(access)static var \(value.name): \(valueKeyText) {")
 
             if value.injectionMethod == .referenced && value.isSettable {
                 // Only a settable source earns a setter, and only then does the
-                // member need an explicit accessor pair.
+                // member need an explicit accessor pair. Effects cannot reach
+                // here: Swift has no effectful setter, so a settable value is
+                // effect-free by construction.
                 output.append("        get {")
                 output += guardLines("            ")
-                output.append("            return \(readExpression)")
+                output += Self.indented(readExpression, by: "            ")
                 output.append("        }")
                 output.append("        set {")
                 output.append("            \(referenceWrite(for: value, from: "newValue"))")
                 output.append("        }")
+            } else if value.effects != .none {
+                // An effectful value needs the explicit `get`, since that is the
+                // only place `async`/`throws` can be written on a property. The
+                // guard stays outside the effects — an interjected double is
+                // read synchronously whatever the real value costs.
+                output.append("        get\(value.effects.declarationSuffix) {")
+                output += guardLines("            ")
+                output += Self.indented(readExpression, by: "            ")
+                output.append("        }")
             } else {
                 output += guardLines("        ")
-                output.append("        return \(readExpression)")
+                output += Self.indented(readExpression, by: "        ")
             }
 
             output.append("    }")
@@ -220,7 +272,7 @@ struct GeneratorOutputBuilder {
         // Ahead of the extensions, which read from it.
         output += singletonStorageLines(singletonStorage)
 
-        let grouped = Dictionary(grouping: resolutions, by: \.injectableKey)
+        let grouped = Dictionary(grouping: emittedResolutions, by: \.injectableKey)
         for injectableKey in grouped.keys.sorted() {
             let providers = grouped[injectableKey]!.sorted { lhs, rhs in
                 memberName(for: lhs) < memberName(for: rhs)
@@ -239,18 +291,33 @@ struct GeneratorOutputBuilder {
                 memberNameCounts[memberName(for: provider), default: 0] += 1
             }
 
+            // Seeded with this key's property values, whose members are
+            // argument-free and so occupy a provider's `name()` signature. They
+            // are emitted from their own loop, so without this a value named
+            // like a provider's member is only caught by `invalid
+            // redeclaration` in the generated file.
             var seenMemberSignatures: [String: String] = [:]
+            var valueOwnedSignatures = Set<String>()
+            for value in values
+            where value.typeKey == injectableKey && !value.isImported && !value.isParametric {
+                let signature = "\(value.name)()"
+                seenMemberSignatures[signature] = "the @InjectableValue '\(value.name)'"
+                valueOwnedSignatures.insert(signature)
+            }
+
             for provider in providers {
                 let name = memberName(for: provider)
                 for signature in memberSignatureKeys(for: provider, name: name) {
                     if let existing = seenMemberSignatures[signature] {
+                        let involvesValue = valueOwnedSignatures.contains(signature)
+                            || { if case .value = provider.provider { return true } else { return false } }()
                         diagnostics.append(CodegenDiagnostic(
                             severity: .error,
-                            message: "Generated member '\(name)' for '\(provider.typeName)' collides with '\(existing)' in Zerk<\(displayName(for: injectableKey))>: same name, same parameters. Rename the type, or give the provider a distinct @InjectableProviding function name.",
+                            message: "Generated member '\(name)' for '\(provider.typeName)' collides with \(existing) in Zerk<\(displayName(for: injectableKey))>: same name, same parameters. \(Self.collisionRemedy(involvesValue: involvesValue))",
                             location: provider.provider.location
                         ))
                     } else {
-                        seenMemberSignatures[signature] = provider.typeName
+                        seenMemberSignatures[signature] = "'\(provider.typeName)'"
                     }
                 }
             }
@@ -332,7 +399,7 @@ struct GeneratorOutputBuilder {
         return GeneratorOutput(
             output: output.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + "\n",
             diagnostics: diagnostics,
-            usesIsolatedDefaultArguments: resolutions.contains {
+            usesIsolatedDefaultArguments: emittedResolutions.contains {
                 classifier.classify($0).usesIsolatedDefaultArgument
             }
         )
@@ -484,18 +551,39 @@ struct GeneratorOutputBuilder {
         return lines
     }
 
-    /// `public ` when `@Exported` asked for it and the key can carry it.
+    /// `public ` when `@Injectable(public: true)` asked for it and the key can
+    /// carry it.
     ///
-    /// `@Exported` publicises every generated member for the key, not just
+    /// `public:` publicises every generated member for the key, not just
     /// `inject()`: a consuming module that wants one specific member — through
     /// `@Injected(\.staging)`, say — needs to see it. The key type itself has to
     /// be public, since a public member cannot expose an internal type.
     private func exportedAccessPrefix(for provider: ProviderResolution,
-                                    injectableKey: String) -> String {
-        guard provider.isExported, moduleAccessLevels[injectableKey] != false else {
+                                      injectableKey: String) -> String {
+        exportedAccessPrefix(isExported: provider.isExported, injectableKey: injectableKey)
+    }
+
+    /// The same decision for an injectable *value*, which has no
+    /// `ProviderResolution` behind it. The key is all that appears in the
+    /// member's signature, so the rule is identical: the value's own declaration
+    /// may stay internal, since a public accessor's *body* may read it.
+    private func exportedAccessPrefix(isExported: Bool, injectableKey: String) -> String {
+        guard isExported, moduleAccessLevels[injectableKey] != false else {
             return ""
         }
         return "public "
+    }
+
+    /// The warning raised when `public: true` cannot be honoured, worded for
+    /// whichever declaration asked.
+    private func inertPublicDiagnostic(injectableKey: String,
+                                       plural: Bool,
+                                       location: AttributeLocation) -> CodegenDiagnostic {
+        CodegenDiagnostic(
+            severity: .warning,
+            message: "@Injectable(public: true) has no effect: '\(injectableKey)' is not public, so the generated \(plural ? "members cannot be public" : "member cannot be public").",
+            location: location
+        )
     }
 
     /// Emits an argument-free `static var` alongside a function-shaped member
@@ -741,6 +829,59 @@ struct GeneratorOutputBuilder {
             && classification.singletonDependencies.isEmpty
     }
 
+    /// Two values claiming the same key **and name**.
+    ///
+    /// Values are matched by that pair, so neither can win: the matcher demands
+    /// a unique match and finding two silently resolves nothing, leaving the
+    /// parameter to the caller. The property form is worse still — two identical
+    /// `static var`s land in one `extension Zerk<Key>` and the *generated* file
+    /// fails with `invalid redeclaration`, in a file nobody wrote.
+    ///
+    /// Providers have had this check since collisions were possible; values had
+    /// never had one. Grouped by key and name together, so the same value under
+    /// two keys, or two values of one key under different names, both stay legal
+    /// — those are the normal cases.
+    private func duplicateValueDiagnostics() -> [CodegenDiagnostic] {
+        var byIdentity: [String: [InjectableValueRecord]] = [:]
+        for value in values {
+            byIdentity[value.matchIdentity, default: []].append(value)
+        }
+
+        var diagnostics: [CodegenDiagnostic] = []
+        for (_, group) in byIdentity.sorted(by: { $0.key < $1.key }) {
+            // One record per key of the same declaration is not a collision;
+            // distinct source positions are what make it one.
+            let declarations = group.sorted { $0.location < $1.location }
+            guard let first = declarations.first else {
+                continue
+            }
+            for duplicate in declarations.dropFirst() where duplicate.location != first.location {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "'\(duplicate.name)' is declared as a '\(duplicate.typeName)' value more than once (also at \(first.location.filePath):\(first.location.line)). Values are matched by name as well as type, so two of one name under one key can never be told apart. Rename one, or register it under a different key.",
+                    location: duplicate.location
+                ))
+            }
+        }
+        return diagnostics
+    }
+
+    /// What to do about a member-name collision, which differs by what collided:
+    /// a provider is named after its type or its factory, a value after its own
+    /// declaration, and neither remedy makes sense for the other.
+    private static func collisionRemedy(involvesValue: Bool) -> String {
+        involvesValue
+            ? "Rename the @InjectableValue, or register it under a different key."
+            : "Rename the type, or give the provider a distinct @InjectableProviding function name."
+    }
+
+    /// Re-indents a value body so a multi-statement one lines up inside the
+    /// generated accessor. Relative indentation is left as written.
+    private static func indented(_ body: String, by indent: String) -> [String] {
+        body.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.isEmpty ? "" : indent + $0.trimmingCharacters(in: .whitespaces) }
+    }
+
     // MARK: - Referenced values
 
     /// How a `.referenced` value reads its source.
@@ -778,7 +919,7 @@ struct GeneratorOutputBuilder {
         }
         let prefix = value.isolation.actorName.map { "@\($0) " } ?? ""
         var lines = [
-            "\(prefix)private func _$zerk_ref_\(value.name)() -> \(value.typeName) { \(value.name) }"
+            "\(prefix)private func _$zerk_ref_\(value.name)()\(value.effects.declarationSuffix) -> \(value.typeName) { \(value.effects.callPrefix)\(value.name) }"
         ]
         if value.isSettable {
             lines.append(
@@ -786,6 +927,35 @@ struct GeneratorOutputBuilder {
             )
         }
         return lines
+    }
+
+    /// A file-scope thunk for a **top-level** parametric value.
+    ///
+    /// Same problem `.referenced` values have, and the same answer: inside
+    /// `extension Zerk<Key>` an unqualified `greeting(…)` resolves to the
+    /// generated member of that name rather than the developer's function, so it
+    /// would call itself. A nested declaration is qualified by its type and
+    /// needs none of this.
+    private func parametricThunkLines(for value: InjectableValueRecord) -> [String] {
+        guard value.enclosingTypePath == nil else {
+            return []
+        }
+        let prefix = value.isolation.actorName.map { "@\($0) " } ?? ""
+        let parameters = value.parameters.map { parameter -> String in
+            let label = parameter.label ?? "_"
+            return label == parameter.name
+                ? "\(label): \(parameter.typeName)"
+                : "\(label) \(parameter.name): \(parameter.typeName)"
+        }
+        let arguments = value.parameters.map { parameter -> String in
+            guard let label = parameter.label else {
+                return parameter.name
+            }
+            return "\(label): \(parameter.name)"
+        }
+        return [
+            "\(prefix)private func \(value.parametricCallee)(\(parameters.joined(separator: ", ")))\(value.effects.declarationSuffix) -> \(value.typeName) { \(value.effects.callPrefix)\(value.name)(\(arguments.joined(separator: ", "))) }"
+        ]
     }
 
     /// The generated member's return type: always the injectable key, so a type
@@ -822,9 +992,9 @@ struct GeneratorOutputBuilder {
 
         let accessPrefix = exportedAccessPrefix(for: provider, injectableKey: injectableKey)
         if provider.isExported, accessPrefix.isEmpty {
-            diagnostics.append(CodegenDiagnostic(
-                severity: .warning,
-                message: "@Exported has no effect: '\(injectableKey)' is not public, so the generated members cannot be public.",
+            diagnostics.append(inertPublicDiagnostic(
+                injectableKey: injectableKey,
+                plural: true,
                 location: provider.provider.location
             ))
         }
@@ -957,12 +1127,13 @@ struct GeneratorOutputBuilder {
 
                     if let value = classifier.injectableValue(matching: core) {
                         let hops = value.isolation.requiresHop(callingFrom: record.isolation.dependencyCallContext)
-                        let callEffects = ProviderEffects(isAsync: hops, isThrowing: false)
+                        let callEffects = value.effects.merged(
+                            with: ProviderEffects(isAsync: hops, isThrowing: false))
                         effects = effects.merged(with: callEffects)
                         argumentExpressions.append(
                             overloadArgument(
                                 label: core.label,
-                                expression: "\(callEffects.callPrefix)Zerk<\(value.keyText)>.\(value.name)"
+                                expression: "\(callEffects.callPrefix)\(value.resolutionExpression)"
                             )
                         )
                         continue
@@ -1161,7 +1332,7 @@ struct GeneratorOutputBuilder {
     /// name — i.e. whether the name is an overload set rather than a single
     /// member. Two of a type's initializers are the usual way this happens.
     private func isOverloaded(_ name: String, in injectableKey: String) -> Bool {
-        resolutions.filter {
+        emittedResolutions.filter {
             $0.injectableKey == injectableKey && memberName(for: $0) == name
         }
         .count > 1
@@ -1266,6 +1437,8 @@ struct GeneratorOutputBuilder {
             // nothing here, so no member is emitted for them. Answering with the
             // resolving expression keeps this total rather than fatal.
             return record.callee
+        case .value(let record):
+            return record.parametricCallee
         case .implicit:
             return resolution.typeName
         }
@@ -1565,9 +1738,28 @@ struct GeneratorOutputBuilder {
 
             if let value = classifier.injectableValue(matching: parameter) {
                 let hops = value.isolation.requiresHop(callingFrom: memberIsolation)
-                let callEffects = ProviderEffects(isAsync: hops, isThrowing: false)
+                // The value's own `async`/`throws` merge with the hop: reading
+                // it costs both, and `inject()` has to declare both.
+                var callEffects = value.effects.merged(
+                    with: ProviderEffects(isAsync: hops, isThrowing: false))
+
+                guard value.isParametric else {
+                    effects = effects.merged(with: callEffects)
+                    argumentExpressions.append("\(callEffects.callPrefix)\(value.resolutionExpression)")
+                    continue
+                }
+
+                // Parametric: whatever it cannot resolve for itself bubbles up
+                // here, the same as a provider dependency's does.
+                let valuePlan = wrapperPlan(for: value.providerResolution, visiting: nextVisiting)
+                callEffects = callEffects.merged(with: valuePlan.effects)
                 effects = effects.merged(with: callEffects)
-                argumentExpressions.append("\(callEffects.callPrefix)Zerk<\(value.keyText)>.\(value.name)")
+                requests.append(BubbleResolver.Request(
+                    sourceName: parameter.name,
+                    requirements: valuePlan.parameters
+                ))
+                dependencyCalls[parameter.name] = (callEffects.callPrefix, value.providerResolution, parameter.typeName)
+                argumentExpressions.append("\u{0}\(parameter.name)")
                 continue
             }
 

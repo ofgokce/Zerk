@@ -11,5 +11,6 @@
 /// them would silently stop matching rather than fail to compile.
 public enum ZerkMacroNames {
     public static let injectableAttributeName = "Injectable"
+    public static let injectableValueAttributeName = "InjectableValue"
     public static let injectableProvidingAttributeName = "InjectableProviding"
 }

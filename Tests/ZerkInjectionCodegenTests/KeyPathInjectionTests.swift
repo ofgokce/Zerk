@@ -169,7 +169,7 @@ struct KeyPathInjectionTests {
         #expect(result.didCompile, Comment(rawValue: result.compilerOutput))
     }
 
-    @Test("@Exported publicizes the members a key path would name, and type-checks")
+    @Test("@Injectable(public:) publicizes the members a key path would name, and type-checks")
     func sharedPublicizesKeyPathTargets() throws {
         // Without this a consuming module can call inject() but cannot name a
         // member, so `@Injected(\.staging)` has nothing to point at across a
@@ -177,8 +177,7 @@ struct KeyPathInjectionTests {
         let source = """
         public protocol ApiServicing: AnyObject {}
 
-        @Exported
-        @Injectable<ApiServicing>
+        @Injectable<ApiServicing>(public: true)
         public final class ApiService: ApiServicing {
             @InjectableProviding<ApiServicing>(primary: true)
             public static func live() -> ApiServicing { ApiService() }
@@ -206,8 +205,7 @@ struct KeyPathInjectionTests {
         public protocol Storing: AnyObject {}
 
         @Singleton
-        @Exported
-        @Injectable<Storing>
+        @Injectable<Storing>(public: true)
         public final class Store: Storing {
             @InjectableProviding
             public init() {}

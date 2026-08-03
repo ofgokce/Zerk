@@ -5,16 +5,44 @@
 //  Created by Ömer Faruk Gökce on 2.08.2026.
 //
 
-/// Registers a type or a value with the dependency graph.
+/// Registers a **type** with the dependency graph.
 ///
-/// On a type the key is the type itself; `@Injectable<Key>` registers it under
-/// each listed key instead. On a `var` or `let` the declared type is the key
-/// and the declaration supplies the value.
+/// The key is the type itself; `@Injectable<Key>` registers it under each listed
+/// key instead. Every key needs a way to be built — see
+/// ``InjectableProviding()``.
 ///
-/// The two arguments apply to opposite halves of that: ``ValueInjectionMethod``
-/// is meaningful on a value only, `primary` on a type only. Neither overload
-/// accepts both, and passing one to the wrong kind of declaration is an error
-/// rather than a silently ignored argument.
+/// Values are a different thing and have their own marker,
+/// ``InjectableValue()``: a type is *built* by a provider, while a value is
+/// *read* from a declaration, and the two are matched differently — a type by
+/// its key, a value by key and name together. Applying this to a `var` or `let`
+/// is an error naming the replacement.
+///
+/// ## Exporting a key
+///
+/// Zerk generates `internal` members by default, which keeps a module's graph
+/// its own business. `public: true` opts a key out of that: `inject()` and
+/// every named member for it become public, so a consuming module can resolve
+/// the primary with `@Injected` or name one specific provider with
+/// `@Injected(\.staging)`.
+///
+/// Like `primary`, it rides on the attribute that names the key, so a type
+/// injectable under several can export some of them:
+///
+/// ```swift
+/// @Injectable<Storing>(public: true)
+/// @Injectable<Caching>
+/// public final class Store: Storing, Caching { ... }
+///
+/// // Zerk<Storing> members are public; Zerk<Caching> members stay internal.
+/// ```
+///
+/// The key type itself must be `public` — a public member cannot expose an
+/// internal type — otherwise the request is dropped with a warning. A
+/// `@Singleton`'s shared storage stays private regardless; only its getter is
+/// exported.
+///
+/// `public` must be written as a `true`/`false` literal, for the same reason
+/// `primary` must.
 @attached(peer)
 public macro Injectable() = #externalMacro(
     module: "ZerkMacros",
@@ -27,10 +55,22 @@ public macro Injectable<each T>() = #externalMacro(
     type: "InjectableMacro"
 )
 
-/// Registers a **value** and states how the generated member reaches it.
-///
-/// `method` controls whether the value is copied into the generated member or
-/// read through to the original declaration — see ``ValueInjectionMethod``.
+@attached(peer)
+public macro Injectable(public: Bool) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
+@attached(peer)
+public macro Injectable<each T>(public: Bool) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
+/// Not a real overload. It exists so that `@Injectable(.referenced)` reports
+/// what to write instead — overload resolution would otherwise say "type 'Bool'
+/// has no member 'referenced'", which names neither the problem nor the fix.
+/// See ``InjectableValue(_:public:)``.
 @attached(peer)
 public macro Injectable(_ method: ValueInjectionMethod) = #externalMacro(
     module: "ZerkMacros",
@@ -67,13 +107,13 @@ public macro Injectable<each T>(_ method: ValueInjectionMethod) = #externalMacro
 /// `primary` must be written as a `true`/`false` literal: Zerk reads syntax, so
 /// it cannot evaluate a constant or a computed expression.
 @attached(peer)
-public macro Injectable(primary: Bool) = #externalMacro(
+public macro Injectable(primary: Bool, public: Bool = false) = #externalMacro(
     module: "ZerkMacros",
     type: "InjectableMacro"
 )
 
 @attached(peer)
-public macro Injectable<each T>(primary: Bool) = #externalMacro(
+public macro Injectable<each T>(primary: Bool, public: Bool = false) = #externalMacro(
     module: "ZerkMacros",
     type: "InjectableMacro"
 )

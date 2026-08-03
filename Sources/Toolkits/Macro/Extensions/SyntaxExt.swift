@@ -9,7 +9,7 @@ import SwiftSyntax
 
 public extension Syntax {
     /// The name of the nearest enclosing type declaration, or `nil` at file
-    /// scope. Used to tell a top-level `@Injectable` value from one nested in
+    /// scope. Used to tell a top-level `@InjectableValue` from one nested in
     /// a type, which must additionally be `static`.
     var enclosingTypeName: String? {
         var current = parent

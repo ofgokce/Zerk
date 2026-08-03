@@ -124,9 +124,12 @@ enum CompileFixture {
             into: resolution.primaryResolutions,
             localKeys: Set(resolution.resolutions.map(\.injectableKey))
         )
+        let importedValues = ImportedValueMerger(
+            records: rewriter.rewrite(importedValues: collector.importedValues)
+        ).merged(into: rewriter.rewrite(values: collector.values))
         return GeneratorOutputBuilder(
             types: rewriter.rewrite(types: collector.types),
-            values: rewriter.rewrite(values: collector.values),
+            values: importedValues.values,
             resolutions: resolution.resolutions,
             primaryResolutions: imports.primaries,
             moduleAccessLevels: collector.moduleAccessLevels,
@@ -163,9 +166,12 @@ enum CompileFixture {
             into: resolution.primaryResolutions,
             localKeys: Set(resolution.resolutions.map(\.injectableKey))
         )
+        let importedValues = ImportedValueMerger(
+            records: rewriter.rewrite(importedValues: collector.importedValues)
+        ).merged(into: rewriter.rewrite(values: collector.values))
         let output = GeneratorOutputBuilder(
             types: rewriter.rewrite(types: collector.types),
-            values: rewriter.rewrite(values: collector.values),
+            values: importedValues.values,
             resolutions: resolution.resolutions,
             primaryResolutions: imports.primaries,
             moduleAccessLevels: collector.moduleAccessLevels,
@@ -175,7 +181,8 @@ enum CompileFixture {
             importedModules: collector.importedModules
         ).build()
 
-        return (output, collector.diagnostics + resolution.diagnostics + imports.diagnostics + output.diagnostics)
+        return (output, collector.diagnostics + resolution.diagnostics + imports.diagnostics
+            + importedValues.diagnostics + output.diagnostics)
     }
 
     // MARK: - Compilation
@@ -264,11 +271,11 @@ enum CompileFixture {
     }
     """
 
-    // Prefix matches, so "@Injectable" also covers "@InjectableValues" and
-    // "@InjectableProviding".
+    // Prefix matches, so "@Injectable" also covers "@InjectableValue",
+    // "@InjectableValues" and "@InjectableProviding".
     private static let zerkAttributePrefixes = [
         "@Injectable", "@NonInjectable", "@Singleton", "@ImportedInjectable",
-        "@Exported", "@Isolated", "@Injected"
+        "@Isolated", "@Injected"
     ]
 
     private static func stripZerkMacros(from source: String) -> String {

@@ -19,7 +19,7 @@
 /// }
 ///
 /// // `retries` stays on the generated member even though an
-/// // `@Injectable var retries: Int` exists in the module
+/// // `@InjectableValue var retries: Int` exists in the module
 /// // static func inject(retries: Int) -> Checkout
 /// ```
 ///

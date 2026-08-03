@@ -59,7 +59,7 @@ public struct CodeGenerator {
         let aliases = KeyAliases(declarations: collector.aliasDeclarations)
         let rewriter = AliasRewriter(aliases: aliases)
         let types = rewriter.rewrite(types: collector.types)
-        let values = rewriter.rewrite(values: collector.values)
+        let localValues = rewriter.rewrite(values: collector.values)
         let injectedUses = rewriter.rewrite(injectedUses: collector.injectedUses)
         let markedMembers = rewriter.rewrite(markedMembers: collector.markedMembers)
         let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
@@ -79,7 +79,15 @@ public struct CodeGenerator {
             localKeys: Set(resolution.resolutions.map(\.injectableKey))
         )
 
-        var diagnostics = collector.diagnostics + resolution.diagnostics + imports.diagnostics
+        // Imported values join the matching pool on the same terms, but keyed by
+        // name as well, so several of one type stay distinct.
+        let importedValues = ImportedValueMerger(
+            records: rewriter.rewrite(importedValues: collector.importedValues)
+        ).merged(into: localValues)
+        let values = importedValues.values
+
+        var diagnostics = collector.diagnostics + resolution.diagnostics
+            + imports.diagnostics + importedValues.diagnostics
 
         if diagnostics.contains(where: { $0.severity == .error }) {
             emitDiagnostics(diagnostics)
