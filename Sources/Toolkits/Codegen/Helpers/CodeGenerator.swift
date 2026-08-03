@@ -80,7 +80,8 @@ public struct CodeGenerator {
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: injectedUses,
             markedMembers: markedMembers,
-            keyDisplayNames: keyDisplayNames
+            keyDisplayNames: keyDisplayNames,
+            importedModules: collector.importedModules
         ).build()
 
         diagnostics += output.diagnostics

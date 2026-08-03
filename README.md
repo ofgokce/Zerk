@@ -264,6 +264,16 @@ The two `primary` flags are independent axes: `@Injectable(primary:)` picks the 
 
 Like every Zerk attribute it applies per key, so `@Injectable<A>(primary: true) @Injectable<B>` claims `A` only. It is a *type*-only argument: a value is the sole provider for its key, so `primary` on one is an error.
 
+**`#ZerkImport(module: "…")`** — adds `import` statements to the generated file.
+
+Zerk generates a file that imports `Zerk` and nothing else, because the plugin reads syntax and cannot tell which module a name came from. That is fine while every type in the graph is local, and breaks the moment one is not — a provider parameter typed `Date` is emitted into a file where `Date` does not exist:
+
+```swift
+#ZerkImport(module: "Foundation", "CoreLocation")
+```
+
+Write it anywhere in the module; every occurrence is collected and the union is imported, deduplicated and sorted so the generated file does not churn between builds. Module names must be plain string literals — the plugin reads them from source and cannot evaluate a constant or an interpolation, so either is a build error rather than a silently dropped import.
+
 **`@ZerkAlias` / `#ZerkAlias<A, B, …>()`** — tells Zerk that two names are one key. Zerk matches by spelling, so without this a provider registered as `Storing` will not satisfy a parameter written `Persisting`:
 
 ```swift
@@ -642,7 +652,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Exported` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Exported` on a non-public key (warning), `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

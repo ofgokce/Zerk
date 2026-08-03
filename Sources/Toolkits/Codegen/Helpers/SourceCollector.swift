@@ -41,6 +41,9 @@ final class SourceCollector: SyntaxVisitor {
     /// `@ZerkAlias` / `#ZerkAlias` declarations, which merge keys before
     /// resolution. See ``KeyAliases``.
     private(set) var aliasDeclarations: [AliasDeclaration] = []
+    /// Modules `#ZerkImport` asked the generated file to import, from anywhere
+    /// in the module. Emitted deduplicated and sorted.
+    private(set) var importedModules: Set<String> = []
 
     private let settings: ZerkSettings
     private var sourceFile: String = ""
@@ -309,6 +312,7 @@ final class SourceCollector: SyntaxVisitor {
         collectAlias(macroName: node.macroName.text,
                      arguments: node.genericArgumentClause,
                      syntax: Syntax(node))
+        collectImport(macroName: node.macroName.text, arguments: node.arguments)
         return .skipChildren
     }
 
@@ -316,7 +320,22 @@ final class SourceCollector: SyntaxVisitor {
         collectAlias(macroName: node.macroName.text,
                      arguments: node.genericArgumentClause,
                      syntax: Syntax(node))
+        collectImport(macroName: node.macroName.text, arguments: node.arguments)
         return .skipChildren
+    }
+
+    /// `#ZerkImport(module: "Foundation")` — names a module the generated file
+    /// must import. The macro has already refused anything unreadable, so a
+    /// non-literal argument is simply absent here.
+    private func collectImport(macroName: String, arguments: LabeledExprListSyntax) {
+        guard macroName == "ZerkImport" else {
+            return
+        }
+        for argument in arguments {
+            if let module = argument.moduleNameLiteral {
+                importedModules.insert(module)
+            }
+        }
     }
 
     private func collectAlias(macroName: String,

@@ -122,7 +122,8 @@ enum CompileFixture {
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
             markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
-            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
+            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
+            importedModules: collector.importedModules
         ).build()
     }
 
@@ -150,7 +151,8 @@ enum CompileFixture {
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
             markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
-            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
+            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
+            importedModules: collector.importedModules
         ).build()
 
         return (output, collector.diagnostics + resolution.diagnostics + output.diagnostics)
