@@ -337,3 +337,54 @@ struct ParameterizedKeyInjectionTests {
         #expect(mixed.described == "x|true")
     }
 }
+
+@Suite("Generic key interjection", .zerk)
+struct GenericKeyInterjectionTests {
+
+    /// A double whose identity is checkable: `Logger` is not a singleton here,
+    /// so a freshly built one always has a serial of its own.
+    private func makeDouble<E>(_: E.Type) -> Repository<E> {
+        Repository<E>(codec: .init(logger: .init()), logger: .init())
+    }
+
+    @Test("a generic key interjects per specialization, by key path")
+    func byKeyPathPerSpecialization() {
+        let double = makeDouble(String.self)
+        #Interject(\.`repository`, with: double)
+
+        // The point is scoped by the generated marker, so it reaches exactly
+        // `Repository`'s specializations...
+        let strings: Repository<String> = Zerk<Repository<String>>.inject()
+        #expect(strings.logger.serial == double.logger.serial)
+
+        // ...and only the one registered. A sibling is built for real.
+        let ints: Repository<Int> = Zerk<Repository<Int>>.inject()
+        #expect(ints.logger.serial != double.logger.serial)
+    }
+
+    @Test("a blanket reaches a generic key too")
+    func blanketOnASpecialization() {
+        let double = makeDouble(String.self)
+        #Interject<Repository<String>>(with: double)
+
+        let resolved: Repository<String> = Zerk<Repository<String>>.inject()
+        #expect(resolved.logger.serial == double.logger.serial)
+
+        // Interjection does not short-circuit resolution: the member's defaults
+        // are evaluated before its guard runs, so the real subtree is still
+        // built. That is by design and holds for a generic key too.
+        CodecCounter.builds = []
+        _ = Zerk<Repository<String>>.inject() as Repository<String>
+        #expect(CodecCounter.builds == ["String"])
+    }
+
+    @Test("a parameterized existential key is reachable by key")
+    func parameterizedExistentialByKey() {
+        #Interject<any Pairing<Int, String>>(with: Pair(99, "z"))
+        let pair: any Pairing<Int, String> = Zerk<any Pairing<Int, String>>.inject(1, "a")
+        #expect(pair.described == "99|z")
+        // A different specialization resolves for real.
+        let other: any Pairing<Bool, Bool> = Zerk<any Pairing<Bool, Bool>>.inject(true, false)
+        #expect(other.described == "true|false")
+    }
+}

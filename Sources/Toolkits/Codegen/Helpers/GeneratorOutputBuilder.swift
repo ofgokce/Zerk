@@ -250,7 +250,7 @@ struct GeneratorOutputBuilder {
             output.append("}")
             output.append("")
 
-            points.append(InterjectionPoint(zerkArgument: value.typeKey, name: point))
+            points.append(InterjectionPoint(scope: .key(value.typeKey), name: point))
         }
 
         if !thunkLines.isEmpty {
@@ -450,7 +450,7 @@ struct GeneratorOutputBuilder {
                 return nil
             }
             let point = pointNames[pointIdentity(for: provider)] ?? memberName
-            points.append(InterjectionPoint(zerkArgument: injectableKey, name: point))
+            points.append(InterjectionPoint(scope: .key(injectableKey), name: point))
             return singletonLines(
                 for: provider,
                 injectableKey: injectableKey,
@@ -476,22 +476,12 @@ struct GeneratorOutputBuilder {
             let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))(\(builderArguments(allParameters, useParameterNames: true, defaults: defaults)))"
             lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(generics.parameters)\(signature)\(ownEffects.declarationSuffix) -> \(keyText)\(generics.whereClause) {")
             let point = pointNames[pointIdentity(for: provider)] ?? memberName
-            // A generic key has no interjection point yet: the namespace
-            // extension that would declare one cannot bind the parameter —
-            // `extension Zerk<Cache<E>>.Interjection` is "cannot find type 'E'
-            // in scope" — and the marker-protocol route that can is its own
-            // piece of work. Guarding against a point that does not exist would
-            // not compile, so a generic member carries none. `#Interject` on
-            // such a key registers, resolves nothing, and fails the test loudly
-            // rather than passing quietly.
-            if !provider.keyIsGeneric {
-                lines += interjectionGuardLines(point: "`\(point)`")
-            }
+            lines += interjectionGuardLines(for: provider, point: point)
             lines.append("        return \(construction)")
             lines.append("    }")
 
-            if !provider.keyIsGeneric {
-                points.append(InterjectionPoint(zerkArgument: injectableKey, name: point))
+            if let scope = pointScope(for: provider, injectableKey: injectableKey) {
+                points.append(InterjectionPoint(scope: scope, name: point))
             }
 
             // The companion `var` is a property too, so it goes the same way.
@@ -509,11 +499,13 @@ struct GeneratorOutputBuilder {
             let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))()"
             lines.append("    \(isolation.declarationPrefix)\(access)static var \(memberName): \(keyText) {")
             let point = pointNames[pointIdentity(for: provider)] ?? memberName
-            lines += interjectionGuardLines(point: "`\(point)`")
+            lines += interjectionGuardLines(for: provider, point: point)
             lines.append("        return \(construction)")
             lines.append("    }")
 
-            points.append(InterjectionPoint(zerkArgument: injectableKey, name: point))
+            if let scope = pointScope(for: provider, injectableKey: injectableKey) {
+                points.append(InterjectionPoint(scope: scope, name: point))
+            }
         }
 
         guard classification.requiresSplit else {
@@ -1408,6 +1400,52 @@ struct GeneratorOutputBuilder {
     /// `@inlinable`, so a release build deletes the branch *and* the key-path
     /// formation. Confirmed in optimized SIL: the member reduces to its
     /// construction alone.
+    /// The guard for one provider's member, which differs by what its key can
+    /// declare a point on.
+    ///
+    /// - A key that is a type gets a point in its own namespace, and the guard
+    ///   names it.
+    /// - A **generic** key cannot — `extension Zerk<Cache<E>>.Interjection` is
+    ///   "cannot find type 'E' in scope" — but a generated marker protocol
+    ///   scopes one to exactly its specializations, so the guard is the same.
+    /// - A **parameterized existential** key can do neither: an existential
+    ///   conforms to nothing, so there is no marker to constrain by. It falls
+    ///   back to the by-key lookup, which needs no point — `#Interject<any
+    ///   Boxable<Int, String>>` still reaches it.
+    private func interjectionGuardLines(for provider: ProviderResolution,
+                                        point: String) -> [String] {
+        guard !provider.isParameterizedExistential else {
+            return [
+                "        if let interjected = _$interjected() {",
+                "            return interjected",
+                "        }"
+            ]
+        }
+        return interjectionGuardLines(point: "`\(point)`")
+    }
+
+    /// Where this provider's point is declared, or `nil` when it can have none.
+    private func pointScope(for provider: ProviderResolution,
+                            injectableKey: String) -> InterjectionPoint.Scope? {
+        if provider.isParameterizedExistential {
+            return nil
+        }
+        guard provider.keyIsGeneric else {
+            return .key(injectableKey)
+        }
+        // A generic key is the registering type itself, so that type is what
+        // carries the marker.
+        //
+        // The type's name goes in **verbatim**, inside a raw identifier, rather
+        // than through `sanitizedIdentifier`. Sanitizing collapses `Outer.Bar`
+        // and `OuterBar` onto one name, which for two markers would mean one
+        // protocol claiming both families and points leaking between them.
+        // Backticks the type itself carried are dropped, since the name is being
+        // put inside a pair of them.
+        return .marker(protocolName: "_$ZerkInjectable_\(provider.typeName.filter { $0 != "`" })",
+                       baseType: provider.typeName)
+    }
+
     private func interjectionGuardLines(point: String,
                                         indent: String = "        ") -> [String] {
         [
@@ -1587,16 +1625,35 @@ struct GeneratorOutputBuilder {
         }
 
         var lines: [String] = []
-        let grouped = Dictionary(grouping: points, by: \.zerkArgument)
+        let grouped = Dictionary(grouping: points, by: \.scope)
 
-        for zerkArgument in grouped.keys.sorted() {
+        // Markers first, and each declared once: the protocol and its
+        // conformance have to precede the extension constrained by them, and a
+        // base type with several generic keys would otherwise conform twice.
+        var declaredMarkers = Set<String>()
+        for scope in grouped.keys.sorted(by: { Self.scopeOrder($0) < Self.scopeOrder($1) }) {
+            guard case .marker(let protocolName, let baseType) = scope,
+                  declaredMarkers.insert(protocolName).inserted else {
+                continue
+            }
+            lines.append("protocol `\(protocolName)` {}")
+            lines.append("extension \(baseType): `\(protocolName)` {}")
+            lines.append("")
+        }
+
+        for scope in grouped.keys.sorted(by: { Self.scopeOrder($0) < Self.scopeOrder($1) }) {
             // Deduped by name, which already carries the parameters: several
             // providers for one key can share a member name, and each overload
             // needs its own point.
             var seen = Set<String>()
-            let names = grouped[zerkArgument]!.map(\.name).sorted()
+            let names = grouped[scope]!.map(\.name).sorted()
 
-            lines.append("extension Zerk<\(displayName(for: zerkArgument))>.Interjection {")
+            switch scope {
+            case .key(let key):
+                lines.append("extension Zerk<\(displayName(for: key))>.Interjection {")
+            case .marker(let protocolName, _):
+                lines.append("extension Zerk.Interjection where Injectable: `\(protocolName)` {")
+            }
             for name in names where seen.insert(name).inserted {
                 lines.append("    var `\(name)`: Void {}")
             }
@@ -1605,6 +1662,17 @@ struct GeneratorOutputBuilder {
         }
 
         return lines
+    }
+
+    /// A stable order for point scopes, so the generated file does not depend on
+    /// dictionary iteration.
+    static func scopeOrder(_ scope: InterjectionPoint.Scope) -> String {
+        switch scope {
+        case .key(let key):
+            return "0\(key)"
+        case .marker(let protocolName, _):
+            return "1\(protocolName)"
+        }
     }
 
     /// What makes two interjection requirements the same requirement: the

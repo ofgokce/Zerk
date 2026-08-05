@@ -1,5 +1,5 @@
 //
-//  ZerkTraitEdgeTests.swift
+//  ZerkInterjectionsEdgeTests.swift
 //  Zerk
 //
 
@@ -9,8 +9,8 @@ import ZerkTesting
 
 /// Parameterized and repeated tests — the shapes where a task-local trait is
 /// most likely to hand two cases the same scope.
-@Suite("Zerk trait edges", .zerk)
-struct ZerkTraitEdgeTests {
+@Suite("Zerk interjections, edges", .zerk)
+struct ZerkInterjectionsEdgeTests {
 
     @Test("each parameterized case gets its own scope", arguments: ["a", "b", "c", "d"])
     func parameterizedCasesAreIsolated(tag: String) async throws {

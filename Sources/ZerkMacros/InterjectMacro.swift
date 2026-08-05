@@ -14,13 +14,15 @@ import SwiftSyntaxMacros
 ///
 /// ```swift
 /// #Interject<Loading>(with: Mock())   ->  Zerk<Loading>._$interject { Mock() }
-/// #Interject(\.live, with: Mock())    ->  _$zerkInterject(\.live) { Mock() }
+/// #Interject(\.live, with: Mock())    ->  Zerk._$interject(\.live) { Mock() }
 /// ```
 ///
 /// The second cannot name `Zerk<Loading>`, because a macro sees only syntax and
-/// never learns what the key path's root was inferred to be. Expanding to the
-/// free function hands that back to the type checker, which solved it to begin
-/// with.
+/// never learns what the key path's root was inferred to be. Leaving `Zerk`
+/// unbound hands that back to the type checker, which solved it to begin with:
+/// `Injectable` appears in `_$interject`'s own signature, so the double infers
+/// it, and the key path rejects the candidate that would otherwise win — the
+/// double's own concrete type, which registers under a key nothing resolves.
 public struct InterjectMacro: ExpressionMacro {
 
     public static func expansion(of node: some FreestandingMacroExpansionSyntax,
@@ -51,7 +53,13 @@ public struct InterjectMacro: ExpressionMacro {
             return "()"
         }
 
-        let receiver = key.map { "Zerk<\($0)>._$interject" } ?? "_$zerkInterject"
+        // Unbound when the key was not written. A macro never learns what the
+        // key path's root was solved to, so it cannot write `Zerk<Loading>` —
+        // but it does not have to: `Injectable` appears in the member's own
+        // signature, so the type checker infers it from the double, and the key
+        // path rejects the candidate that would otherwise win (the double's own
+        // concrete type, which registers under a key nothing resolves).
+        let receiver = key.map { "Zerk<\($0)>._$interject" } ?? "Zerk._$interject"
 
         guard let keyPath else {
             return "\(raw: receiver)(\(raw: body))"

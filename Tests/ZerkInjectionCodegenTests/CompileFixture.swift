@@ -276,6 +276,7 @@ enum CompileFixture {
     public extension Zerk {
         enum Interjection {}
         static func _$interjected(for keyPath: KeyPath<Interjection, Void>) -> Injectable? { nil }
+        static func _$interjected() -> Injectable? { nil }
     }
 
     @propertyWrapper

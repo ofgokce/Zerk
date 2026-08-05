@@ -521,12 +521,12 @@ struct GenericEmissionTests {
         #expect(compiled.didCompile, "\(compiled.compilerOutput)")
     }
 
-    @Test("a generic member carries no interjection guard or point")
-    func genericMembersAreNotYetInterjectable() {
-        // A point cannot be declared for a generic key — `extension
+    @Test("a generic key declares its point through a marker protocol")
+    func genericKeyPointGoesThroughAMarker() throws {
+        // The namespace extension cannot name the parameter — `extension
         // Zerk<Cache<E>>.Interjection` is "cannot find type 'E' in scope" — so
-        // the member carries no guard either. The concrete key alongside it
-        // keeps both, which is what makes this a gap rather than a regression.
+        // the point is scoped by a generated protocol the base type conforms to
+        // unconditionally. That covers exactly `Cache`'s specializations.
         let source = """
         @Injectable
         struct Cache<E> {
@@ -543,10 +543,93 @@ struct GenericEmissionTests {
 
         let output = CompileFixture.generate(source: source)
 
+        #expect(output.contains("protocol `_$ZerkInjectable_Cache` {}"))
+        #expect(output.contains("extension Cache: `_$ZerkInjectable_Cache` {}"))
+        #expect(output.contains("extension Zerk.Interjection where Injectable: `_$ZerkInjectable_Cache` {"))
+        #expect(output.contains("var `cache`: Void {}"))
         #expect(!output.contains("extension Zerk<Cache<E>>.Interjection"))
-        #expect(!output.contains("\\.`cache`"))
+        // The generic member carries the same guard a concrete one does.
+        #expect(output.contains("if let interjected = _$interjected(for: \\.`cache`)"))
+        // The concrete key alongside it is untouched.
         #expect(output.contains("extension Zerk<Logger>.Interjection"))
-        #expect(output.contains("\\.`logger`"))
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)")
+    }
+
+    @Test("a parameterized existential key falls back to the by-key guard")
+    func parameterizedExistentialKeyUsesTheBlanketGuard() throws {
+        // An existential conforms to nothing, so there is no marker to scope a
+        // point by. `#Interject<any Boxable<Int, String>>` needs no point, and
+        // that is the lookup the member gets.
+        let source = """
+        protocol Boxable<X, Y> { associatedtype X; associatedtype Y }
+
+        @Injectable<any Boxable>(parameterized: true)
+        struct Box<X, Y>: Boxable {
+            @InjectableProviding
+            init(_ x: X, _ y: Y) {}
+        }
+        """
+
+        let output = CompileFixture.generate(source: source)
+
+        #expect(output.contains("if let interjected = _$interjected() {"))
+        #expect(!output.contains("_$ZerkInjectable_Box"))
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)")
+    }
+
+    @Test("marker names cannot collide the way sanitized ones did")
+    func markerNamesDoNotCollide() throws {
+        // `sanitizedIdentifier` maps `Outer.Bar` and `OuterBar` onto one name —
+        // the collision the old `Interjecting___` protocols had. The marker uses
+        // the type's name verbatim inside a raw identifier, so the two stay
+        // distinct and neither family's points leak into the other.
+        let source = """
+        enum Outer {
+            @Injectable
+            struct Bar<E> {
+                @InjectableProviding
+                init() {}
+            }
+        }
+
+        @Injectable
+        struct OuterBar<E> {
+            @InjectableProviding
+            init() {}
+        }
+        """
+
+        let output = CompileFixture.generate(source: source)
+
+        #expect(output.contains("protocol `_$ZerkInjectable_Bar` {}"))
+        #expect(output.contains("protocol `_$ZerkInjectable_OuterBar` {}"))
+        // Two families, two markers, two constrained extensions.
+        #expect(output.components(separatedBy: "extension Zerk.Interjection where Injectable: `_$ZerkInjectable_")
+            .count - 1 == 2)
+    }
+
+    @Test("one marker is declared however many members a key has")
+    func markerIsDeclaredOnce() {
+        let source = """
+        @Injectable
+        struct Cache<E> {
+            @InjectableProviding
+            init() {}
+            @InjectableProviding
+            init(seed: Int) {}
+        }
+        """
+
+        let output = CompileFixture.generate(source: source)
+
+        #expect(output.components(separatedBy: "protocol `_$ZerkInjectable_Cache` {}").count - 1 == 1)
+        #expect(output.components(separatedBy: "extension Cache: `_$ZerkInjectable_Cache` {}").count - 1 == 1)
     }
 
     @Test("an @Injected overload binds only the parameters its signature names")

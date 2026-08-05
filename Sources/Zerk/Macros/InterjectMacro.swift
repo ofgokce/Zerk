@@ -14,7 +14,7 @@
 /// Interjections belong to the scope in force — the `.zerk` trait gives each
 /// test its own, so parallel tests never see each other's. Outside a scope this
 /// traps rather than leaking, except in a SwiftUI preview, where the process is
-/// the scope; see ``ZerkInterjections/processDefault``.
+/// the scope; see ``ZerkInterjector/processDefault``.
 ///
 /// ## Naming a member
 ///

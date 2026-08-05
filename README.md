@@ -9,6 +9,8 @@ Zerk is a compile-time dependency injection framework for Swift. Instead of a ru
 
 For testing, the same plugin gives every generated member a named interjection point, so `#Interject` can stand a double in for any injectable — one member, or a whole key at once — without touching production code. Interjections belong to a scope, so tests keep running in parallel, and they compile to nothing in release.
 
+Generic types are registered like any other: `@Injectable struct Cache<E>` makes `Zerk<Cache<String>>.inject()` resolve, and any specialization of it satisfies a dependency that asks for one.
+
 ## What's changed
 
 Zerk 2 is a ground-up replacement for the original runtime container:
@@ -91,7 +93,7 @@ targets: [
 ]
 ```
 
-The package vends three products: the `Zerk` library (the macros and the `Zerk<Key>` namespace), the `ZerkPlugin` build-tool plugin, and `ZerkTesting` (the `.zerk` trait). `ZerkTesting` depends on swift-testing, so keep it to test targets:
+The package vends three products: the `Zerk` library (the macros and the `Zerk<Key>` namespace), the `ZerkPlugin` build-tool plugin, and `ZerkTesting` (the `ZerkInterjections` trait, spelled `.zerk` at a use site). `ZerkTesting` depends on swift-testing, so keep it to test targets:
 
 ```swift
     .testTarget(
@@ -161,7 +163,7 @@ extension Zerk<ApiServicing>.Interjection {
 
 Zerk is a macro package and a build-tool plugin, and it is worth knowing which does what — because **almost none of the code generation happens in the macros.**
 
-`@Injectable`, `@InjectableProviding`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a type that does not conform to the key it claims, a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<Key>.inject()`) depends on nothing but the property's own type.
+`@Injectable`, `@InjectableProviding`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier, a generic parameter nothing can infer — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<Key>.inject()`) depends on nothing but the property's own type.
 
 Everything else is the plugin, for one reason: an attached macro can only see the declaration it is attached to, while resolving a dependency graph requires the whole module. So `ZerkPlugin` runs `ZerkCodegen` over every `.swift` file in the target, in three stages:
 
@@ -557,9 +559,95 @@ The lowercase name is deliberate: `@Injected` is the property macro, `@injected`
 
 Effects propagate through the chain: if a provider is `async`/`throws`, the generated members and `inject()` are too, and transitive dependents inherit the effects. `@Injected` expands to a synchronous accessor and cannot resolve such chains (the codegen emits an error if you try); resolve them manually, or use an `@injected` parameter, whose generated overload inherits the chain's effects.
 
+## Generic injectables
+
+A generic type can be registered three ways, and which one you get depends on the key you write. They are genuinely different — the same attribute with and without `parameterized:` means opposite things — so the table is worth reading before the prose:
+
+| you write | key | resolved as |
+|---|---|---|
+| `@Injectable` | the type itself | `Zerk<Cache<String>>.inject()` |
+| `@Injectable<any P>` | `any P`, parameters erased | `Zerk<any P>.inject(1, "a")` |
+| `@Injectable<any P>(parameterized: true)` | `any P<X, Y>` | `Zerk<any P<Int, String>>.inject(1, "a")` |
+
+**Generic types register under themselves, and only under themselves.** `@Injectable struct Cache<E>` becomes members of an unconstrained `extension Zerk` that bind the key per call — `static func cache<E>() -> Cache<E> where Injectable == Cache<E>` — so `Zerk<Cache<String>>.inject()` resolves, and a dependency on any specialization resolves with it. A concrete registration for one specialization coexists with the generic one and wins it, exactly as Swift's own overload resolution does. Three limits:
+
+- **No `@Singleton`.** Its storage is a static stored property, which Swift does not allow in a generic type — there is nowhere to keep one instance per specialization. This one is permanent.
+- **`@InjectableValue` on a generic function** stays refused: a value's key *is* its return type, so a free parameter there is a key nothing can register.
+- **Members are functions.** A property takes no generic parameters, so a generic key has no `Zerk<Cache<String>>.cache` spelling and no `@Injected(\.member)` key path — call `Zerk<Cache<String>>.cache()` or `inject()`.
+
+**A generic type may also register under a concrete key, erasing its parameters.** The attribute cannot name them — `@Injectable<Cache<E>>` is rejected by Swift itself — but a key that erases them works, provided every parameter arrives as an argument the caller can supply:
+
+```swift
+@Injectable<any Boxable>
+struct Box<X, Y>: Boxable {
+    @InjectableProviding init(_ x: X, _ y: Y) { … }
+}
+
+// extension Zerk<any Boxable> {
+//     static func box<X, Y>(_ x: X, _ y: Y) -> any Boxable { … }
+//     static func inject<X, Y>(_ x: X, _ y: Y) -> any Boxable { box(x, y) }
+// }
+
+@Injected(1, "a") var box: any Boxable
+```
+
+**A provider may add generic parameters of its own**, on a generic type or a plain one:
+
+```swift
+@Injectable
+struct Box { init<X, Y>(x: X, y: Y) { … } }
+// static func box<X, Y>(x: X, y: Y) -> Box
+
+@Injectable
+struct Pair<X, Y> { init<Z>(x: X, y: Y, z: Z) { … } }
+// static func pair<X, Y, Z>(x: X, y: Y, z: Z) -> Pair<X, Y> where Injectable == Pair<X, Y>
+```
+
+The rule across all of these is Swift's own, reported at your declaration rather than in generated code: **every generic parameter the member declares must appear in its signature.** The return type supplies the ones a generic key carries; everything else has to arrive as an argument. A parameter nothing can infer is a build error. And because this key is concrete, it keeps its interjection point — unlike a generic key.
+
+**Or the key can carry the parameters, with `parameterized: true`.** The protocol's primary associated types take the type's own parameters, so the specialization survives into the key instead of being erased:
+
+```swift
+protocol Boxable<X, Y> { associatedtype X; associatedtype Y }
+
+@Injectable<any Boxable>(parameterized: true)
+struct Box<X, Y>: Boxable {
+    @InjectableProviding init(_ x: X, _ y: Y) { … }
+}
+
+Zerk<any Boxable<Int, String>>.inject(1, "a")   // any Boxable<Int, String>
+```
+
+It has to be asked for: the same attribute without it means the opposite, and both are legal. The key cannot be written out in full — `@Injectable<any Boxable<X, Y>>` is rejected by Swift itself, since an attribute is resolved outside the declaration's scope.
+
+Three things are checked: the type must be generic, the key must be spelled `any P` (Zerk never *adds* `any` — it cannot tell a protocol from a class), and the protocol's primary associated types must be as many as the type's parameters. The conformance must also map them positionally; Zerk reads syntax and cannot check that, so a crossed-over conformance is a compile error on the generated member naming both real types.
+
+Parameterized existentials arrived in iOS 16 / macOS 13, so the generated extension carries an `@available` attribute. The plugin cannot read your deployment target, so it is emitted unconditionally — which costs nothing if you deploy higher.
+
+**Generic keys are interjectable per specialization.** The namespace extension cannot name the parameter, so the plugin declares a marker protocol the base type conforms to, and scopes the point by that:
+
+```swift
+protocol `_$ZerkInjectable_Cache` {}
+extension Cache: `_$ZerkInjectable_Cache` {}
+extension Zerk.Interjection where Injectable: `_$ZerkInjectable_Cache` {
+    var `cache`: Void {}
+}
+```
+
+So both forms work, and each reaches exactly the specialization it names — `Cache<Int>` is untouched by a double registered for `Cache<String>`:
+
+```swift
+#Interject(\.cache, with: Cache<String>(…))
+#Interject<Cache<String>>(with: …)
+```
+
+There is no way to stand one double in for *every* specialization at once: a closure cannot be generic, so the registration has to name the specialization it covers.
+
+A **parameterized existential** key is the exception. An existential conforms to nothing, so it can have no marker and no point — it is reachable by key only, with `#Interject<any Boxable<Int, String>>(with:)`.
+
 ## Testing with interjection
 
-Every generated member opens with a lookup against the interjections in force, and the plugin declares a matching point on that key's `Interjection` namespace — named, via a raw identifier, verbatim after the member's signature:
+Every generated member opens with a lookup against the interjections in force, and the plugin declares a matching point on that key's `Interjection` namespace — named, via a raw identifier, verbatim after the member's signature. A generic key works the same way, through a generated marker protocol — see [Generic injectables](#generic-injectables):
 
 ```swift
 // Generated:
@@ -620,7 +708,21 @@ A group escalates as a whole, so every overload of one name is spelled the same 
 
 **When the double is built.** `with:` is an autoclosure, so it runs on every resolution rather than once at registration — a fresh double each time, matching Zerk's transient default. To hold one and assert on it afterwards, capture it (`#Interject(\.live, with: mock)`), which requires `mock` to be `Sendable` since a scope is shared across tasks. Built inline, nothing is captured and nothing needs to be `Sendable`.
 
-**Scopes.** Interjections belong to the scope in force. `.zerk` opens one per test — `isRecursive`, so a suite-level trait scopes each test rather than the suite — which is what lets tests interject the same key in parallel without seeing each other. Seed a suite with `.zerk { #Interject<ApiServicing>(with: MockApi()) }`; the seed runs per test, and a test's own interjections win. Under XCTest, override `invokeTest()` to wrap `super.invokeTest()` in `Zerk.withInterjections { }`.
+**Scopes.** Interjections belong to the scope in force. `.zerk` opens one per test — `isRecursive`, so a suite-level trait scopes each test rather than the suite — which is what lets tests interject the same key in parallel without seeing each other. Start a suite from a shared set with `.zerk { #Interject<ApiServicing>(with: MockApi()) }`; it runs per test, and a test's own interjections win. Under XCTest, override `invokeTest()` to wrap `super.invokeTest()` in `Zerk.withInterjections { }`.
+
+A set worth reusing can be named, since `ZerkInterjections` is an ordinary value as well as a trait:
+
+```swift
+let apiDoubles = ZerkInterjections {
+    #Interject<ApiServicing>(with: MockApi())
+    #Interject(\.staging, with: Session.mock)
+}
+
+@Suite(apiDoubles) struct CheckoutTests { … }
+@Suite(apiDoubles) struct FeedTests { … }
+```
+
+It is still per test, not per suite: the doubles are rebuilt for each, so sharing one between suites carries no state across.
 
 Outside a scope, `#Interject` **traps** rather than leaking into whatever runs alongside. The one exception is a SwiftUI preview, where the process genuinely is the scope:
 
@@ -773,7 +875,7 @@ What it cannot unify needs real type resolution, and stays distinct: module qual
 
 A target that declares no injectables needs no plugin and can still use `@Injected`: exporting a key publicizes its members, so it can resolve the primary with a bare `@Injected` or name one with `@Injected(\.staging)`. Without `public: true`, generated members are `internal` and invisible across the boundary.
 
-**Conformances must be written on the declaration.** `@Injectable<Key>` checks that the type lists `Key` in its own inheritance clause. A conformance added in an extension, inherited transitively, or declared in another module is invisible to a syntax-only plugin.
+**Conformance is the compiler's to check, not Zerk's.** `@Injectable<Key>` takes your word for it. The generated `inject()` returns `Key` and builds your type, so a type that does not actually conform fails there — `return expression of type 'Store' does not conform to 'Storing'`, naming both. Zerk used to check the inheritance clause itself and refused three correct spellings for it: a conformance added in an extension, one inherited transitively, and `Box<X, Y>: Boxable<X, Y>`, which is legal and genuinely conforms.
 
 **Global actor detection is heuristic.** `@MainActor` is recognized exactly; any other attribute ending in `Actor` is assumed to be a global actor. A custom global actor named otherwise, or isolation inherited through a conformance, is invisible to the plugin — annotate it with `@Isolated<A>`.
 
@@ -787,62 +889,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 **Generated member names must be unique per key *per signature*.** Providers may share a member name when their parameters differ — two marked initializers both generate `Zerk<Key>.loader(...)`, told apart exactly as the initializers are. Two that agree on name *and* parameters (e.g. a `Service` in two files, both argument-free) collide; rename the type or use a distinctly named `@InjectableProviding` factory.
 
-**Generic types register under themselves, and only under themselves.** `@Injectable struct Cache<E>` becomes members of an unconstrained `extension Zerk` that bind the key per call — `static func cache<E>() -> Cache<E> where Injectable == Cache<E>` — so `Zerk<Cache<String>>.inject()` resolves, and a dependency on any specialization resolves with it. A concrete registration for one specialization coexists with the generic one and wins it, exactly as Swift's own overload resolution does. Four limits:
-
-- **No `@Singleton`.** Its storage is a static stored property, which Swift does not allow in a generic type — there is nowhere to keep one instance per specialization. This one is permanent.
-- **`@InjectableValue` on a generic function** stays refused: a value's key *is* its return type, so a free parameter there is a key nothing can register.
-- **Members are functions.** A property takes no generic parameters, so a generic key has no `Zerk<Cache<String>>.cache` spelling and no `@Injected(\.member)` key path — call `Zerk<Cache<String>>.cache()` or `inject()`.
-
-**A generic type may also register under a concrete key, erasing its parameters.** The attribute cannot name them — `@Injectable<Cache<E>>` is rejected by Swift itself — but a key that erases them works, provided every parameter arrives as an argument the caller can supply:
-
-```swift
-@Injectable<any Boxable>
-struct Box<X, Y>: Boxable {
-    @InjectableProviding init(_ x: X, _ y: Y) { … }
-}
-
-// extension Zerk<any Boxable> {
-//     static func box<X, Y>(_ x: X, _ y: Y) -> any Boxable { … }
-//     static func inject<X, Y>(_ x: X, _ y: Y) -> any Boxable { box(x, y) }
-// }
-
-@Injected(1, "a") var box: any Boxable
-```
-
-**A provider may add generic parameters of its own**, on a generic type or a plain one:
-
-```swift
-@Injectable
-struct Box { init<X, Y>(x: X, y: Y) { … } }
-// static func box<X, Y>(x: X, y: Y) -> Box
-
-@Injectable
-struct Pair<X, Y> { init<Z>(x: X, y: Y, z: Z) { … } }
-// static func pair<X, Y, Z>(x: X, y: Y, z: Z) -> Pair<X, Y> where Injectable == Pair<X, Y>
-```
-
-The rule across all of these is Swift's own, reported at your declaration rather than in generated code: **every generic parameter the member declares must appear in its signature.** The return type supplies the ones a generic key carries; everything else has to arrive as an argument. A parameter nothing can infer is a build error. And because this key is concrete, it keeps its interjection point — unlike a generic key.
-
-**Or the key can carry the parameters, with `parameterized: true`.** The protocol's primary associated types take the type's own parameters, so the specialization survives into the key instead of being erased:
-
-```swift
-protocol Boxable<X, Y> { associatedtype X; associatedtype Y }
-
-@Injectable<any Boxable>(parameterized: true)
-struct Box<X, Y>: Boxable {
-    @InjectableProviding init(_ x: X, _ y: Y) { … }
-}
-
-Zerk<any Boxable<Int, String>>.inject(1, "a")   // any Boxable<Int, String>
-```
-
-It has to be asked for: the same attribute without it means the opposite, and both are legal. The key cannot be written out in full — `@Injectable<any Boxable<X, Y>>` is rejected by Swift itself, since an attribute is resolved outside the declaration's scope.
-
-Three things are checked: the type must be generic, the key must be spelled `any P` (Zerk never *adds* `any` — it cannot tell a protocol from a class), and the protocol's primary associated types must be as many as the type's parameters. The conformance must also map them positionally; Zerk reads syntax and cannot check that, so a crossed-over conformance is a compile error on the generated member naming both real types.
-
-Parameterized existentials arrived in iOS 16 / macOS 13, so the generated extension carries an `@available` attribute. The plugin cannot read your deployment target, so it is emitted unconditionally — which costs nothing if you deploy higher.
-
-**Generic keys are not interjectable yet.** A member for a generic key carries no interjection guard, because the namespace extension that declares a point cannot bind the parameter. `#Interject<Cache<String>>(with:)` compiles and registers, but nothing reads it — a test written against it fails against the real value rather than passing quietly.
+**Generic injectables have their own rules** — three ways to register one, and what each can and cannot do. See [Generic injectables](#generic-injectables).
 
 **`@Singleton` constraints.** Reference types only; provider must be synchronous and non-throwing; no external arguments; no dependency in a different isolation domain, since resolving one would need `await`; exactly one provider per key, and the *same* provider across every key the type claims. A singleton injectable under several keys must be built by an initializer or by a factory returning the concrete type — its one instance is stored once and read through every key.
 

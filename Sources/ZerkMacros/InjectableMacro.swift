@@ -260,12 +260,14 @@ private extension InjectableMacro {
             for arg in keys {
                 let key = arg.normalizedTypeKey
 
-                if key != declaration.nameText && !declaration.inheritsOrConforms(to: key) {
-                    context.zerkError(
-                        attribute,
-                        "Type '\(declaration.nameText)' must explicitly conform to '\(key)' in its declaration."
-                    )
-                }
+                // Conformance is deliberately *not* checked here. Reading
+                // syntax, Zerk sees only what the declaration itself lists — not
+                // a conformance added in an extension, inherited transitively,
+                // or declared in another module — so the check refused code that
+                // was correct, and a parameterized spelling (`Box<X, Y>: Boxable<X, Y>`)
+                // failed it outright. The compiler settles the same question on
+                // the generated member, with both real types named and no false
+                // positives.
 
                 if injectableKeys[key] != nil {
                     context.zerkError(

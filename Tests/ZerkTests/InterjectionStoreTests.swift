@@ -119,7 +119,7 @@ struct InterjectionScopeTests {
         await fresh {
             Zerk<any IJServing>._$interject { IJMock(tag: "blanket") }
             Zerk<any IJServing>._$interject(livePath) { IJMock(tag: "specific") }
-            ZerkInterjections.current.removeAll()
+            ZerkInterjector.current.removeAll()
             #expect(member(livePath).tag == "live")
         }
     }
@@ -149,13 +149,13 @@ struct InterjectionScopeTests {
     func scopeReplacesTheProcessDefault() async {
         // The trap itself cannot be exercised — a precondition failure would
         // take the whole run down — so this checks the state that decides it.
-        #expect(ZerkInterjections.isRunningInPreview == false)
+        #expect(ZerkInterjector.isRunningInPreview == false)
         // No scope here, so the shared default is in force. Registering into it
         // is what would leak across concurrent tests, and what traps.
-        #expect(ZerkInterjections.current === ZerkInterjections.processDefault)
+        #expect(ZerkInterjector.current === ZerkInterjector.processDefault)
         // Inside a scope it is an instance of this test's own, which accepts.
         await fresh {
-            #expect(ZerkInterjections.current !== ZerkInterjections.processDefault)
+            #expect(ZerkInterjector.current !== ZerkInterjector.processDefault)
         }
     }
 

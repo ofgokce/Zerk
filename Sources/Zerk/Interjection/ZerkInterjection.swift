@@ -29,12 +29,18 @@ public extension Zerk {
     /// never-returning function, so `var bar: Never {}` does not compile.
     enum Interjection {}
 
-    /// This key's identity in ``ZerkInterjections``.
+    /// This key's identity in ``ZerkInterjector``.
     ///
     /// `Self`, not `Zerk<Injectable>`: inside this extension they are the same
     /// type, and naming the parameter is one more place a future rename could
     /// silently drift.
-    static var _$interjectionKey: ObjectIdentifier {
+    ///
+    /// `@usableFromInline` rather than `public`: nothing outside this extension
+    /// reads it — not even the generated file — but two of the members that do
+    /// are `@inlinable`, and an inlinable body may only name declarations
+    /// visible outside the module.
+    @usableFromInline
+    internal static var _$interjectionKey: ObjectIdentifier {
         ObjectIdentifier(Self.self)
     }
 
@@ -62,7 +68,23 @@ public extension Zerk {
     @inlinable
     static func _$interjected(for keyPath: KeyPath<Interjection, Void>) -> Injectable? {
         #if DEBUG
-        return ZerkInterjections.current.value(for: keyPath, of: _$interjectionKey)
+        return ZerkInterjector.current.value(for: keyPath, of: _$interjectionKey)
+        #else
+        return nil
+        #endif
+    }
+
+    /// The blanket double for this key, for members that have no point.
+    ///
+    /// A parameterized existential key (`any Boxable<X, Y>`) cannot take the
+    /// marker route a plain generic key takes: an existential conforms to
+    /// nothing, so there is no protocol to scope a point by. Such a member is
+    /// still reachable by key — `#Interject<any Boxable<Int, String>>` — which
+    /// needs no point, and this is the lookup for it.
+    @inlinable
+    static func _$interjected() -> Injectable? {
+        #if DEBUG
+        return ZerkInterjector.current.value(of: _$interjectionKey)
         #else
         return nil
         #endif
@@ -71,7 +93,7 @@ public extension Zerk {
     /// Registers a double for one member. The target of `#Interject(\.member)`.
     static func _$interject(_ keyPath: KeyPath<Interjection, Void>,
                             _ body: @escaping @Sendable () -> Injectable) {
-        ZerkInterjections.current.interject(keyPath, body)
+        ZerkInterjector.current.interject(keyPath, body)
     }
 
     /// Registers a double for **every** member of this key. The target of
@@ -80,20 +102,7 @@ public extension Zerk {
     /// Reaches parameterized members too — a blanket says "this key resolves to
     /// this, however it was asked for", so arguments are ignored by design.
     static func _$interject(_ body: @escaping @Sendable () -> Injectable) {
-        ZerkInterjections.current.interject(_$interjectionKey, body)
+        ZerkInterjector.current.interject(_$interjectionKey, body)
     }
 }
 
-/// Registration entry points that do **not** name the key.
-///
-/// `#Interject(\.live, with: MockLoader())` leaves the key to inference, and a
-/// macro only ever sees syntax — it never learns what `T` was solved to, so it
-/// cannot expand to `Zerk<Loading>._$interject(…)`. Expanding to these instead
-/// hands the same inference problem back to the type checker, which is where it
-/// was solved in the first place.
-///
-/// Not for direct use; write `#Interject` instead.
-public func _$zerkInterject<T>(_ keyPath: KeyPath<Zerk<T>.Interjection, Void>,
-                               _ body: @escaping @Sendable () -> T) {
-    Zerk<T>._$interject(keyPath, body)
-}

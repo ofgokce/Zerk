@@ -1,5 +1,5 @@
 //
-//  ZerkTraitTests.swift
+//  ZerkInterjectionsTests.swift
 //  Zerk
 //
 
@@ -9,12 +9,12 @@ import ZerkTesting
 
 /// The trait gives every test its own scope, so `#Interject` works with no
 /// `withInterjections` in sight — and nothing leaks between tests.
-@Suite("Zerk trait", .zerk)
-struct ZerkTraitTests {
+@Suite("Zerk interjections", .zerk)
+struct ZerkInterjectionsTests {
 
     @Test("a scope is in force without asking for one")
     func scopeIsProvided() {
-        #expect(ZerkInterjections.current !== ZerkInterjections.processDefault)
+        #expect(ZerkInterjector.current !== ZerkInterjector.processDefault)
     }
 
     @Test("interjecting needs no explicit scope")
@@ -53,27 +53,58 @@ struct ZerkTraitTests {
     }
 }
 
-/// The seeded form: every test starts from the same doubles, and may override.
-@Suite("Zerk trait, seeded", .zerk { #Interject<Loading>(with: TraitMock(tag: "seed")) })
-struct SeededZerkTraitTests {
+/// Shared interjections: every test starts from the same doubles, and may
+/// override them.
+@Suite("Zerk interjections, shared", .zerk { #Interject<Loading>(with: TraitMock(tag: "shared")) })
+struct SharedZerkInterjectionsTests {
 
-    @Test("the seed is in force")
-    func seedApplies() {
-        #expect((Zerk<Loading>.live as? TraitMock)?.tag == "seed")
+    @Test("the shared interjections are in force")
+    func sharedApply() {
+        #expect((Zerk<Loading>.live as? TraitMock)?.tag == "shared")
     }
 
-    @Test("a test can override the seed")
-    func testOverridesSeed() {
+    @Test("a test can override them")
+    func testOverridesShared() {
         #Interject<Loading>(with: TraitMock(tag: "own"))
         #expect((Zerk<Loading>.live as? TraitMock)?.tag == "own")
     }
 
     @Test("overriding in one test does not disturb another")
-    func seedSurvivesElsewhere() async throws {
+    func sharedSurviveElsewhere() async throws {
         for _ in 0..<40 {
-            #expect((Zerk<Loading>.live as? TraitMock)?.tag == "seed")
+            #expect((Zerk<Loading>.live as? TraitMock)?.tag == "shared")
             try await Task.sleep(nanoseconds: 100_000)
         }
+    }
+}
+
+/// The named form, which is the point of the value being a trait: one set,
+/// declared once, applied to as many suites as want it.
+let sharedDoubles = ZerkInterjections {
+    #Interject<Loading>(with: TraitMock(tag: "named"))
+}
+
+@Suite("Zerk interjections, named", sharedDoubles)
+struct NamedZerkInterjectionsTests {
+
+    @Test("a named set applies like an inline one")
+    func namedApplies() {
+        #expect((Zerk<Loading>.live as? TraitMock)?.tag == "named")
+    }
+
+    @Test("and is still per-test, not per-suite")
+    func namedIsPerTest() {
+        #Interject<Loading>(with: TraitMock(tag: "own"))
+        #expect((Zerk<Loading>.live as? TraitMock)?.tag == "own")
+    }
+}
+
+@Suite("Zerk interjections, named again", sharedDoubles)
+struct NamedAgainZerkInterjectionsTests {
+
+    @Test("the same set reaches a second suite untouched by the first")
+    func reachesASecondSuite() {
+        #expect((Zerk<Loading>.live as? TraitMock)?.tag == "named")
     }
 }
 

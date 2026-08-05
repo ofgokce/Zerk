@@ -117,22 +117,4 @@ public enum ZerkTypeDecl {
         }
     }
 
-    /// Whether the declaration *itself* lists `typeKey` as a supertype.
-    ///
-    /// Only the inheritance clause written on the declaration is visible here.
-    /// A conformance added in an extension, inherited transitively, or declared
-    /// in another module reads as absent — which is why `@Injectable<Key>`
-    /// requires the conformance to be spelled on the type.
-    public func inheritsOrConforms(to typeKey: String) -> Bool {
-        guard let clause = inheritanceClause else {
-            return false
-        }
-
-        for inherited in clause.inheritedTypes
-        where inherited.type.normalizedTypeKey == typeKey {
-            return true
-        }
-        
-        return false
-    }
 }
