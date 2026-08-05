@@ -104,7 +104,7 @@ struct ProviderResolver {
                     message: GenericRefusal.unboundKeyParameters(
                         on: resolution.typeName,
                         key: keyDisplayNames[resolution.injectableKey] ?? resolution.injectableKey,
-                        provider: resolution.provider.memberNameHint,
+                        provider: resolution.provider.declarationDescription,
                         parameters: unbound.fromKey
                     ),
                     location: resolution.provider.location
@@ -115,7 +115,7 @@ struct ProviderResolver {
                     severity: .error,
                     message: GenericRefusal.unboundProviderParameters(
                         on: resolution.typeName,
-                        provider: resolution.provider.memberNameHint,
+                        provider: resolution.provider.declarationDescription,
                         parameters: unbound.fromProvider
                     ),
                     location: resolution.provider.location
@@ -276,7 +276,7 @@ private extension ProviderResolver {
     /// How a provider is named in a diagnostic: a factory by its own name, an
     /// initializer as `init`.
     static func providerDescription(_ provider: ProviderChoice) -> String {
-        provider.memberNameHint.map { "'\($0)'" } ?? "init"
+        provider.declarationDescription.map { "'\($0)'" } ?? "init"
     }
 
     func resolution(of type: TypeRecord,

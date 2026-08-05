@@ -682,6 +682,19 @@ final class SourceCollector: SyntaxVisitor {
                     if attribute.primaryArgument == .nonLiteral {
                         diagnostics.append(nonLiteralPrimaryDiagnostic(at: initializerLocation))
                     }
+                    // `produced: nil` refuses `typeNamed:`: an initializer only
+                    // ever builds its own type, which its member is named after
+                    // already. A naming mistake keeps the provider — the error
+                    // is reported, and dropping it would add "no provider for
+                    // key" on top of it.
+                    let memberName = statedMemberName(
+                        from: [attribute],
+                        attribute: "@InjectableProviding",
+                        declared: nil,
+                        produced: nil,
+                        typeNamedRefusal: MemberNamingRefusal.typeNamedOnInitializer,
+                        at: initializerLocation
+                    ) ?? .typeName
                     defaultProviders.append(
                         InjectingProvider(
                             kind: .initializer,
@@ -691,7 +704,8 @@ final class SourceCollector: SyntaxVisitor {
                             returnTypeName: nil,
                             isolation: initializerIsolation,
                             isPrimary: attribute.primaryArgument.isTrue,
-                            genericParameters: initializerGenerics
+                            genericParameters: initializerGenerics,
+                            memberName: memberName
                         )
                     )
                 }
@@ -718,6 +732,11 @@ final class SourceCollector: SyntaxVisitor {
                 .parameters.map { $0.name.text } ?? []
 
             let returnType = function.signature.returnClause?.type.trimmedDescription ?? ""
+            // What `typeNamed:` names the member after: the type the factory
+            // *returns*, not the type it is declared inside. The two differ
+            // exactly when the factory is worth renaming — a provider type
+            // exists to build something that is not itself.
+            let producedName = function.signature.returnClause?.type.nominalBaseName
             let functionLocation = self.location(for: Syntax(function))
             let functionStated = statedIsolation(
                 modifiers: function.modifiers,
@@ -737,6 +756,20 @@ final class SourceCollector: SyntaxVisitor {
                     diagnostics.append(nonLiteralPrimaryDiagnostic(at: functionLocation))
                 }
 
+                // Named per attribute, as `primary` is: a factory bound to two
+                // keys can be called something different under each.
+                let memberName = statedMemberName(
+                    from: [attribute],
+                    attribute: "@InjectableProviding",
+                    declared: function.name.text,
+                    produced: producedName,
+                    typeNamedRefusal: MemberNamingRefusal.typeNamedNeedsNamedType(
+                        attribute: "@InjectableProviding",
+                        type: returnType
+                    ),
+                    at: functionLocation
+                ) ?? .stated(function.name.text)
+
                 let provider = InjectingProvider(
                     kind: .staticFunction(name: function.name.text),
                     parameters: function.signature.parameterClause.parameters
@@ -747,7 +780,8 @@ final class SourceCollector: SyntaxVisitor {
                     returnTypeName: returnType.isEmpty ? nil : returnType,
                     isolation: functionStated.resolved(default: typeIsolation),
                     isPrimary: attribute.primaryArgument.isTrue,
-                    genericParameters: functionGenerics
+                    genericParameters: functionGenerics,
+                    memberName: memberName
                 )
 
                 let genericKeys = attribute.genericArgumentKeys
@@ -1399,9 +1433,8 @@ final class SourceCollector: SyntaxVisitor {
     ///
     /// A `TypeRecord` rather than a new kind of record, because everything
     /// downstream — election, classification, emission — already works in those
-    /// terms. `name` is the *produced type*, not the declaration, so the
-    /// emitter's own "name the member after the key's type" fallback is exactly
-    /// what `typeNamed:` asks for.
+    /// terms. `name` is the *produced type*, not the declaration, which is also
+    /// what `typeNamed:` names the member after.
     private func collectInjectableDeclaration(node: Syntax,
                                               attributes: [AttributeSyntax],
                                               declaredName: String,
@@ -1433,16 +1466,24 @@ final class SourceCollector: SyntaxVisitor {
             return
         }
 
-        guard let memberName = injectableMemberName(from: attributes,
-                                                    declaredName: declaredName,
-                                                    at: location) else {
-            return
-        }
-
         // A generic declaration registers exactly as `struct Box<X, Y>` does —
         // under the shape `Box<#0, #1>`, displayed as written. A concrete one
         // keys on the produced type itself.
         let baseName = producedType.nominalBaseName ?? producedType.trimmedDescription
+
+        guard let memberName = statedMemberName(
+            from: attributes,
+            attribute: "@Injectable",
+            declared: declaredName,
+            produced: producedType.nominalBaseName,
+            typeNamedRefusal: MemberNamingRefusal.typeNamedNeedsNamedType(
+                attribute: "@Injectable",
+                type: producedType.trimmedDescription
+            ),
+            at: location
+        ) else {
+            return
+        }
         let ownKey = genericParameters.isEmpty
             ? producedType.normalizedTypeKey
             : KeyShape.text(base: baseName, arity: genericParameters.count)
@@ -1508,13 +1549,33 @@ final class SourceCollector: SyntaxVisitor {
         )
     }
 
-    /// What the generated member is called: the declaration's own name by
-    /// default, the key's type under `typeNamed:`, or whatever `name:` says.
+    // MARK: - Member naming
+
+    /// What the member generated for a provider is called.
+    ///
+    /// Three answers, and the attribute picks between them: the declaration's
+    /// own name by default, the type it produces under `typeNamed:`, or whatever
+    /// `name:` says.
+    ///
+    /// - Parameters:
+    ///   - declared: what the member is called with nothing stated — a
+    ///     declaration's or a factory's own name, and `nil` for an initializer,
+    ///     which has none.
+    ///   - produced: the name of the type the provider builds, which is what
+    ///     `typeNamed:` names the member after. `nil` when there is no such name
+    ///     to take, which `typeNamedRefusal` explains.
+    ///   - typeNamedRefusal: what to report if `typeNamed:` is asked for anyway.
+    ///     The reasons differ — an initializer produces its own type and is
+    ///     named after it already, while a factory may return something
+    ///     unnamed — so the caller, which knows which it has, supplies it.
     ///
     /// Returns `nil` when the attributes disagree, having reported it.
-    private func injectableMemberName(from attributes: [AttributeSyntax],
-                                      declaredName: String,
-                                      at location: AttributeLocation) -> String?? {
+    private func statedMemberName(from attributes: [AttributeSyntax],
+                                  attribute name: String,
+                                  declared: String?,
+                                  produced: String?,
+                                  typeNamedRefusal: String,
+                                  at location: AttributeLocation) -> ProviderMemberName? {
         var typeNamed = false
         var explicit: String?
 
@@ -1523,11 +1584,19 @@ final class SourceCollector: SyntaxVisitor {
             case .nonLiteral:
                 diagnostics.append(CodegenDiagnostic(
                     severity: .error,
-                    message: "@Injectable(typeNamed:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression.",
+                    message: MemberNamingRefusal.nonLiteralTypeNamed(attribute: name),
                     location: location
                 ))
                 return nil
             case .literal(let value):
+                guard produced != nil else {
+                    diagnostics.append(CodegenDiagnostic(
+                        severity: .error,
+                        message: typeNamedRefusal,
+                        location: location
+                    ))
+                    return nil
+                }
                 typeNamed = typeNamed || value
             case .absent:
                 break
@@ -1537,7 +1606,7 @@ final class SourceCollector: SyntaxVisitor {
             case .nonLiteral:
                 diagnostics.append(CodegenDiagnostic(
                     severity: .error,
-                    message: "@Injectable(name:) requires a string literal. Zerk reads this from source and cannot evaluate an expression or an interpolation.",
+                    message: MemberNamingRefusal.nonLiteralName(attribute: name),
                     location: location
                 ))
                 return nil
@@ -1551,14 +1620,18 @@ final class SourceCollector: SyntaxVisitor {
         if typeNamed, let explicit {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "@Injectable states both 'typeNamed: true' and 'name: \"\(explicit)\"'. They name the same member two ways — keep one.",
+                message: MemberNamingRefusal.conflictingNames(attribute: name, name: explicit),
                 location: location
             ))
             return nil
         }
-        // `.some(nil)` is "name it after the type", which is the emitter's own
-        // fallback; `.some(.some(name))` states one outright.
-        return typeNamed ? .some(nil) : .some(explicit ?? declaredName)
+        if typeNamed, let produced {
+            return .stated(produced.memberNameForType)
+        }
+        if let stated = explicit ?? declared {
+            return .stated(stated)
+        }
+        return .typeName
     }
 
     // MARK: @injected parameter markers

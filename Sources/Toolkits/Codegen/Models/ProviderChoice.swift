@@ -88,20 +88,41 @@ enum ProviderChoice {
         }
     }
     
+    /// What the generated member is called, or `nil` to let the emitter name it
+    /// after the key's type.
+    ///
+    /// The collector has already folded every way of stating it — a factory's
+    /// own name, `typeNamed:`, `name:` — into one answer, so there is nothing
+    /// left to decide here. Only an unnamed initializer, which is the case that
+    /// fallback exists for, answers `nil`.
     var memberNameHint: String? {
         switch self {
         case .explicit(let provider):
-            if case .staticFunction(let name) = provider.kind {
-                return name
-            }
-            // `nil` for an `@Injectable` declaration asking to be named after
-            // its type — the emitter's fallback is exactly that. Otherwise the
-            // collector has already resolved `name:` or the declaration's own
-            // name into the hint.
-            if case .declaration = provider.kind {
-                return provider.memberName
-            }
+            return provider.memberName.text
+        case .value(let record):
+            return record.name
+        case .implicit, .imported:
             return nil
+        }
+    }
+
+    /// How a diagnostic refers to the provider: by the **declaration**, which is
+    /// what a developer can go and fix.
+    ///
+    /// Deliberately not ``memberNameHint``. The two agree until `typeNamed:` or
+    /// `name:` renames the member, and past that point the member's name is the
+    /// one thing that does not appear in the source being complained about.
+    var declarationDescription: String? {
+        switch self {
+        case .explicit(let provider):
+            switch provider.kind {
+            case .initializer:
+                return nil
+            case .staticFunction(let name):
+                return name
+            case .declaration(let reference, _, _):
+                return reference
+            }
         case .value(let record):
             return record.name
         case .implicit, .imported:

@@ -52,6 +52,11 @@ public macro NonInjectable() = #externalMacro(
 /// When a type has more than one provider for a key, whichever one `inject()`
 /// should call must be marked `primary`. It is only required of the type that
 /// actually wins the key — see ``Injectable(primary:)``.
+///
+/// A factory's member takes the factory's own name and an initializer's takes
+/// its type's. Both can be changed — see
+/// ``InjectableProviding(typeNamed:primary:)`` and
+/// ``InjectableProviding(name:primary:)``.
 @attached(body)
 public macro InjectableProviding() = #externalMacro(
     module: "ZerkMacros",
@@ -76,6 +81,77 @@ public macro InjectableProviding(primary: Bool) = #externalMacro(
 
 @attached(body)
 public macro InjectableProviding<each T>(primary: Bool) = #externalMacro(
+    module: "ZerkMacros",
+    type: "ProvidingMacro"
+)
+
+/// Marks a factory, and names the member it generates after the type it
+/// returns.
+///
+/// A factory's member is called what the factory is called, which is the right
+/// default when the two live together — `Zerk<Loading>.live`. It is the wrong
+/// one when the factory only exists to build a type from somewhere else, since
+/// then its name says nothing about the key:
+///
+/// ```swift
+/// @Injectable<URLSession>
+/// enum SessionProvider {
+///     @InjectableProviding(typeNamed: true)
+///     static func live() -> URLSession { .init(configuration: .default) }
+/// }
+///
+/// Zerk<URLSession>.urlSession    // rather than .live
+/// ```
+///
+/// The name comes from the **return type**, not from the key or the enclosing
+/// type: a factory returning `URLSession` yields `urlSession` whatever it is
+/// declared inside and whatever key it is bound to.
+///
+/// Only a factory takes this. An initializer can only ever produce its own
+/// type, so its member is named after that type already — writing it there is
+/// an error naming ``InjectableProviding(name:primary:)`` as the way to change
+/// it.
+///
+/// Naming is per attribute, as `primary` is: a factory bound to two keys can
+/// be named differently under each.
+@attached(body)
+public macro InjectableProviding(typeNamed: Bool, primary: Bool = false) = #externalMacro(
+    module: "ZerkMacros",
+    type: "ProvidingMacro"
+)
+
+@attached(body)
+public macro InjectableProviding<each T>(typeNamed: Bool, primary: Bool = false) = #externalMacro(
+    module: "ZerkMacros",
+    type: "ProvidingMacro"
+)
+
+/// Marks a provider, and names the member it generates outright.
+///
+/// Takes a string literal — Zerk reads syntax and cannot evaluate an expression
+/// or an interpolation. Unlike `typeNamed:`, this applies to an initializer
+/// too, which is otherwise stuck with its type's name:
+///
+/// ```swift
+/// @Injectable<Loading>
+/// struct Loader: Loading {
+///     @InjectableProviding(name: "live")
+///     init() {}
+/// }
+///
+/// Zerk<Loading>.live    // rather than .loader
+/// ```
+///
+/// Stating this alongside `typeNamed: true` is an error; they name the same
+/// member two ways.
+@attached(body)
+public macro InjectableProviding(name: String, primary: Bool = false) = #externalMacro(
+    module: "ZerkMacros",
+    type: "ProvidingMacro"
+)
+
+@attached(body)
+public macro InjectableProviding<each T>(name: String, primary: Bool = false) = #externalMacro(
     module: "ZerkMacros",
     type: "ProvidingMacro"
 )

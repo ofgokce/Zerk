@@ -13,6 +13,16 @@ extension String {
         return first.lowercased() + dropFirst()
     }
 
+    /// The member name a type name gives: `ApiService` -> `apiService`,
+    /// `Keychain.Store` -> `store`.
+    ///
+    /// A qualification says where the type lives, not what it is called, and
+    /// `keychain.Store` is not an identifier — so only the last component
+    /// survives. Nothing but a nested type reaches this with a dot in it.
+    var memberNameForType: String {
+        (split(separator: ".").last.map(String.init) ?? self).lowerCamelCased
+    }
+
     /// Uppercases the first character only, for splicing a name into the middle
     /// of another: `foo` -> `Foo`, so `value` + `foo` reads `valueFoo`.
     var upperCamelCased: String {

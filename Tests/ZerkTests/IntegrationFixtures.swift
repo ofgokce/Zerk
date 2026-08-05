@@ -543,3 +543,38 @@ struct Pair<A, B>: Pairing {
         self.second = second
     }
 }
+
+// MARK: - Naming the member a provider generates
+//
+// A provider's member is named after the provider: a factory by its own name,
+// an initializer by its type's. `typeNamed:` and `name:` move it, which is what
+// a provider type needs — `MailerProvider.live` describes neither the key nor
+// what the member returns.
+
+protocol Mailing {
+    var route: String { get }
+}
+
+struct Mailer: Mailing {
+    let route: String
+}
+
+@Injectable<Mailing>(primary: true)
+enum MailerProvider {
+    @InjectableProviding(typeNamed: true, primary: true)
+    static func live() -> Mailer { Mailer(route: "live") }
+
+    @InjectableProviding(name: "sandbox")
+    static func staging() -> Mailer { Mailer(route: "sandbox") }
+}
+
+/// `name:` on an initializer — the one naming argument it takes, since it can
+/// only ever produce its own type.
+@Injectable<Mailing>
+struct NullMailer: Mailing {
+    let route = "null"
+
+    @InjectableProviding(name: "silent")
+    init() {}
+}
+

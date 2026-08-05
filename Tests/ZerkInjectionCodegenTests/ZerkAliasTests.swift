@@ -358,7 +358,8 @@ private func populatedTypeRecord() -> TypeRecord {
         location: location,
         returnTypeName: "Unrelated",
         isolation: .globalActor("MainActor"),
-        isPrimary: true
+        isPrimary: true,
+        memberName: .stated("live")
     )
 
     return TypeRecord(

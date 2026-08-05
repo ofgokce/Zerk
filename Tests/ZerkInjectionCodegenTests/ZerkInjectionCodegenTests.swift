@@ -1256,7 +1256,8 @@ private func makeInitializerProvider(parameters: [ParameterRecord] = [],
                                      location: AttributeLocation = makeLocation(),
                                      isolation: ProviderIsolation = .nonisolated,
                                      isPrimary: Bool = false) -> InjectingProvider {
-    InjectingProvider(kind: .initializer, parameters: parameters, effects: effects, location: location, isolation: isolation, isPrimary: isPrimary)
+    // An initializer has no name of its own, so its member takes the type's.
+    InjectingProvider(kind: .initializer, parameters: parameters, effects: effects, location: location, isolation: isolation, isPrimary: isPrimary, memberName: .typeName)
 }
 
 private func makeStaticProvider(name: String,
@@ -1264,8 +1265,12 @@ private func makeStaticProvider(name: String,
                                 effects: ProviderEffects = .none,
                                 location: AttributeLocation = makeLocation(),
                                 isolation: ProviderIsolation = .nonisolated,
-                                isPrimary: Bool = false) -> InjectingProvider {
-    InjectingProvider(kind: .staticFunction(name: name), parameters: parameters, effects: effects, location: location, isolation: isolation, isPrimary: isPrimary)
+                                isPrimary: Bool = false,
+                                memberName: ProviderMemberName? = nil) -> InjectingProvider {
+    // A factory's member is named after the factory unless the attribute said
+    // otherwise, which is what `SourceCollector` resolves. Mirrored here so a
+    // hand-built record behaves like a collected one.
+    InjectingProvider(kind: .staticFunction(name: name), parameters: parameters, effects: effects, location: location, isolation: isolation, isPrimary: isPrimary, memberName: memberName ?? .stated(name))
 }
 
 private func makeParameter(label: String?,

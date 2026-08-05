@@ -49,23 +49,17 @@ private extension InjectableMacro {
     static func validateInjectableDeclaration(_ node: AttributeSyntax,
                                               in context: some MacroExpansionContext) {
         if node.typeNamedArgument == .nonLiteral {
-            context.zerkError(
-                node,
-                "@Injectable(typeNamed:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression."
-            )
+            context.zerkError(node, MemberNamingRefusal.nonLiteralTypeNamed(attribute: "@Injectable"))
             return
         }
         if node.nameArgument == .nonLiteral {
-            context.zerkError(
-                node,
-                "@Injectable(name:) requires a string literal. Zerk reads this from source and cannot evaluate an expression or an interpolation."
-            )
+            context.zerkError(node, MemberNamingRefusal.nonLiteralName(attribute: "@Injectable"))
             return
         }
         if node.typeNamedArgument.isTrue, let name = node.nameArgument.value {
             context.zerkError(
                 node,
-                "@Injectable states both 'typeNamed: true' and 'name: \"\(name)\"'. They name the same member two ways — keep one."
+                MemberNamingRefusal.conflictingNames(attribute: "@Injectable", name: name)
             )
         }
     }

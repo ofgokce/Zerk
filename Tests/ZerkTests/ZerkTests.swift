@@ -203,6 +203,21 @@ struct ZerkTests {
         RetryPolicy.retryLimit = 3
     }
 
+    @Test("typeNamed: and name: move the member a provider generates")
+    func providerNamingOverloads() {
+        resetFixtureState()
+
+        // `typeNamed:` takes the *return* type — neither `live`, the factory's
+        // own name, nor `mailerProvider`, the type it is declared inside.
+        #expect(Zerk<Mailing>.mailer.route == "live")
+        #expect(Zerk<Mailing>.inject().route == "live")
+
+        // `name:` on a sibling factory, and on the losing type's initializer,
+        // which would otherwise be stuck with `nullMailer`.
+        #expect(Zerk<Mailing>.sandbox.route == "sandbox")
+        #expect(Zerk<Mailing>.silent.route == "null")
+    }
+
     @Test("interjection overrides injection with mock type")
     func interjectionOverridesInjection() async throws {
         resetFixtureState()

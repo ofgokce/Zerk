@@ -45,6 +45,7 @@ private extension ProvidingMacro {
                               declaration: some DeclSyntaxProtocol,
                               context: some MacroExpansionContext) {
         validatePrimaryArgument(node: node, context: context)
+        validateNamingArguments(node: node, context: context)
 
         let genericArgs = node.genericArgumentTypes
 
@@ -54,6 +55,9 @@ private extension ProvidingMacro {
                     node,
                     "@InjectableProviding with a generic argument is not supported on initializers."
                 )
+            }
+            if node.typeNamedArgument != .absent {
+                context.zerkError(node, MemberNamingRefusal.typeNamedOnInitializer)
             }
             return
         }
@@ -86,6 +90,37 @@ private extension ProvidingMacro {
             node,
             "@InjectableProviding can only be applied to an initializer or a static function."
         )
+    }
+
+    /// The two arguments that name the generated member are alternatives, and
+    /// neither can be an expression — the plugin reads them out of the source
+    /// text, so anything it cannot read there would silently fall back to the
+    /// default name.
+    ///
+    /// Whether `typeNamed:` is even applicable depends on the declaration, so
+    /// that part is checked by the caller, which has one.
+    static func validateNamingArguments(node: AttributeSyntax,
+                                        context: some MacroExpansionContext) {
+        if node.typeNamedArgument == .nonLiteral {
+            context.zerkError(
+                node,
+                MemberNamingRefusal.nonLiteralTypeNamed(attribute: "@InjectableProviding")
+            )
+            return
+        }
+        if node.nameArgument == .nonLiteral {
+            context.zerkError(
+                node,
+                MemberNamingRefusal.nonLiteralName(attribute: "@InjectableProviding")
+            )
+            return
+        }
+        if node.typeNamedArgument.isTrue, let name = node.nameArgument.value {
+            context.zerkError(
+                node,
+                MemberNamingRefusal.conflictingNames(attribute: "@InjectableProviding", name: name)
+            )
+        }
     }
 
     /// The build plugin decides which provider `inject()` calls by reading

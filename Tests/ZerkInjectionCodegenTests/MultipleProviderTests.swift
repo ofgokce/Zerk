@@ -330,7 +330,8 @@ struct MultipleProviderTests {
                 parameters: [],
                 effects: .none,
                 location: AttributeLocation(filePath: "/tmp/A.swift", line: 1, column: 1),
-                isPrimary: true
+                isPrimary: true,
+                memberName: .typeName
             )),
             isTypePrimary: true,
             isExported: false,
@@ -343,7 +344,8 @@ struct MultipleProviderTests {
                 kind: .initializer,
                 parameters: [],
                 effects: .none,
-                location: AttributeLocation(filePath: "/tmp/B.swift", line: 1, column: 1)
+                location: AttributeLocation(filePath: "/tmp/B.swift", line: 1, column: 1),
+                memberName: .typeName
             )),
             isTypePrimary: true,
             isExported: false,

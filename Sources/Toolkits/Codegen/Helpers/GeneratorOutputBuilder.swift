@@ -1343,10 +1343,10 @@ struct GeneratorOutputBuilder {
         return diagnostics
     }
 
-    /// The generated factory's name: a static factory keeps its own name, while
-    /// an initializer-backed provider is named after its type, lowercased.
+    /// The generated factory's name: whatever the provider stated, or — for an
+    /// initializer, which states nothing by default — its type, lowercased.
     private func memberName(for resolution: ProviderResolution) -> String {
-        resolution.provider.memberNameHint ?? resolution.typeName.lowerCamelCased
+        resolution.provider.memberNameHint ?? resolution.typeName.memberNameForType
     }
 
     /// Whether more than one provider for this key generates a member of this

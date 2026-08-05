@@ -280,6 +280,31 @@ Zerk<Loading>.inject()   // live, because it is primary
 
 Providers that share a member name are fine as long as their parameters differ — two marked initializers are both named after their type, and the generated overloads are told apart exactly as the initializers are.
 
+**Naming the member.** A factory's member takes the factory's name and an initializer's takes its type's, which is right while the provider lives with the thing it builds. It stops being right for a provider *type*, whose whole purpose is to build something it is not — `MailerProvider.live` describes neither the key nor what comes back. Two arguments move it:
+
+| written | member |
+|---|---|
+| `@InjectableProviding static func live() -> Mailer` | `live` |
+| `@InjectableProviding(typeNamed: true) static func live() -> Mailer` | `mailer` |
+| `@InjectableProviding(name: "sandbox") static func staging() -> Mailer` | `sandbox` |
+| `@InjectableProviding init()` on `struct NullMailer` | `nullMailer` |
+| `@InjectableProviding(name: "silent") init()` on `struct NullMailer` | `silent` |
+
+`typeNamed:` reads the **return type** — not the enclosing type, and not the key, so `@InjectableProviding<Mailing>(typeNamed: true) static func live() -> Mailer` gives `Zerk<Mailing>.mailer`. It is a factory-only argument: an initializer can only ever produce its own type, so its member carries that name already and writing `typeNamed:` there is an error naming `name:` as the fix. `name:` takes a string literal; Zerk reads syntax and cannot evaluate an expression or an interpolation. Stating both is an error.
+
+Naming rides the attribute, exactly as `primary` does, so one factory bound to two keys can be called something different under each:
+
+```swift
+@InjectableProviding<Loading>(name: "live")
+@InjectableProviding<Caching>(typeNamed: true)
+static func make() -> Store { ... }
+
+Zerk<Loading>.live
+Zerk<Caching>.store
+```
+
+Renaming moves the interjection point with it, and the *call* still goes to the real declaration — `Zerk<Mailing>.mailer` returns `MailerProvider.live()`.
+
 Provider parameters are resolved in this order: a uniquely matching `@InjectableValue` → a uniquely resolvable injectable key (recursively) → otherwise the parameter is exposed on the generated member and on `inject(...)` for the caller to supply ("parametric injection").
 
 **`@Singleton`** — one shared instance per *type*, created lazily and thread-safely on first access. A type injectable under several keys is built once and every key returns that same instance. Reference types (class/actor) only. Singleton providers cannot be `async`/`throws` and cannot require external arguments, and a singleton must resolve to one provider across all of its keys — one instance cannot be built two ways.
@@ -642,6 +667,8 @@ extension Zerk<URLSession> {
 
 The provider's own `configuration` dependency resolves from the graph, and `URLSessionProvider` appears nowhere except as the callee — pick any name you like, or hang several unrelated keys off separate provider types.
 
+Here `live` is the member's name too, which reads well next to a `staging` sibling and less well on its own. `@InjectableProviding` takes the same two naming arguments as `@Injectable` does, so `@InjectableProviding(typeNamed: true)` gives `Zerk<URLSession>.urlSession` — the same spelling the declaration form produces, from the factory's return type rather than a declared one. See [Declaring injectables](#declaring-injectables).
+
 **The wrapper is required, and it is not a workaround.** You cannot point Zerk at `URLSession.init(configuration:)` directly — by a reference, a freestanding macro, or anything else. Zerk reads syntax: it would see the name but not that `configuration` is a `URLSessionConfiguration`, so it could never emit the default that resolves it. The one-line factory is the construct that carries the type information the graph needs, and it is where you would put the wiring anyway.
 
 **`@Injectable` on an `extension` is refused**, with a message pointing at the form above. An extension is not a declaration — it states no generic parameters of its own, so `extension Wrapper` cannot say whether `Wrapper` is generic, and for a foreign type there is no way to find out. It also has no initializer to adopt implicitly, and a `where` clause would make its providers conditional on something the key cannot express.
@@ -976,7 +1003,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 **Circular dependencies are rejected** with the cycle path in the error. Break cycles manually (e.g. inject a factory or make one edge parametric).
 
-**Generated member names must be unique per key *per signature*.** Providers may share a member name when their parameters differ — two marked initializers both generate `Zerk<Key>.loader(...)`, told apart exactly as the initializers are. Two that agree on name *and* parameters (e.g. a `Service` in two files, both argument-free) collide; rename the type or use a distinctly named `@InjectableProviding` factory.
+**Generated member names must be unique per key *per signature*.** Providers may share a member name when their parameters differ — two marked initializers both generate `Zerk<Key>.loader(...)`, told apart exactly as the initializers are. Two that agree on name *and* parameters (e.g. a `Service` in two files, both argument-free) collide; rename the type, rename the factory, or give one of them `@InjectableProviding(name:)`. Note that this cuts both ways — `typeNamed:` on two factories returning the same type makes them collide where their own names did not.
 
 **Generic injectables have their own rules** — three ways to register one, and what each can and cannot do. See [Generic injectables](#generic-injectables).
 
@@ -986,7 +1013,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 **`@Injected` cannot resolve async, throwing, or cross-domain chains** — use `try await Zerk<Key>.inject()` manually (or an `@injected` parameter). For lazy resolution, use a plain `lazy var = Zerk<Key>.inject()`; there is no `@LazyInjected` macro.
 
-**Interjection is keyed by generated member signature.** A point is named after the member it stands in for, so renaming an injectable type or an `@InjectableProviding` factory makes the interjection a *compile error* — the mismatch is caught, not silently ignored. Two overloads of one name get separate points, since the name carries the parameters.
+**Interjection is keyed by generated member signature.** A point is named after the member it stands in for, so anything that renames the member — renaming an injectable type, renaming an `@InjectableProviding` factory, or adding `typeNamed:`/`name:` to one — makes the interjection a *compile error*, caught rather than silently ignored. Two overloads of one name get separate points, since the name carries the parameters.
 
 **Interjection does not short-circuit resolution.** A member's dependencies are resolved before the lookup runs, so an interjected value still builds its real dependency subtree first.
 
@@ -996,7 +1023,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, an imported value colliding with a local one of the same name, the same value name imported twice, two values sharing a key and a name, a value whose member name collides with a provider's, an `@ImportedInjectableValue` without a getter or with one that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Injectable(public:)` on a non-public key (warning), `@Injectable` on an extension, a non-literal `primary:` or `public:`, a generic parameter that neither the key nor the provider's arguments can bind, a generic `@InjectableProviding` factory or `@InjectableValue` function, `@Singleton` on a generic type, `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, an imported value colliding with a local one of the same name, the same value name imported twice, two values sharing a key and a name, a value whose member name collides with a provider's, an `@ImportedInjectableValue` without a getter or with one that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Injectable(public:)` on a non-public key (warning), `@Injectable` on an extension, a non-literal `primary:`, `public:`, `typeNamed:` or `name:`, `typeNamed:` together with `name:`, `@InjectableProviding(typeNamed:)` on an initializer or on a factory whose return type has no name to lend, a generic parameter that neither the key nor the provider's arguments can bind, a generic `@InjectableProviding` factory or `@InjectableValue` function, `@Singleton` on a generic type, `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 
