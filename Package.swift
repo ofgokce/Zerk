@@ -25,12 +25,16 @@ let package = Package(
             name: "ZerkPlugin",
             targets: ["ZerkPlugin"]
         ),
+        .library(
+            name: "ZerkTesting",
+            targets: ["ZerkTesting"]
+        ),
     ],
     
     dependencies: [
         .package(
             url: "https://github.com/swiftlang/swift-syntax.git",
-            "600.0.0"..<"601.0.0"
+            "602.0.0"..<"603.0.0"
         ),
     ],
     
@@ -38,6 +42,13 @@ let package = Package(
         .target(
             name: "Zerk",
             dependencies: ["ZerkMacros"],
+            swiftSettings: [
+                .swiftLanguageMode(.v6)
+            ]
+        ),
+        .target(
+            name: "ZerkTesting",
+            dependencies: ["Zerk"],
             swiftSettings: [
                 .swiftLanguageMode(.v6)
             ]
@@ -109,6 +120,7 @@ let package = Package(
             name: "ZerkTests",
             dependencies: [
                 "Zerk",
+                "ZerkTesting",
                 "MacroToolkit"
             ],
             swiftSettings: [

@@ -367,7 +367,14 @@ final class SourceCollector: SyntaxVisitor {
         guard macroName == "ZerkAlias" else {
             return
         }
-        let keys = (arguments?.arguments.map(\.argument) ?? []).map(\.normalizedTypeKey)
+        // A generic argument may be a value rather than a type (SE-0453); only
+        // types can be alias keys.
+        let keys = (arguments?.arguments ?? []).compactMap { argument -> String? in
+            guard case .type(let type) = argument.argument else {
+                return nil
+            }
+            return type.normalizedTypeKey
+        }
         guard keys.count >= 2 else {
             return
         }

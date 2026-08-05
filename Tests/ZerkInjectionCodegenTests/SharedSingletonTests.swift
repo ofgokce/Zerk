@@ -267,9 +267,11 @@ struct SharedSingletonTests {
 
         // The guard cannot live in the storage — it is per key, and there is one
         // storage for both keys — so each getter carries its own.
-        #expect(result.output.output.contains("interjector.interjectedDep"))
-        #expect(result.output.output.contains("protocol InterjectingTypeA {"))
-        #expect(result.output.output.contains("protocol InterjectingTypeB {"))
+        #expect(result.output.output.contains("_$interjected(for: \\.`dep`)"))
+        // A point per key, since Zerk<TypeA> and Zerk<TypeB> are separate
+        // specializations even though one instance backs both.
+        #expect(result.output.output.contains("extension Zerk<TypeA>.Interjection {"))
+        #expect(result.output.output.contains("extension Zerk<TypeB>.Interjection {"))
 
         // Storage is a plain initialization, with no guard folded into it.
         #expect(result.output.output.contains("static let dep: Dep = Dep()"))

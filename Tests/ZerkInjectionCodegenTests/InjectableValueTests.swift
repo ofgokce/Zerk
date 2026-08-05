@@ -321,7 +321,7 @@ struct InjectableValueTests {
         #expect(result.output.output.contains("static func inject(name: String) async throws -> Repo"))
     }
 
-    @Test("a parametric value gets an interjection requirement shaped like a function")
+    @Test("a parametric value gets an interjection point")
     func parametricValueInterjectionIsFunctionShaped() {
         let output = CompileFixture.generate(source: """
         enum Values {
@@ -330,7 +330,8 @@ struct InjectableValueTests {
         }
         """)
 
-        #expect(output.contains("static func interjectedGreeting(name: String) -> String?"))
+        // Unique name for its key, so the point takes the bare form.
+        #expect(output.contains("var `greeting`: Void {}"))
     }
 
     // MARK: - Name collisions

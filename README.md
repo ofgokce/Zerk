@@ -3,11 +3,11 @@
 [![Swift Package Manager](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg?style=flat)](https://github.com/apple/swift-package-manager)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-iOS%2013%2B%20%7C%20macOS%2014%2B%20%7C%20macCatalyst%2013%2B%20%7C%20watchOS%206%2B%20%7C%20tvOS%2013%2B%20%7C%20visionOS%201%2B-lightgrey.svg)](#requirements)
-[![Swift Version](https://img.shields.io/badge/Swift-6.0-F16D39.svg?style=flat)](https://developer.apple.com/swift)
+[![Swift Version](https://img.shields.io/badge/Swift-6.2-F16D39.svg?style=flat)](https://developer.apple.com/swift)
 
 Zerk is a compile-time dependency injection framework for Swift. Instead of a runtime container, it combines Swift macros with a build-tool plugin that scans your module's source, resolves the dependency graph during the build, and generates plain static factory code on a `Zerk<T>` namespace. There is nothing to register at runtime, resolution failures are build errors with file/line locations, and injected code is ordinary Swift you can step through.
 
-For testing, the same plugin also generates a per-key `Interjecting<Key>` protocol. A test suite conforms `Zerk` to it to swap any injectable for a double without touching production code — a plain, compile-checked protocol conformance.
+For testing, the same plugin gives every generated member a named interjection point, so `#Interject` can stand a double in for any injectable — one member, or a whole key at once — without touching production code. Interjections belong to a scope, so tests keep running in parallel, and they compile to nothing in release.
 
 ## What's changed
 
@@ -17,7 +17,7 @@ Zerk 2 is a ground-up replacement for the original runtime container:
 - Resolution moved from `Zerk.standardStorage.restore()` to generated members on `Zerk<Key>`, usually reached through `Zerk<Key>.inject()` or `@Injected`.
 - Missing providers, ambiguous providers, cycles, unsupported singletons, and isolation mismatches are reported during the build instead of failing at runtime.
 - Swift concurrency is modeled directly: generated injectors mirror provider isolation, propagate `async`/`throws`, and reject constructs that Swift cannot express safely.
-- Test overrides are compile-checked through generated `Interjecting<Key>` protocols instead of mutating a shared container.
+- Test overrides are compile-checked and scoped per test, rather than mutating a shared container.
 - Installation is Swift Package Manager only; CocoaPods-era runtime APIs and key-path property injection wrappers are no longer part of the public model.
 
 ## Migration
@@ -31,16 +31,18 @@ For an app using Zerk 1.x, migrate one module at a time:
 5. Convert registered constants or configuration values into `@InjectableValue` declarations, or group static members under `@InjectableValues`. Note that values have their own marker: `@Injectable` registers a *type*.
 6. Replace manual restores with `Zerk<Key>.inject()`. Replace property injection with `@Injected var dependency: Key` when the dependency can be resolved synchronously.
 7. For initializer or method parameters that should be filled automatically, use lowercase `@injected` on the parameter and call the generated overload.
-8. Move tests from container mutation to interjection: `@testable import` the declaring module and conform `Zerk` to the generated `Interjecting<Key>` protocol for the member you want to override.
+8. Move tests from container mutation to interjection: `@testable import` the declaring module, put `.zerk` on the suite, and call `#Interject` for what you want to stand in.
 9. Add `ZerkSettings.json` if your target uses Swift 5 language mode, `SWIFT_DEFAULT_ACTOR_ISOLATION`, or a non-default value injection policy.
 
 Key-path wrappers from 1.x such as `@InjectedProperty`, `@InjectedMutableProperty`, and `@InjectedMethod` do not have direct 2.x equivalents. Inject the dependency itself, or expose the needed operation through a small protocol and inject that protocol.
 
 ## Requirements
 
-- Swift 6.0 **toolchain** (`swift-tools-version: 6.0`); Zerk's own targets build in `.v6` language mode
-- swift-syntax 600.x
+- Swift 6.2 **toolchain** (`swift-tools-version: 6.1`); Zerk's own targets build in `.v6` language mode
+- swift-syntax 602.x
 - Platforms: iOS 13+, macOS 14+, watchOS 6+, tvOS 13+, visionOS 1+, Mac Catalyst 13+
+
+6.2 is the floor because interjection points are named with raw identifiers (SE-0451) — they appear in the generated file your toolchain compiles, and in the key paths `#Interject` expands. Your *language mode* is a separate question, answered below.
 
 ### Consuming targets in Swift 5 language mode
 
@@ -69,7 +71,7 @@ Without one of these, Zerk emits a build error naming the providers rather than 
 
 ## Installation
 
-Attach the build plugin to every target that **declares** injectables. Test targets do not need it — they reach interjection through `@testable import`:
+Attach the build plugin to every target that **declares** injectables. Test targets do not need it — they reach interjection through `@testable import`, plus the `ZerkTesting` library for the `.zerk` trait:
 
 ```swift
 // Package.swift
@@ -89,9 +91,16 @@ targets: [
 ]
 ```
 
-The package vends two products: the `Zerk` library (the macros and the `Zerk<T>` namespace) and the `ZerkPlugin` build-tool plugin.
+The package vends three products: the `Zerk` library (the macros and the `Zerk<T>` namespace), the `ZerkPlugin` build-tool plugin, and `ZerkTesting` (the `.zerk` trait). `ZerkTesting` depends on swift-testing, so keep it to test targets:
 
-The plugin generates the injectors **and** the `Interjecting<Key>` protocols into the module that declares the injectables. A test target that does `@testable import App` sees those (internal) protocols and conforms `Zerk` to them; the interjection guards already compiled into `App` resolve the conformance at runtime. Attach the plugin to a test target only if that target itself declares injectables (as this package's own `ZerkTests` does, because its fixtures live in the test target). In an Xcode project, add `ZerkPlugin` under the declaring target's Build Phases → Run Build Tool Plug-ins.
+```swift
+    .testTarget(
+        name: "AppTests",
+        dependencies: ["App", .product(name: "ZerkTesting", package: "Zerk")]
+    ),
+```
+
+The plugin generates the injectors **and** each key's interjection points into the module that declares the injectables. A test target that does `@testable import App` names those points with a key path; the lookups already compiled into `App` consult the scope in force at runtime. Attach the plugin to a test target only if that target itself declares injectables (as this package's own `ZerkTests` does, because its fixtures live in the test target). In an Xcode project, add `ZerkPlugin` under the declaring target's Build Phases → Run Build Tool Plug-ins.
 
 ## Quick start
 
@@ -131,21 +140,18 @@ The plugin generates (roughly):
 
 ```swift
 extension Zerk<ApiServicing> {
-    nonisolated(unsafe) static let apiService: ApiServicing = {
-        // Test suites can override this via the interjection protocol below.
-        if let interjector = Self.self as? any InterjectingApiServicing.Type,
-            let interjected = interjector.interjectedApiService {
-            return interjected
-        }
+    nonisolated static var apiService: ApiServicing {
+        // Where a test double stands in. Compiles to nothing in release.
+        if let interjected = _$interjected(for: \.`apiService`) { return interjected }
         return ApiService(baseURL: Zerk<String>.baseURL)
-    }()
+    }
 
     static func inject() -> ApiServicing { apiService }
 }
 
-// Also generated, one per key, for tests to conform to:
-protocol InterjectingApiServicing {
-    static nonisolated var interjectedApiService: ApiServicing? { get }
+// Also generated: one interjection point per member, named after its signature.
+extension Zerk<ApiServicing>.Interjection {
+    var `apiService`: Void {}
 }
 ```
 
@@ -161,7 +167,7 @@ Everything else is the plugin, for one reason: an attached macro can only see th
 
 1. **Collect** — walk the syntax and record injectable types and values, their providers, `@Injected` uses, and members carrying `@injected` parameters.
 2. **Resolve** — collect every provider for each key, elect the one that backs `inject()`, and report the cases that are ambiguous or impossible.
-3. **Generate** — classify each provider's parameters, then emit the `Zerk<Key>` extensions, the `Interjecting<Key>` protocols, and the `Sendable` checks singletons need.
+3. **Generate** — classify each provider's parameters, then emit the `Zerk<Key>` extensions, each key's `Interjection` namespace, and the `Sendable` checks singletons need.
 
 The output is a single `ZerkGenerated/ZerkInjections.swift` in the build directory, declared as the command's only output so the build system reruns codegen exactly when a source file or `ZerkSettings.json` changes.
 
@@ -408,6 +414,8 @@ The freestanding form expands to a private, never-called function that pairs the
 
 Generic typealiases are rejected — substituting their parameters would need real type resolution. Alias a concrete instantiation instead.
 
+**`#Interject` / `#Interject<Key>`** — stands a test double in for a member, or for a whole key, within the current scope. Covered under [Testing with interjection](#testing-with-interjection).
+
 **`@Isolated<A>`** — tells Zerk which global actor a declaration is isolated to, when the build plugin cannot see it. It is **corrective, not declarative**: it restates what the compiler already believes so the generated members mirror the right isolation. Claiming something untrue produces generated code that will not compile. Two cases need it — a custom global actor whose name does not end in `Actor` (Zerk's attribute heuristic misses it), and isolation inherited through a conformance (invisible to a syntax-only plugin):
 
 ```swift
@@ -551,21 +559,23 @@ Effects propagate through the chain: if a provider is `async`/`throws`, the gene
 
 ## Testing with interjection
 
-For every generated injector member, the plugin also emits a mirror requirement on a per-key protocol named `Interjecting<Key>`, and each generated member checks — at the top of its body — whether `Zerk<Key>` conforms:
+Every generated member opens with a lookup against the interjections in force, and the plugin declares a matching point on that key's `Interjection` namespace — named, via a raw identifier, verbatim after the member's signature:
 
 ```swift
 // Generated:
-protocol InterjectingUserService {
-    static func interjectedLive(apiService: ApiServicing, logger: Logger) -> UserService?
+extension Zerk<UserService>.Interjection {
+    var `live`: Void {}
 }
-protocol InterjectingSeededToken {
-    static func interjectedSeeded(seed: Int) -> SeededToken?
+extension Zerk<SeededToken>.Interjection {
+    var `seeded`: Void {}
 }
 ```
 
-These protocols are `internal` to the declaring module, so the test target reaches them with `@testable import App` — no plugin on the test target. A test suite overrides an implementation by conditionally conforming `Zerk` to the protocol. Returning a value overrides injection; returning `nil` falls through to the real provider — so you can gate overrides behind a flag and leave production code untouched:
+These are `internal` to the declaring module, so the test target reaches them with `@testable import App` — no plugin on the test target. Add the `ZerkTesting` library for the `.zerk` trait, which gives each test a scope of its own:
 
 ```swift
+import Testing
+import ZerkTesting
 @testable import App
 
 struct MockUserService: UserService {
@@ -573,21 +583,58 @@ struct MockUserService: UserService {
     var loggerSerial: Int { -1 }
 }
 
-extension Zerk: InterjectingUserService where T == UserService {
-    static func interjectedLive(apiService: ApiServicing, logger: Logger) -> UserService? {
-        MockUserService()
-    }
-}
+@Suite(.zerk)
+struct FeedTests {
 
-// A parameterized provider is overridden the same way, bypassing the real factory:
-extension Zerk: InterjectingSeededToken where T == SeededToken {
-    static func interjectedSeeded(seed: Int) -> SeededToken? {
-        SeededToken(value: 999)
+    @Test func usesTheDouble() {
+        #Interject(\.live, with: MockUserService())
+        #expect(FeedViewModel().userService is MockUserService)
+    }
+
+    // A parameterized provider is named the same way, and the real factory never runs.
+    @Test func parameterized() {
+        #Interject(\.seeded, with: SeededToken(value: 999))
+        #expect(Zerk<SeededToken>.seeded(seed: 1).value == 999)
     }
 }
 ```
 
-The interjected member name is `interjected` + the capitalized generated member name (so `Zerk<Loading>.live` → `interjectedLive`), and it mirrors the generated member's parameters. Property-shaped members (values, singletons, argument-free providers) become a `var interjected…: Key? { get }` requirement instead. Because interjection is an ordinary protocol conformance, renaming a provider surfaces as a *compile error* on the stale conformance rather than silently falling through.
+**A point is named as short as the key allows.** A member name used once takes the bare name; overloads take Swift's own selector form; and only overloads differing *solely* by parameter type spell them out:
+
+| members sharing the name | point |
+|---|---|
+| one | `\.live` |
+| several, distinct labels | `` \.`loader(store:)` `` |
+| several, same labels | `` \.`loader(store: Disk)` `` |
+
+A group escalates as a whole, so every overload of one name is spelled the same way. Adding an overload can therefore rename a point and turn interjections naming it into compile errors — which is the intended outcome, since the name really did stop identifying one member.
+
+**Naming a member.** The key is inferred from the key path, and from `with:` when one member name belongs to more than one key. Only a genuine tie needs it spelled — `#Interject<UserService>(\.live, with: …)` — and Swift says so when it happens. Because the point is a real declaration, a renamed provider makes the interjection a *compile error* rather than something that silently stops applying.
+
+**A whole key at once.** A blanket interjection names its key and covers every member of it, parameterized ones included — arguments are ignored, because a blanket says "this key resolves to this, however it was asked for". A member-specific interjection beats a blanket over the same key, so a blanket can set the baseline and one member stay pinned:
+
+```swift
+#Interject<ApiServicing>(with: MockApi())
+#Interject<ApiServicing> { MockApi(host: "staging") }   // multi-statement form
+```
+
+**When the double is built.** `with:` is an autoclosure, so it runs on every resolution rather than once at registration — a fresh double each time, matching Zerk's transient default. To hold one and assert on it afterwards, capture it (`#Interject(\.live, with: mock)`), which requires `mock` to be `Sendable` since a scope is shared across tasks. Built inline, nothing is captured and nothing needs to be `Sendable`.
+
+**Scopes.** Interjections belong to the scope in force. `.zerk` opens one per test — `isRecursive`, so a suite-level trait scopes each test rather than the suite — which is what lets tests interject the same key in parallel without seeing each other. Seed a suite with `.zerk { #Interject<ApiServicing>(with: MockApi()) }`; the seed runs per test, and a test's own interjections win. Under XCTest, override `invokeTest()` to wrap `super.invokeTest()` in `Zerk.withInterjections { }`.
+
+Outside a scope, `#Interject` **traps** rather than leaking into whatever runs alongside. The one exception is a SwiftUI preview, where the process genuinely is the scope:
+
+```swift
+#Preview {
+    ContentView().interjecting {
+        #Interject<ApiServicing>(with: MockApi())
+    }
+}
+```
+
+The `interjecting` modifier exists because a `#Preview` body is a `@ViewBuilder`, which rejects `#Interject` as `type '()' cannot conform to 'View'`; its closure is a plain `() -> Void`. A preview's interjections outlive the view that made them and accumulate across previews in one process, so register everything a preview needs rather than relying on a neighbour's.
+
+**In release, none of this exists.** The lookup is `@inlinable` and compiles to `nil` outside `DEBUG`, so an optimized build reduces each member to its construction alone — no branch, no key-path formation.
 
 ## Swift 6 concurrency model
 
@@ -625,7 +672,7 @@ final class ApiService: ApiServicing {
 `await` cannot appear in a default argument at all. So a dependency whose resolution is effectful or crosses a domain is not exposed as a defaulted parameter — the member splits in two:
 
 ```swift
-// explicit variant — carries the interjection guard and the construction
+// explicit variant — carries the interjection lookup and the construction
 nonisolated static func userRepository(manager: ApiManager) -> UserRepository { ... }
 
 // resolving variant — resolves and delegates, inheriting the merged effects
@@ -634,7 +681,7 @@ nonisolated static func userRepository() async -> UserRepository {
 }
 ```
 
-Their arities always differ, so the overload is never ambiguous, and there is still exactly one construction point and one interjection guard per provider.
+Their arities always differ, so the overload is never ambiguous, and there is still exactly one construction point and one interjection lookup per provider.
 
 ### Crossing a domain
 
@@ -671,7 +718,7 @@ Storage sits there rather than on `Zerk<Key>` because `Zerk<Reading>` and `Zerk<
 
 `@Singleton` storage mirrors provider isolation too: `nonisolated(unsafe) static let` for a nonisolated provider, `@MainActor static let` for a `@MainActor` one (global-actor isolation already protects the storage, so no `unsafe` escape hatch is needed). Singletons stay synchronous and non-throwing, so a singleton whose dependency lives in a *different* domain is a build error — resolving it would need `await`, and a `static let` initializer cannot.
 
-Because the storage is shared but the `Interjecting<Key>` protocols are per key, the interjection guard lives in the getter rather than in the storage initializer. A test double is therefore consulted on every read — one installed after the first resolution still takes effect, and interjecting a singleton never builds the real instance at all.
+The interjection lookup lives in the getter rather than in the storage initializer, so a double is consulted on every read — one installed after the first resolution still takes effect, and interjecting a singleton never builds the real instance at all.
 
 When a singleton is injected across an isolation boundary, Zerk emits a `Sendable` constraint check next to an explanatory comment. Zerk does not attempt to prove `Sendable` from syntax; the check costs nothing when the type already conforms, and it puts the compiler's complaint on a line that explains itself.
 
@@ -746,9 +793,9 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 **`@Injected` cannot resolve async, throwing, or cross-domain chains** — use `try await Zerk<Key>.inject()` manually (or an `@injected` parameter). For lazy resolution, use a plain `lazy var = Zerk<Key>.inject()`; there is no `@LazyInjected` macro.
 
-**Interjection is keyed by generated member name.** A test override conforms `Zerk` to `Interjecting<Key>` and implements `interjected<MemberName>`. Renaming an injectable type or `@InjectableProviding` factory changes that member name, so a stale conformance becomes a *compile error* — the mismatch is caught, not silently ignored. Requirements mirror the member's isolation, so a double for a `@MainActor` provider is built on the main actor.
+**Interjection is keyed by generated member signature.** A point is named after the member it stands in for, so renaming an injectable type or an `@InjectableProviding` factory makes the interjection a *compile error* — the mismatch is caught, not silently ignored. Two overloads of one name get separate points, since the name carries the parameters.
 
-**Interjection does not short-circuit resolution.** A member's dependencies are resolved before the guard runs, so an interjected value still builds its real dependency subtree first.
+**Interjection does not short-circuit resolution.** A member's dependencies are resolved before the lookup runs, so an interjected value still builds its real dependency subtree first.
 
 **Generated code is per-build.** The plugin output lives in the build directory (`ZerkGenerated/ZerkInjections.swift`). Never edit it; regenerate by building.
 

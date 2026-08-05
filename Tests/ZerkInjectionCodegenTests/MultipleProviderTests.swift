@@ -279,8 +279,9 @@ struct MultipleProviderTests {
         #expect(result.generated.contains("static func loader(store: Memory"))
         // The interjection protocol has to carry both overloads; one requirement
         // for two members would leave a generated call with no declaration.
-        #expect(result.generated.contains("interjectedLoader(store: Disk) -> Loading?"))
-        #expect(result.generated.contains("interjectedLoader(store: Memory) -> Loading?"))
+        // Same labels, so only the types tell these apart.
+        #expect(result.generated.contains("var `loader(store: Disk)`: Void {}"))
+        #expect(result.generated.contains("var `loader(store: Memory)`: Void {}"))
         // Both overloads are fully defaulted, so a bare `loader()` would match
         // both. inject() has to name the argument to pick the primary.
         #expect(result.generated.contains("loader(store: Zerk<Disk>.inject())"))

@@ -211,7 +211,7 @@ struct ProviderResolverTests {
         #expect(output.diagnostics.isEmpty)
         #expect(output.output.contains("@MainActor static var liveService: Service {"))
         #expect(output.output.contains("@MainActor static func inject() -> Service {"))
-        #expect(output.output.contains("@MainActor static var interjectedLiveService: Service? { get }"))
+        #expect(output.output.contains("var `liveService`: Void {}"))
     }
 
     @Test("@Singleton on a value type emits a diagnostic")
@@ -603,7 +603,7 @@ struct GeneratorOutputBuilderTests {
         #expect(result.output.contains("= Zerk<ApiManager>.inject()") == false)
         // Exactly one construction point and one interjection guard.
         #expect(result.output.contains("return UserRepository(manager: manager)"))
-        #expect(result.output.contains("nonisolated static func interjectedUserRepository(manager: ApiManager) -> UserRepository?"))
+        #expect(result.output.contains("var `userRepository`: Void {}"))
     }
 
     @Test("member name collisions within an injectable key emit a diagnostic")

@@ -101,8 +101,7 @@ struct ZerkAliasTests {
         let result = CompileFixture.generateWithResolution(source: source)
 
         #expect(result.diagnostics.isEmpty)
-        let extensionCount = result.output.output
-            .components(separatedBy: "extension Zerk<").count - 1
+        let extensionCount = CompileFixture.memberExtensionCount(in: result.output.output)
         #expect(extensionCount == 1)
         #expect(result.output.output.contains("extension Zerk<Storing> {"))
         // Both providers land in that one extension.

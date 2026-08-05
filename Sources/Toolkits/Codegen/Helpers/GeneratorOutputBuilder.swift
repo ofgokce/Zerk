@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SharedToolkit
 
 /// Turns resolved providers into the text of the generated file.
 ///
@@ -116,7 +117,7 @@ struct GeneratorOutputBuilder {
         output += importedModules.sorted().map { "import \($0)" }
         output.append("")
         var diagnostics: [CodegenDiagnostic] = []
-        var requirements: [InterjectionRequirement] = []
+        var points: [InterjectionPoint] = []
         var sendabilityChecks: [SendabilityCheck] = []
         var reportedAutoInjected = Set<String>()
 
@@ -198,19 +199,11 @@ struct GeneratorOutputBuilder {
                 }
             }
 
-            let interjectedName = interjectedName(for: value.name)
-            // Keyed on the canonical key, exactly as a type-backed member is.
-            // Using the declared spelling instead would give a value registered
-            // as `[String]` a different `Interjecting…` protocol from a type
-            // registered as `Array<String>`, even though they are one key.
+            // A value is always property-shaped, so its point is just its name.
+            let point = InterjectionPointName.text(member: value.name, parameters: [])
             let valueKeyText = value.keyText
             let guardLines = { (indent: String) in
-                self.interjectionGuardLines(
-                    protocolName: self.interjectingProtocolName(for: value.typeKey),
-                    interjectedName: interjectedName,
-                    callArguments: nil,
-                    indent: indent
-                )
+                self.interjectionGuardLines(point: "`\(point)`", indent: indent)
             }
 
             let access = exportedAccessPrefix(isExported: value.isExported, injectableKey: value.typeKey)
@@ -255,13 +248,7 @@ struct GeneratorOutputBuilder {
             output.append("}")
             output.append("")
 
-            requirements.append(InterjectionRequirement(
-                zerkArgument: value.typeKey,
-                interjectedName: interjectedName,
-                returnTypeName: valueKeyText,
-                kind: .variable,
-                isolation: value.isolation
-            ))
+            points.append(InterjectionPoint(zerkArgument: value.typeKey, name: point))
         }
 
         if !thunkLines.isEmpty {
@@ -322,6 +309,8 @@ struct GeneratorOutputBuilder {
                 }
             }
 
+            let pointNames = interjectionPointNames(for: providers)
+
             output.append("extension Zerk<\(displayName(for: injectableKey))> {")
 
             for provider in providers {
@@ -368,7 +357,8 @@ struct GeneratorOutputBuilder {
                     classification: classification,
                     hasUniqueMemberName: memberNameCounts[memberName(for: provider)] == 1,
                     singletonStorage: singletonStorage,
-                    requirements: &requirements,
+                    pointNames: pointNames,
+                    points: &points,
                     diagnostics: &diagnostics
                 ) else {
                     continue
@@ -393,7 +383,7 @@ struct GeneratorOutputBuilder {
         }
 
         output += markedMemberLines(diagnostics: &diagnostics)
-        output += interjectionProtocolLines(requirements: requirements)
+        output += interjectionPointLines(points: points)
         output += sendabilityCheckLines(sendabilityChecks)
 
         return GeneratorOutput(
@@ -426,16 +416,13 @@ struct GeneratorOutputBuilder {
                              classification: ProviderClassification,
                              hasUniqueMemberName: Bool,
                              singletonStorage: [String: SingletonStorage],
-                             requirements: inout [InterjectionRequirement],
+                             pointNames: [String: String],
+                             points: inout [InterjectionPoint],
                              diagnostics: inout [CodegenDiagnostic]) -> [String]? {
         let memberName = memberName(for: provider)
         let isolation = provider.isolation
         let allParameters = provider.provider.parameters
         let ownEffects = provider.provider.effects
-        let protocolName = interjectingProtocolName(for: injectableKey)
-        let interjectedName = interjectedName(for: memberName)
-        // The key as it is written in the output. The protocol name above stays
-        // on the canonical key, so an `any` spelling cannot rename it.
         let keyText = displayName(for: injectableKey)
         let access = exportedAccessPrefix(for: provider, injectableKey: injectableKey)
 
@@ -447,20 +434,14 @@ struct GeneratorOutputBuilder {
             guard let storage = singletonStorage[provider.typeName] else {
                 return nil
             }
-            requirements.append(InterjectionRequirement(
-                zerkArgument: injectableKey,
-                interjectedName: interjectedName,
-                returnTypeName: keyText,
-                kind: .variable,
-                isolation: isolation
-            ))
+            let point = pointNames[pointIdentity(for: provider)] ?? memberName
+            points.append(InterjectionPoint(zerkArgument: injectableKey, name: point))
             return singletonLines(
                 for: provider,
                 injectableKey: injectableKey,
                 access: access,
                 memberName: memberName,
-                protocolName: protocolName,
-                interjectedName: interjectedName,
+                point: point,
                 storage: storage
             )
         }
@@ -475,21 +456,12 @@ struct GeneratorOutputBuilder {
             let signature = parameterClause(parameters: allParameters, defaults: defaults)
             let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))(\(builderArguments(allParameters, useParameterNames: true, defaults: defaults)))"
             lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(signature)\(ownEffects.declarationSuffix) -> \(keyText) {")
-            lines += interjectionGuardLines(
-                protocolName: protocolName,
-                interjectedName: interjectedName,
-                callArguments: interjectedCallArguments(allParameters)
-            )
+            let point = pointNames[pointIdentity(for: provider)] ?? memberName
+            lines += interjectionGuardLines(point: "`\(point)`")
             lines.append("        return \(construction)")
             lines.append("    }")
 
-            requirements.append(InterjectionRequirement(
-                zerkArgument: injectableKey,
-                interjectedName: interjectedName,
-                returnTypeName: keyText,
-                kind: .function(parameters: allParameters),
-                isolation: isolation
-            ))
+            points.append(InterjectionPoint(zerkArgument: injectableKey, name: point))
 
             if hasUniqueMemberName {
                 lines += keyPathReachableVariantLines(
@@ -504,21 +476,12 @@ struct GeneratorOutputBuilder {
         } else {
             let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))()"
             lines.append("    \(isolation.declarationPrefix)\(access)static var \(memberName): \(keyText) {")
-            lines += interjectionGuardLines(
-                protocolName: protocolName,
-                interjectedName: interjectedName,
-                callArguments: nil
-            )
+            let point = pointNames[pointIdentity(for: provider)] ?? memberName
+            lines += interjectionGuardLines(point: "`\(point)`")
             lines.append("        return \(construction)")
             lines.append("    }")
 
-            requirements.append(InterjectionRequirement(
-                zerkArgument: injectableKey,
-                interjectedName: interjectedName,
-                returnTypeName: keyText,
-                kind: .variable,
-                isolation: isolation
-            ))
+            points.append(InterjectionPoint(zerkArgument: injectableKey, name: point))
         }
 
         guard classification.requiresSplit else {
@@ -778,17 +741,12 @@ struct GeneratorOutputBuilder {
                                 injectableKey: String,
                                 access: String,
                                 memberName: String,
-                                protocolName: String,
-                                interjectedName: String,
+                                point: String,
                                 storage: SingletonStorage) -> [String] {
         var lines = [
             "    \(provider.isolation.declarationPrefix)\(access)static var \(memberName): \(displayName(for: injectableKey)) {"
         ]
-        lines += interjectionGuardLines(
-            protocolName: protocolName,
-            interjectedName: interjectedName,
-            callArguments: nil
-        )
+        lines += interjectionGuardLines(point: "`\(point)`")
         lines.append("        return \(Self.singletonStorageEnumName).\(storage.memberName)")
         lines.append("    }")
         return lines
@@ -1408,14 +1366,18 @@ struct GeneratorOutputBuilder {
     /// the mirrored member returns a value, that value is used instead of the
     /// real provider. `callArguments` is `nil` for property-shaped members and
     /// the (possibly empty) argument list for function-shaped members.
-    private func interjectionGuardLines(protocolName: String,
-                                       interjectedName: String,
-                                       callArguments: String?,
-                                       indent: String = "        ") -> [String] {
-        let access = callArguments.map { "\(interjectedName)(\($0))" } ?? interjectedName
-        return [
-            "\(indent)if let interjector = Self.self as? any \(protocolName).Type,",
-            "\(indent)    let interjected = interjector.\(access) {",
+    /// The lookup at the top of every generated member.
+    ///
+    /// No type annotation: `_$interjected(for:)` returns `T?` concretely, so
+    /// there is no generic parameter for Swift to solve as the fallback's type.
+    /// No `#if DEBUG` either — that lives inside the helper, which is
+    /// `@inlinable`, so a release build deletes the branch *and* the key-path
+    /// formation. Confirmed in optimized SIL: the member reduces to its
+    /// construction alone.
+    private func interjectionGuardLines(point: String,
+                                        indent: String = "        ") -> [String] {
+        [
+            "\(indent)if let interjected = _$interjected(for: \\.\(point)) {",
             "\(indent)    return interjected",
             "\(indent)}"
         ]
@@ -1462,27 +1424,12 @@ struct GeneratorOutputBuilder {
 
     /// Labeled arguments forwarded to the mirrored interjection member, using
     /// the enclosing member's parameter names.
-    private func interjectedCallArguments(_ parameters: [ParameterRecord]) -> String {
-        parameters.map { parameter in
-            if let label = parameter.label {
-                return "\(label): \(parameter.name)"
-            }
-            return parameter.name
-        }
-        .joined(separator: ", ")
-    }
 
     /// The interjection requirement mirroring a generated member: `live`
     /// becomes `interjectedLive`.
-    private func interjectedName(for memberName: String) -> String {
-        "interjected" + upperFirst(memberName)
-    }
 
     /// `Interjecting` plus the key rendered as an identifier, e.g.
     /// `InterjectingStoring`.
-    private func interjectingProtocolName(for key: String) -> String {
-        "Interjecting" + sanitizedIdentifier(key)
-    }
 
     /// Uppercases the first character only, leaving the rest as written.
     private func upperFirst(_ string: String) -> String {
@@ -1508,37 +1455,85 @@ struct GeneratorOutputBuilder {
     ///
     /// Requirements mirror the isolation of the member they stand in for: a
     /// generated member cannot call a requirement that lives in another domain.
-    private func interjectionProtocolLines(requirements: [InterjectionRequirement]) -> [String] {
-        guard !requirements.isEmpty else {
+    /// What identifies a provider while naming points: its member name and full
+    /// parameter shape, which the collision check has already proved unique
+    /// within the key.
+    private func pointIdentity(for provider: ProviderResolution) -> String {
+        InterjectionPointName.text(
+            member: memberName(for: provider),
+            parameters: provider.provider.parameters.map { "\($0.label ?? "_"): \($0.typeName)" }
+        )
+    }
+
+    /// Names every provider's interjection point, as short as the key allows.
+    ///
+    /// Three forms, escalating only when the previous one is ambiguous:
+    ///
+    /// | members sharing the name | point |
+    /// |---|---|
+    /// | one | `live` |
+    /// | several, distinct labels | `loader(store:)` |
+    /// | several, same labels | `loader(store: Disk)` |
+    ///
+    /// A group escalates as a whole rather than per member, so every overload of
+    /// one name is spelled the same way — a mix would be harder to predict than
+    /// either form alone.
+    ///
+    /// Adding an overload can therefore rename an existing point, which turns
+    /// interjections naming it into compile errors. That is the intended
+    /// outcome: the name really did stop identifying one member.
+    private func interjectionPointNames(for providers: [ProviderResolution]) -> [String: String] {
+        var names: [String: String] = [:]
+
+        for (member, group) in Dictionary(grouping: providers, by: { memberName(for: $0) }) {
+            guard group.count > 1 else {
+                names[pointIdentity(for: group[0])] = member
+                continue
+            }
+
+            let labelForms = group.map { provider in
+                InterjectionPointName.selector(
+                    member: member,
+                    labels: provider.provider.parameters.map { $0.label ?? "_" }
+                )
+            }
+            let labelsSuffice = Set(labelForms).count == group.count
+
+            for (offset, provider) in group.enumerated() {
+                names[pointIdentity(for: provider)] = labelsSuffice
+                    ? labelForms[offset]
+                    : pointIdentity(for: provider)
+            }
+        }
+
+        return names
+    }
+
+    /// Emits each key's `Interjection` namespace — one `Void` property per
+    /// generated member, named after that member's signature.
+    ///
+    /// Kept off `Zerk<Key>` itself: hung there, the point for an argument-free
+    /// member would collide with the member, since both would be
+    /// `static var live`. In the namespace every member gets one whatever its
+    /// shape, and `Zerk<Key>`'s own surface is untouched.
+    private func interjectionPointLines(points: [InterjectionPoint]) -> [String] {
+        guard !points.isEmpty else {
             return []
         }
 
         var lines: [String] = []
-        let grouped = Dictionary(grouping: requirements, by: \.zerkArgument)
+        let grouped = Dictionary(grouping: points, by: \.zerkArgument)
 
         for zerkArgument in grouped.keys.sorted() {
-            // Deduped by name *and* parameters, not by name alone: several
+            // Deduped by name, which already carries the parameters: several
             // providers for one key can share a member name, and each overload
-            // needs its own requirement. Collapsing them would leave a generated
-            // member calling a requirement that was never declared.
-            let sorted = grouped[zerkArgument]!.sorted { identity(of: $0) < identity(of: $1) }
+            // needs its own point.
             var seen = Set<String>()
+            let names = grouped[zerkArgument]!.map(\.name).sorted()
 
-            lines.append("protocol \(interjectingProtocolName(for: zerkArgument)) {")
-            for requirement in sorted {
-                guard seen.insert(identity(of: requirement)).inserted else {
-                    continue
-                }
-                // Isolation comes first: `@MainActor static var` is the valid
-                // ordering for an attribute, and `nonisolated static var` the
-                // conventional one for a modifier.
-                let isolation = requirement.isolation.declarationPrefix
-                switch requirement.kind {
-                case .variable:
-                    lines.append("    \(isolation)static var \(requirement.interjectedName): \(optionalOf(requirement.returnTypeName)) { get }")
-                case .function(let parameters):
-                    lines.append("    \(isolation)static func \(requirement.interjectedName)\(protocolParameterClause(parameters)) -> \(optionalOf(requirement.returnTypeName))")
-                }
+            lines.append("extension Zerk<\(displayName(for: zerkArgument))>.Interjection {")
+            for name in names where seen.insert(name).inserted {
+                lines.append("    var `\(name)`: Void {}")
             }
             lines.append("}")
             lines.append("")
@@ -1549,26 +1544,6 @@ struct GeneratorOutputBuilder {
 
     /// What makes two interjection requirements the same requirement: the
     /// mirrored member's name together with its parameters.
-    private func identity(of requirement: InterjectionRequirement) -> String {
-        switch requirement.kind {
-        case .variable:
-            return requirement.interjectedName
-        case .function(let parameters):
-            return requirement.interjectedName + protocolParameterClause(parameters)
-        }
-    }
-
-    /// Makes a type optional, parenthesizing it when `?` would otherwise bind to
-    /// the wrong thing.
-    ///
-    /// `any Serving?` is a parse error — Swift reads it as `any (Serving?)` and
-    /// asks for `(any Serving)?`. The same goes for a composition (`A & B?`) and
-    /// a function type. A plain identifier, generic or not, needs no help, and
-    /// `Dictionary<String, Int>?` is already unambiguous because the space is
-    /// inside the brackets.
-    private func optionalOf(_ typeText: String) -> String {
-        hasTopLevelBreak(typeText) ? "(\(typeText))?" : "\(typeText)?"
-    }
 
     /// Whether the spelling has a space or `&` outside any bracket, which is
     /// what makes a trailing `?` ambiguous.

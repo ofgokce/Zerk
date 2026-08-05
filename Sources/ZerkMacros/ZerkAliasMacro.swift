@@ -56,7 +56,14 @@ public struct ZerkAliasMacro: PeerMacro {
 public struct ZerkAliasDeclarationMacro: DeclarationMacro {
     public static func expansion(of node: some FreestandingMacroExpansionSyntax,
                                  in context: some MacroExpansionContext) throws -> [DeclSyntax] {
-        let types = node.genericArgumentClause?.arguments.map(\.argument) ?? []
+        // Only type arguments: a generic argument may be a value (SE-0453),
+         // which cannot be an alias key.
+        let types = (node.genericArgumentClause?.arguments ?? []).compactMap { argument -> TypeSyntax? in
+            guard case .type(let type) = argument.argument else {
+                return nil
+            }
+            return type
+        }
 
         // The trailing `()` is not optional. Written bare, `#ZerkAlias<A, B>`
         // parses as a macro expansion *expression* named `ZerkAlias` followed by

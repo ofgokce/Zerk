@@ -22,6 +22,16 @@ import SwiftParser
 /// substituted — so no build of the Zerk module is required.
 enum CompileFixture {
 
+    /// Counts the `extension Zerk<Key> { … }` blocks that carry members,
+    /// ignoring the per-key `Interjection` namespaces the plugin also emits.
+    /// Tests asserting "one extension per key" mean the member ones.
+    static func memberExtensionCount(in generated: String) -> Int {
+        generated
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { $0.hasPrefix("extension Zerk<") && !$0.contains(".Interjection") }
+            .count
+    }
+
     struct Result {
         let generated: String
         let didCompile: Bool
@@ -245,6 +255,16 @@ enum CompileFixture {
     private static let preamble = """
     // Generated test scaffolding.
     public enum Zerk<T> {}
+
+    // The interjection surface the generated file expects. Mirrors the real
+    // Zerk module's shape closely enough to type-check: the namespace the
+    // plugin extends per key, and the lookup every member calls. Always `nil`
+    // here — this fixture proves the emitted code *compiles*, and interjection
+    // behaviour is covered against the real module in ZerkTests.
+    public extension Zerk {
+        enum Interjection {}
+        static func _$interjected(for keyPath: KeyPath<Interjection, Void>) -> T? { nil }
+    }
 
     @propertyWrapper
     public struct injected<Value> {

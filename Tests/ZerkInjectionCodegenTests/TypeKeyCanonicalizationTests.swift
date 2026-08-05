@@ -178,11 +178,9 @@ struct TypeKeyCanonicalizationPipelineTests {
 
         #expect(result.generated.contains("extension Zerk<any Serving> {"))
         #expect(result.generated.contains("-> any Serving"))
-        // `any Serving?` is a parse error; the requirement has to parenthesize.
-        #expect(result.generated.contains("(any Serving)?"))
-        // The protocol name stays on the canonical key, so writing `any` cannot
-        // rename it out from under an existing conformance.
-        #expect(result.generated.contains("protocol InterjectingServing {"))
+        // The `any` spelling reaches the interjection namespace too, so a test
+        // naming a point writes the key exactly as the members do.
+        #expect(result.generated.contains("extension Zerk<any Serving>.Interjection {"))
 
         try #require(!result.skipped, "no usable Swift compiler; case not verified")
         #expect(result.didCompile, Comment(rawValue: result.compilerOutput))
@@ -232,8 +230,7 @@ struct TypeKeyCanonicalizationPipelineTests {
 
         // One extension, not two: bare and `any` are the same specialization, so
         // emitting both would redeclare the members.
-        let extensionCount = result.generated
-            .components(separatedBy: "extension Zerk<").count - 1
+        let extensionCount = CompileFixture.memberExtensionCount(in: result.generated)
         #expect(extensionCount == 1)
         #expect(result.generated.contains("extension Zerk<any Serving> {"))
         #expect(result.generated.contains("static var a: any Serving"))

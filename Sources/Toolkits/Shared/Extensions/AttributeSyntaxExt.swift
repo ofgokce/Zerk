@@ -28,7 +28,15 @@ public extension AttributeSyntax {
             return []
         }
 
-        return clause.arguments.map(\.argument)
+        // A generic argument may be a value rather than a type (SE-0453), and
+        // Zerk's keys are always types, so a value argument is not a key and
+        // drops out here.
+        return clause.arguments.compactMap { argument in
+            guard case .type(let type) = argument.argument else {
+                return nil
+            }
+            return type
+        }
     }
 
     var genericArgumentKeys: [String] {

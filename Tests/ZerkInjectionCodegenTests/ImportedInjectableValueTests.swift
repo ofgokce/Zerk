@@ -137,7 +137,7 @@ struct ImportedInjectableValueTests {
         #expect(result.diagnostics.isEmpty)
         #expect(!result.output.output.contains("extension Zerk<String>"))
         // The interjection requirement goes with the member, so it stays away too.
-        #expect(!result.output.output.contains("InterjectingString"))
+        #expect(!result.output.output.contains("extension Zerk<String>.Interjection {"))
     }
 
     @Test("a local value on the same key is still emitted alongside an import")

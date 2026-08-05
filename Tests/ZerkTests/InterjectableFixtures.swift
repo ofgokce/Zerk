@@ -2,16 +2,13 @@ import Zerk
 
 // MARK: - Interjection test doubles
 //
-// The Zerk plugin generates an `Interjecting<Key>` protocol per injectable key,
-// mirroring each generated injector member. A test suite overrides an
-// implementation by conditionally conforming `Zerk` to that protocol and
-// returning a double — or `nil` to fall through to the real provider. The
-// toggles below keep the non-interjection tests resolving the real objects.
-
-enum InterjectionToggles {
-    nonisolated(unsafe) static var userService = false
-    nonisolated(unsafe) static var seededToken = false
-}
+// The plugin declares one interjection point per generated member on
+// `Zerk<Key>.Interjection`, named — with a raw identifier — after that member's
+// signature. A test registers a double against that point for the duration of a
+// scope, so nothing leaks between tests and no global toggle is needed.
+//
+// These helpers stand in for the `#Interject` macro until Phase 4 lands; the
+// mechanism underneath is the one the macro will expand to.
 
 struct InterjectedUserService: UserService {
     func requestPath() -> String {
@@ -21,14 +18,24 @@ struct InterjectedUserService: UserService {
     var loggerSerial: Int { -1 }
 }
 
-extension Zerk: InterjectingUserService where T == UserService {
-    static func interjectedLive(apiService: ApiServicing, logger: Logger) -> UserService? {
-        InterjectionToggles.userService ? InterjectedUserService() : nil
+/// Runs `operation` with a scope of its own, so interjections registered inside
+/// are invisible to every other test — which is what lets these run in parallel.
+func withInterjections<R>(_ register: () -> Void,
+                          operation: () async throws -> R) async rethrows -> R {
+    try await Zerk.withInterjections {
+        register()
+        return try await operation()
     }
 }
 
-extension Zerk: InterjectingSeededToken where T == SeededToken {
-    static func interjectedSeeded(seed: Int) -> SeededToken? {
-        InterjectionToggles.seededToken ? SeededToken(value: 999) : nil
+func interjectUserService() {
+    Zerk<UserService>._$interject(\.live) {
+        InterjectedUserService()
+    }
+}
+
+func interjectSeededToken() {
+    Zerk<SeededToken>._$interject(\.seeded) {
+        SeededToken(value: 999)
     }
 }

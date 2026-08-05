@@ -1,6 +1,11 @@
 import Testing
 import Zerk
 
+/// Serialized for the *counter* fixtures, not for interjection: several cases
+/// assert on shared `static var` construction counts (`Logger.createdCount`,
+/// `LiveUserService.factoryCount`) that race when tests run concurrently.
+/// Interjection itself is now per-scope and parallel-safe — see
+/// `InterjectionStoreTests`, whose suites do run concurrently.
 @Suite("Zerk Macro Integration", .serialized)
 struct ZerkTests {
     @Test("unique typed injection resolves dependencies")
@@ -199,28 +204,28 @@ struct ZerkTests {
     }
 
     @Test("interjection overrides injection with mock type")
-    func interjectionOverridesInjection() throws {
+    func interjectionOverridesInjection() async throws {
         resetFixtureState()
-        InterjectionToggles.userService = true
+        await withInterjections(interjectUserService) {
+            let model = FeedViewModel()
+            let service = model.userService
 
-        let model = FeedViewModel()
-        let service = model.userService
-
-        #expect(service is InterjectedUserService)
-        #expect(service.requestPath() == "interjected/users")
-        #expect(service.loggerSerial == -1)
+            #expect(service is InterjectedUserService)
+            #expect(service.requestPath() == "interjected/users")
+            #expect(service.loggerSerial == -1)
+        }
     }
 
     @Test("interjection overrides parameterized injection with inlined value")
-    func interjectionOverridesParameterizedInjection() {
+    func interjectionOverridesParameterizedInjection() async {
         resetFixtureState()
-        InterjectionToggles.seededToken = true
+        await withInterjections(interjectSeededToken) {
+            let consumer = EagerTokenConsumer()
+            let value = consumer.seededToken.value
 
-        let consumer = EagerTokenConsumer()
-        let value = consumer.seededToken.value
-
-        #expect(value == 999)
-        #expect(SeededToken.factoryCount == 0)
+            #expect(value == 999)
+            #expect(SeededToken.factoryCount == 0)
+        }
     }
 
 }
@@ -229,6 +234,4 @@ private func resetFixtureState() {
     Logger.createdCount = 0
     LiveUserService.factoryCount = 0
     SeededToken.factoryCount = 0
-    InterjectionToggles.userService = false
-    InterjectionToggles.seededToken = false
 }
