@@ -5,7 +5,7 @@
 [![Platforms](https://img.shields.io/badge/platforms-iOS%2013%2B%20%7C%20macOS%2014%2B%20%7C%20macCatalyst%2013%2B%20%7C%20watchOS%206%2B%20%7C%20tvOS%2013%2B%20%7C%20visionOS%201%2B-lightgrey.svg)](#requirements)
 [![Swift Version](https://img.shields.io/badge/Swift-6.2-F16D39.svg?style=flat)](https://developer.apple.com/swift)
 
-Zerk is a compile-time dependency injection framework for Swift. Instead of a runtime container, it combines Swift macros with a build-tool plugin that scans your module's source, resolves the dependency graph during the build, and generates plain static factory code on a `Zerk<T>` namespace. There is nothing to register at runtime, resolution failures are build errors with file/line locations, and injected code is ordinary Swift you can step through.
+Zerk is a compile-time dependency injection framework for Swift. Instead of a runtime container, it combines Swift macros with a build-tool plugin that scans your module's source, resolves the dependency graph during the build, and generates plain static factory code on a `Zerk<Key>` namespace. There is nothing to register at runtime, resolution failures are build errors with file/line locations, and injected code is ordinary Swift you can step through.
 
 For testing, the same plugin gives every generated member a named interjection point, so `#Interject` can stand a double in for any injectable — one member, or a whole key at once — without touching production code. Interjections belong to a scope, so tests keep running in parallel, and they compile to nothing in release.
 
@@ -91,7 +91,7 @@ targets: [
 ]
 ```
 
-The package vends three products: the `Zerk` library (the macros and the `Zerk<T>` namespace), the `ZerkPlugin` build-tool plugin, and `ZerkTesting` (the `.zerk` trait). `ZerkTesting` depends on swift-testing, so keep it to test targets:
+The package vends three products: the `Zerk` library (the macros and the `Zerk<Key>` namespace), the `ZerkPlugin` build-tool plugin, and `ZerkTesting` (the `.zerk` trait). `ZerkTesting` depends on swift-testing, so keep it to test targets:
 
 ```swift
     .testTarget(
@@ -155,13 +155,13 @@ extension Zerk<ApiServicing>.Interjection {
 }
 ```
 
-`@Injected var apiService` expands to a stored property whose default value is `Zerk<ApiServicing>.inject()`. `Zerk<T>` itself is an empty `public enum Zerk<T> {}`; everything lives in the generated extensions.
+`@Injected var apiService` expands to a stored property whose default value is `Zerk<ApiServicing>.inject()`. The namespace itself is an empty `public enum Zerk<Injectable> {}`; everything lives in the generated extensions.
 
 ## How it works
 
 Zerk is a macro package and a build-tool plugin, and it is worth knowing which does what — because **almost none of the code generation happens in the macros.**
 
-`@Injectable`, `@InjectableProviding`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a type that does not conform to the key it claims, a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<T>.inject()`) depends on nothing but the property's own type.
+`@Injectable`, `@InjectableProviding`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a type that does not conform to the key it claims, a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier — are reported right at the declaration. `@Injected` is the one macro that generates code, because the expression it needs (`Zerk<Key>.inject()`) depends on nothing but the property's own type.
 
 Everything else is the plugin, for one reason: an attached macro can only see the declaration it is attached to, while resolving a dependency graph requires the whole module. So `ZerkPlugin` runs `ZerkCodegen` over every `.swift` file in the target, in three stages:
 
@@ -538,7 +538,7 @@ Marking a parameter somewhere Zerk never resolves — a second initializer, an o
 
 Distinct from `@injected` below, which generates an overload of the *enclosing member*. They compose — `@injected @autoinjected` does both.
 
-**`@injected` (lowercase) — parameter injection.** Marks an initializer or method parameter; the build plugin generates an overload with every marked parameter omitted and filled via `Zerk<T>.inject()`. When the resolved dependency's own provider still needs arguments, those bubble up onto the overload — see `@injectable` above to feed one from a parameter the member already has:
+**`@injected` (lowercase) — parameter injection.** Marks an initializer or method parameter; the build plugin generates an overload with every marked parameter omitted and filled via `Zerk<Key>.inject()`. When the resolved dependency's own provider still needs arguments, those bubble up onto the overload — see `@injectable` above to feed one from a parameter the member already has:
 
 ```swift
 final class AuditTrail {
@@ -787,6 +787,8 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 **Generated member names must be unique per key *per signature*.** Providers may share a member name when their parameters differ — two marked initializers both generate `Zerk<Key>.loader(...)`, told apart exactly as the initializers are. Two that agree on name *and* parameters (e.g. a `Service` in two files, both argument-free) collide; rename the type or use a distinctly named `@InjectableProviding` factory.
 
+**Generic types cannot be registered (yet).** `@Injectable` on `struct Cache<E>`, `@InjectableProviding` on a generic factory, and `@InjectableValue` on a generic function are all build errors, because the member Zerk would generate names a type parameter nothing binds. Register the specialization you need behind a concrete type. Generic support is planned; **`@Singleton` on a generic type is the one part that stays refused** — a singleton lives in a static stored property, which Swift does not allow in a generic type, so there is nowhere to keep one instance per specialization.
+
 **`@Singleton` constraints.** Reference types only; provider must be synchronous and non-throwing; no external arguments; no dependency in a different isolation domain, since resolving one would need `await`; exactly one provider per key, and the *same* provider across every key the type claims. A singleton injectable under several keys must be built by an initializer or by a factory returning the concrete type — its one instance is stored once and read through every key.
 
 **Referenced values must be visible to the generated file.** That file is a separate file in the same module, so `private` and `fileprivate` sources cannot be referenced — only copied. A mutable `static var` also has to be legal Swift 6 global state in its own right (`nonisolated(unsafe)`, or actor-isolated); Zerk mirrors whatever isolation you give it but does not launder it.
@@ -803,7 +805,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, an imported value colliding with a local one of the same name, the same value name imported twice, two values sharing a key and a name, a value whose member name collides with a provider's, an `@ImportedInjectableValue` without a getter or with one that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Injectable(public:)` on a non-public key (warning), a non-literal `primary:` or `public:`, `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, an imported value colliding with a local one of the same name, the same value name imported twice, two values sharing a key and a name, a value whose member name collides with a provider's, an `@ImportedInjectableValue` without a getter or with one that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Injectable(public:)` on a non-public key (warning), a non-literal `primary:` or `public:`, a generic `@Injectable` type / `@InjectableProviding` factory / `@InjectableValue` function, `@Singleton` on a generic type, `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

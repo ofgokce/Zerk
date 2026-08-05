@@ -169,10 +169,7 @@ private extension InjectableValueMacro {
         }
 
         if declaration.genericParameterClause != nil {
-            context.zerkError(
-                node,
-                "@InjectableValue cannot be applied to a generic function. The key is the return type, and Zerk reads syntax so it cannot substitute a type parameter."
-            )
+            context.zerkError(node, GenericRefusal.injectableValueFunction)
         }
 
         validateArguments(attributes, in: context)

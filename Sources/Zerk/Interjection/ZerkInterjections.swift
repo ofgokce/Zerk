@@ -149,7 +149,7 @@ public final class ZerkInterjections: @unchecked Sendable {
     }
 }
 
-public extension Zerk where T == Never {
+public extension Zerk where Injectable == Never {
 
     /// Runs `operation` with a scope of its own, so anything interjected inside
     /// is invisible to everything outside — including tests running alongside.

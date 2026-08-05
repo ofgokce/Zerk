@@ -505,6 +505,23 @@ final class SourceCollector: SyntaxVisitor {
             ))
         }
 
+        // A generic type keys on its bare name below, which is not a type — so
+        // nothing past this point can be emitted for it. Reported here rather
+        // than left to fail inside the generated file. The singleton case gets
+        // its own message because it is the one that stays refused.
+        let genericParameters = node.declaredGenericParameterNames
+        if !genericParameters.isEmpty {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: isSingleton
+                    ? GenericRefusal.singleton(type: node.declaredName)
+                    : GenericRefusal.injectableType(named: node.declaredName,
+                                                    parameters: genericParameters),
+                location: location
+            ))
+            return
+        }
+
         var injectableKeys: [String: AttributeLocation] = [:]
         for attribute in injectableAttributes {
             let genericKeys = attribute.genericArgumentKeys
@@ -613,6 +630,21 @@ final class SourceCollector: SyntaxVisitor {
                 continue
             }
 
+            // A generic factory's return type mentions parameters the key does
+            // not bind, so the member built from it would not compile. Same
+            // reasoning as the type-level refusal in `collectType`.
+            let functionParameters = function.genericParameterClause?
+                .parameters.map { $0.name.text } ?? []
+            if !functionParameters.isEmpty {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: GenericRefusal.providingFunction(named: function.name.text,
+                                                              parameters: functionParameters),
+                    location: self.location(for: Syntax(function))
+                ))
+                continue
+            }
+
             let returnType = function.signature.returnClause?.type.trimmedDescription ?? ""
             let functionLocation = self.location(for: Syntax(function))
             let functionStated = statedIsolation(
@@ -714,6 +746,18 @@ final class SourceCollector: SyntaxVisitor {
         }
 
         let location = self.location(for: Syntax(node))
+
+        // A swept member is already filtered out above, silently, because the
+        // sweep is a statement about the type rather than a promise about every
+        // member. An annotation is a promise, so this one is reported.
+        if node.genericParameterClause != nil {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: GenericRefusal.injectableValueFunction,
+                location: location
+            ))
+            return
+        }
 
         for attribute in attributes where attribute.publicArgument == .nonLiteral {
             diagnostics.append(nonLiteralPublicDiagnostic(named: "@InjectableValue", at: location))

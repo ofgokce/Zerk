@@ -6,7 +6,7 @@
 /// Marks an initializer or method parameter as injectable.
 ///
 /// The Zerk build plugin generates an overload of the enclosing member with
-/// every `@injected` parameter omitted and filled via `Zerk<T>.inject()`:
+/// every `@injected` parameter omitted and filled via `Zerk<Key>.inject()`:
 ///
 /// ```swift
 /// final class Checkout {

@@ -30,6 +30,8 @@ struct KeyPathInjectionTests {
     func keyPathOverloadIsDeclared() {
         let result = CompileFixture.generateWithResolution(source: Self.graph)
 
+        // The `T` here is the *macro's* own generic parameter, not Zerk's —
+        // whose parameter is named `Injectable`. A rename sweep skips this line.
         #expect(result.output.output.contains(
             "macro Injected<T>(_ keyPath: KeyPath<Zerk<T>.Type, T>) = #externalMacro(module: \"ZerkMacros\", type: \"InjectedMacro\")"
         ))

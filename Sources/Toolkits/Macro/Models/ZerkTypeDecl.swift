@@ -47,6 +47,24 @@ public enum ZerkTypeDecl {
         }
     }
 
+    /// The declaration's generic parameters, in order, or empty when it has
+    /// none. A type's Zerk key is its name plus these, so the two are always
+    /// read together.
+    public var genericParameterNames: [String] {
+        let clause: GenericParameterClauseSyntax?
+        switch self {
+        case .class(let decl):
+            clause = decl.genericParameterClause
+        case .struct(let decl):
+            clause = decl.genericParameterClause
+        case .enum(let decl):
+            clause = decl.genericParameterClause
+        case .actor(let decl):
+            clause = decl.genericParameterClause
+        }
+        return clause?.parameters.map { $0.name.text } ?? []
+    }
+
     public var attributes: AttributeListSyntax {
         switch self {
         case .class(let decl):

@@ -18,7 +18,7 @@ import SwiftParser
 /// both `SWIFT_DEFAULT_ACTOR_ISOLATION` values.
 ///
 /// The fixture is type-checked standalone — `import Zerk` and the generated
-/// `macro Injected` declarations are stripped and a bare `enum Zerk<T> {}` is
+/// `macro Injected` declarations are stripped and a bare `enum Zerk<Injectable> {}` is
 /// substituted — so no build of the Zerk module is required.
 enum CompileFixture {
 
@@ -249,12 +249,16 @@ enum CompileFixture {
         )
     }
 
-    /// `Zerk<T>` and the `@injected` wrapper, so fixtures type-check without a
-    /// build of the Zerk module. The Zerk macros are attribute-only markers, so
-    /// stripping them changes nothing the compiler needs to see.
+    /// `Zerk<Injectable>` and the `@injected` wrapper, so fixtures type-check
+    /// without a build of the Zerk module. The Zerk macros are attribute-only
+    /// markers, so stripping them changes nothing the compiler needs to see.
+    ///
+    /// The generic parameter's *name* is load-bearing, not cosmetic: generated
+    /// code may constrain it (`where Injectable == …`), and it shadows any
+    /// module type spelled the same. Keep it in step with Sources/Zerk/Zerk.swift.
     private static let preamble = """
     // Generated test scaffolding.
-    public enum Zerk<T> {}
+    public enum Zerk<Injectable> {}
 
     // The interjection surface the generated file expects. Mirrors the real
     // Zerk module's shape closely enough to type-check: the namespace the
@@ -263,7 +267,7 @@ enum CompileFixture {
     // behaviour is covered against the real module in ZerkTests.
     public extension Zerk {
         enum Interjection {}
-        static func _$interjected(for keyPath: KeyPath<Interjection, Void>) -> T? { nil }
+        static func _$interjected(for keyPath: KeyPath<Interjection, Void>) -> Injectable? { nil }
     }
 
     @propertyWrapper

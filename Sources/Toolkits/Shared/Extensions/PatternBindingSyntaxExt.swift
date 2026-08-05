@@ -13,8 +13,8 @@ public extension PatternBindingSyntax {
     /// error. The whole expression is kept, not just a callee: a value takes no
     /// arguments, so there is nothing to re-emit around it.
     ///
-    /// Accepts the getter-only spellings a value can have — `{ Zerk<T>.x }` and
-    /// `{ get { Zerk<T>.x } }` — and `= Zerk<T>.x`, which reads the foreign
+    /// Accepts the getter-only spellings a value can have — `{ Zerk<Key>.x }` and
+    /// `{ get { Zerk<Key>.x } }` — and `= Zerk<Key>.x`, which reads the foreign
     /// member once at initialization rather than per resolution and so is
     /// refused by the macro rather than honoured here.
     var importedValueExpression: String? {
@@ -29,7 +29,7 @@ public extension PatternBindingSyntax {
     }
 
     /// Whether the declaration reads through a getter at all. A stored binding
-    /// (`= Zerk<T>.x`) captures the foreign value once; the import has to be
+    /// (`= Zerk<Key>.x`) captures the foreign value once; the import has to be
     /// re-read per resolution, so the two are not interchangeable.
     var hasGetter: Bool {
         guard let accessors = accessorBlock?.accessors else {

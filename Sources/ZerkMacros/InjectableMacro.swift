@@ -69,6 +69,21 @@ private extension InjectableMacro {
             return
         }
 
+        // A generic type has no key the generator can spell — see
+        // ``GenericRefusal``. Reported before anything else, and alone: every
+        // check below is about a key this type is not going to have.
+        let genericParameters = declaration.genericParameterNames
+        if !genericParameters.isEmpty {
+            context.zerkError(
+                node,
+                declaration.attributes.hasAttribute(named: ZerkMacroNames.singletonAttributeName)
+                    ? GenericRefusal.singleton(type: declaration.nameText)
+                    : GenericRefusal.injectableType(named: declaration.nameText,
+                                                    parameters: genericParameters)
+            )
+            return
+        }
+
         for attribute in injectableAttributes {
             if attribute.hasPositionalArgument {
                 context.zerkError(

@@ -19,19 +19,23 @@ public extension Zerk {
     /// }
     /// ```
     ///
-    /// Keeping these off `Zerk<T>` itself is what makes the scheme total. Hung
+    /// Keeping these off `Zerk<Key>` itself is what makes the scheme total. Hung
     /// there, the point for an argument-free member would collide with the
     /// member — both would be `static var bar` — and only parameterized members
     /// would have a free name. In here every member gets one, whatever its
-    /// shape, and `Zerk<T>`'s own namespace is left alone.
+    /// shape, and `Zerk<Key>`'s own namespace is left alone.
     ///
     /// `Void` rather than `Never`: a getter returning `Never` must call another
     /// never-returning function, so `var bar: Never {}` does not compile.
     enum Interjection {}
 
     /// This key's identity in ``ZerkInterjections``.
+    ///
+    /// `Self`, not `Zerk<Injectable>`: inside this extension they are the same
+    /// type, and naming the parameter is one more place a future rename could
+    /// silently drift.
     static var _$interjectionKey: ObjectIdentifier {
-        ObjectIdentifier(Zerk<T>.self)
+        ObjectIdentifier(Self.self)
     }
 
     /// The double standing in for a generated member, or `nil` to build the real
@@ -44,10 +48,10 @@ public extension Zerk {
     /// }
     /// ```
     ///
-    /// Returns `T?` rather than a generic `V?` so the call site needs no type
-    /// annotation — with a generic result, `_$interjected(…) ?? Live()` lets
-    /// Swift solve the result as the *fallback's* type, and every lookup then
-    /// fails its cast.
+    /// Returns `Injectable?` rather than a generic `V?` so the call site needs
+    /// no type annotation — with a generic result, `_$interjected(…) ?? Live()`
+    /// lets Swift solve the result as the *fallback's* type, and every lookup
+    /// then fails its cast.
     ///
     /// `@inlinable` so a release build can see the body is `nil` and delete both
     /// the branch and the key-path formation; confirmed in optimized SIL, where
@@ -56,7 +60,7 @@ public extension Zerk {
     /// in an inlinable body resolves at the definition site — which is right for
     /// source distribution, where a debug app builds a debug Zerk.
     @inlinable
-    static func _$interjected(for keyPath: KeyPath<Interjection, Void>) -> T? {
+    static func _$interjected(for keyPath: KeyPath<Interjection, Void>) -> Injectable? {
         #if DEBUG
         return ZerkInterjections.current.value(for: keyPath, of: _$interjectionKey)
         #else
@@ -66,7 +70,7 @@ public extension Zerk {
 
     /// Registers a double for one member. The target of `#Interject(\.member)`.
     static func _$interject(_ keyPath: KeyPath<Interjection, Void>,
-                            _ body: @escaping @Sendable () -> T) {
+                            _ body: @escaping @Sendable () -> Injectable) {
         ZerkInterjections.current.interject(keyPath, body)
     }
 
@@ -75,7 +79,7 @@ public extension Zerk {
     ///
     /// Reaches parameterized members too — a blanket says "this key resolves to
     /// this, however it was asked for", so arguments are ignored by design.
-    static func _$interject(_ body: @escaping @Sendable () -> T) {
+    static func _$interject(_ body: @escaping @Sendable () -> Injectable) {
         ZerkInterjections.current.interject(_$interjectionKey, body)
     }
 }

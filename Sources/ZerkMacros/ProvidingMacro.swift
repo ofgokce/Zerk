@@ -66,6 +66,16 @@ private extension ProvidingMacro {
                 )
             }
 
+            let genericParameters = functionDecl.genericParameterClause?
+                .parameters.map { $0.name.text } ?? []
+            if !genericParameters.isEmpty {
+                context.zerkError(
+                    node,
+                    GenericRefusal.providingFunction(named: functionDecl.name.text,
+                                                     parameters: genericParameters)
+                )
+            }
+
             if let returnType = functionDecl.signature.returnClause?.type {
                 if isVoidType(returnType) {
                     context.zerkError(

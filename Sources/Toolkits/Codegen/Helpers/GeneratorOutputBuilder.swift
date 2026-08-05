@@ -845,7 +845,7 @@ struct GeneratorOutputBuilder {
     /// How a `.referenced` value reads its source.
     ///
     /// A member of a type is reached through that type. A *top-level*
-    /// declaration cannot be named directly from inside `extension Zerk<T>`:
+    /// declaration cannot be named directly from inside `extension Zerk<Key>`:
     /// the bare name resolves to the generated member itself, which compiles
     /// but recurses forever (the compiler only warns, "attempting to access
     /// within its own getter"). Routing it through a file-scope thunk fixes it,
@@ -1033,7 +1033,7 @@ struct GeneratorOutputBuilder {
 
     /// Emits per-type extensions containing overloads of members with
     /// `@injected` parameters: each marked parameter is omitted from the
-    /// overload and filled via the resolved `Zerk<T>` member; unmarked
+    /// overload and filled via the resolved `Zerk<Key>` member; unmarked
     /// parameters pass through unchanged. Effects of resolved chains merge
     /// into the overload (an async chain yields an async overload), and a
     /// dependency in another isolation domain merges in as `async` too.

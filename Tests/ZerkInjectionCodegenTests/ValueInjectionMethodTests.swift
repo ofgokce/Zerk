@@ -13,7 +13,7 @@ import SwiftParser
 ///
 /// The referenced case is where the subtleties live: a member of a type is
 /// qualified as `Type.member`, but a top-level declaration cannot be named
-/// directly from inside `extension Zerk<T>` without resolving to the generated
+/// directly from inside `extension Zerk<Key>` without resolving to the generated
 /// member itself and recursing, so it goes through a file-scope thunk.
 @Suite("Value injection methods")
 struct ValueInjectionMethodTests {

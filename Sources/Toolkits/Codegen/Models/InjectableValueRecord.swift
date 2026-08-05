@@ -37,7 +37,7 @@ struct InjectableValueRecord {
     /// for a top-level declaration.
     ///
     /// `.referenced` needs it to qualify the read: a bare name inside
-    /// `extension Zerk<T>` resolves to the generated member itself, so an
+    /// `extension Zerk<Key>` resolves to the generated member itself, so an
     /// unqualified reference would recurse. Top-level values have no qualifier
     /// available and go through a file-scope thunk instead.
     var enclosingTypePath: String? = nil

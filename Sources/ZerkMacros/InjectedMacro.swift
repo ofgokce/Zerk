@@ -13,7 +13,7 @@ import SwiftSyntaxMacros
 /// Expands `@Injected var x: T` into a backing property that resolves `T`.
 ///
 /// The one Zerk macro that generates code, because it can: the resolution
-/// expression is `Zerk<T>.inject()`, which needs only the property's own type.
+/// expression is `Zerk<Key>.inject()`, which needs only the property's own type.
 ///
 /// The peer uses `@storageRestrictions(initializes:)` (SE-0400) so the backing
 /// property *initializes* the original rather than shadowing it. That keeps a

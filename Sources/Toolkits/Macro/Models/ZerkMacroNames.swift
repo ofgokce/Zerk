@@ -13,4 +13,5 @@ public enum ZerkMacroNames {
     public static let injectableAttributeName = "Injectable"
     public static let injectableValueAttributeName = "InjectableValue"
     public static let injectableProvidingAttributeName = "InjectableProviding"
+    public static let singletonAttributeName = "Singleton"
 }

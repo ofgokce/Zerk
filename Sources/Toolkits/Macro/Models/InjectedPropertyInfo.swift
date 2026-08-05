@@ -149,7 +149,7 @@ public struct InjectedPropertyInfo {
         }
     }
 
-    /// Builds `Zerk<T>.inject()`, forwarding any attribute arguments verbatim.
+    /// Builds `Zerk<Key>.inject()`, forwarding any attribute arguments verbatim.
     private static func buildInjectedExpression(injectedType: String,
                                                 arguments: [LabeledExprSyntax]) -> String {
         let target = "Zerk<\(injectedType)>.inject"

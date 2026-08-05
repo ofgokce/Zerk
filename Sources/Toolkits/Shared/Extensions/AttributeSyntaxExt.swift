@@ -50,7 +50,7 @@ public extension AttributeSyntax {
     }
 
     /// The call-style arguments of `@Attribute(...)`, as used by
-    /// `@Injected(Zerk<T>.custom)`. Empty for attributes written without
+    /// `@Injected(Zerk<Key>.custom)`. Empty for attributes written without
     /// parentheses.
     var labeledArguments: [LabeledExprSyntax] {
         guard let arguments else {
