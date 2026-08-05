@@ -1,3 +1,4 @@
+import Foundation
 import Zerk
 
 @InjectableValue
@@ -409,30 +410,77 @@ final class AuditTrail {
 /// The build counter cannot live on `Codec` itself: static stored properties
 /// are illegal in a generic type, which is the same fact that makes a generic
 /// `@Singleton` impossible.
+/// Locked, not merely `nonisolated(unsafe)`. These fixtures are resolved from
+/// several suites at once, and Swift Testing runs suites in parallel —
+/// `.serialized` orders a suite's own tests and nothing more. An unguarded
+/// `Array.append` from two suites is a genuine data race, and it does not fail
+/// an assertion: it corrupts the buffer and takes the test process down, which
+/// reads as an unexplained crash far from the cause.
 enum CodecCounter {
-    nonisolated(unsafe) static var builds: [String] = []
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var storage: [String] = []
+
+    static var builds: [String] {
+        lock.withLock { storage }
+    }
+
+    static func record(_ element: String) {
+        lock.withLock { storage.append(element) }
+    }
+}
+
+/// An identity-bearing dependency for the generic fixtures alone.
+///
+/// Deliberately **not** `Logger`. That one is counted by `resetFixtureState()`
+/// and asserted on by `ZerkTests`, which is `.serialized` — but serialization
+/// orders tests *within* a suite, not across them. A generic test resolving a
+/// `Logger` in parallel therefore breaks an assertion in an unrelated suite,
+/// intermittently and far from the cause. Anything the generic suites resolve
+/// has to be theirs alone.
+enum StampCounter {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var storage = 0
+
+    /// Returns the serial it just issued, so a caller never reads a value
+    /// another suite has already moved past.
+    static func next() -> Int {
+        lock.withLock {
+            storage += 1
+            return storage
+        }
+    }
+}
+
+@Injectable
+struct Stamp {
+    let serial: Int
+
+    @InjectableProviding
+    init() {
+        serial = StampCounter.next()
+    }
 }
 
 @Injectable
 struct Codec<Element> {
-    let logger: Logger
+    let stamp: Stamp
 
     @InjectableProviding
-    init(logger: Logger) {
-        self.logger = logger
-        CodecCounter.builds.append(String(describing: Element.self))
+    init(stamp: Stamp) {
+        self.stamp = stamp
+        CodecCounter.record(String(describing: Element.self))
     }
 }
 
 @Injectable
 struct Repository<Element> {
     let codec: Codec<Element>
-    let logger: Logger
+    let stamp: Stamp
 
     @InjectableProviding
-    init(codec: Codec<Element>, logger: Logger) {
+    init(codec: Codec<Element>, stamp: Stamp) {
         self.codec = codec
-        self.logger = logger
+        self.stamp = stamp
     }
 }
 

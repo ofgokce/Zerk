@@ -28,6 +28,7 @@ enum GenericGate {
         var diagnostics: [CodegenDiagnostic] = []
 
         for type in types {
+
             guard !type.genericParameters.isEmpty else {
                 admitted.append(type)
                 continue

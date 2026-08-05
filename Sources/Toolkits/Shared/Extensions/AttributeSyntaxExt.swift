@@ -87,6 +87,40 @@ public extension AttributeSyntax {
         boolArgument(labeled: "parameterized")
     }
 
+    /// The attribute's `typeNamed:` argument — `@Injectable(typeNamed: true)`
+    /// names the generated member after the declared *type* rather than after
+    /// the declaration.
+    var typeNamedArgument: LiteralBoolArgument {
+        boolArgument(labeled: "typeNamed")
+    }
+
+    /// The attribute's `name:` argument, which names the generated member
+    /// outright.
+    var nameArgument: LiteralStringArgument {
+        stringArgument(labeled: "name")
+    }
+
+    /// Reads a `String` argument by label.
+    ///
+    /// Only a literal can be honoured, for the same reason a `Bool` one can:
+    /// Zerk reads syntax and never evaluates it. Interpolation counts as
+    /// non-literal — `"\(prefix)Session"` has segments Zerk cannot resolve.
+    func stringArgument(labeled label: String) -> LiteralStringArgument {
+        for argument in labeledArguments where argument.label?.text == label {
+            guard let literal = argument.expression.as(StringLiteralExprSyntax.self) else {
+                return .nonLiteral
+            }
+            let segments = literal.segments.compactMap { segment in
+                segment.as(StringSegmentSyntax.self)?.content.text
+            }
+            guard segments.count == literal.segments.count else {
+                return .nonLiteral
+            }
+            return .literal(segments.joined())
+        }
+        return .absent
+    }
+
     /// Reads a `Bool` argument by label.
     ///
     /// Zerk reads syntax and never evaluates it, so only a `true`/`false`
@@ -107,6 +141,21 @@ public extension AttributeSyntax {
     /// `ValueInjectionMethod` in `@Injectable(.referenced)`.
     var hasPositionalArgument: Bool {
         labeledArguments.contains { $0.label == nil }
+    }
+}
+
+/// The three states a `String` attribute argument can be in, for the same
+/// reason ``LiteralBoolArgument`` has three.
+public enum LiteralStringArgument: Equatable {
+    case absent
+    case literal(String)
+    case nonLiteral
+
+    public var value: String? {
+        if case .literal(let text) = self {
+            return text
+        }
+        return nil
     }
 }
 

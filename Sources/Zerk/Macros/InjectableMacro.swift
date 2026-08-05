@@ -118,6 +118,73 @@ public macro Injectable<each T>(primary: Bool, public: Bool = false) = #external
     type: "InjectableMacro"
 )
 
+/// Registers the type a **global or static** declaration produces, with the
+/// declaration as its provider.
+///
+/// The way a type you cannot annotate — `URLSession`, a vendor SDK's client —
+/// becomes a real key rather than a value matched by name:
+///
+/// ```swift
+/// @Injectable var urlSession: URLSession { .init(configuration: .default) }
+///
+/// Zerk<URLSession>.inject()      // and Zerk<URLSession>.urlSession
+/// ```
+///
+/// The key is the declared or returned type, unless a generic argument states
+/// one: `@Injectable<URLSessionProtocol> var urlSession: URLSession` registers
+/// `URLSessionProtocol` and builds it from this.
+///
+/// The member takes the declaration's own name. Two arguments change that:
+///
+/// - `typeNamed: true` names it after the produced *type*, so a declaration
+///   called anything yields `Zerk<URLSession>.urlSession`.
+/// - `name:` names it outright, and takes a string literal — Zerk reads syntax
+///   and cannot evaluate an expression or an interpolation.
+///
+/// They are alternatives; stating both is an error.
+///
+/// A generic function registers exactly as a generic type does — the key is the
+/// family, and the member binds it per call:
+///
+/// ```swift
+/// @Injectable(typeNamed: true)
+/// func makeBox<X, Y>(x: X, y: Y) -> Box<X, Y> { … }
+///
+/// Zerk<Box<Int, String>>.box(x: 1, y: "a")
+/// ```
+@attached(peer)
+public macro Injectable(typeNamed: Bool,
+                        primary: Bool = false,
+                        public: Bool = false) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
+@attached(peer)
+public macro Injectable<each T>(typeNamed: Bool,
+                                primary: Bool = false,
+                                public: Bool = false) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
+/// Names the generated member outright. See ``Injectable(typeNamed:primary:public:)``.
+@attached(peer)
+public macro Injectable(name: String,
+                        primary: Bool = false,
+                        public: Bool = false) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
+@attached(peer)
+public macro Injectable<each T>(name: String,
+                                primary: Bool = false,
+                                public: Bool = false) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
 /// Registers a generic type under a **parameterized existential** key: the
 /// type's own parameters become the protocol's primary associated types.
 ///

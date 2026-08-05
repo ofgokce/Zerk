@@ -559,6 +559,95 @@ The lowercase name is deliberate: `@Injected` is the property macro, `@injected`
 
 Effects propagate through the chain: if a provider is `async`/`throws`, the generated members and `inject()` are too, and transitive dependents inherit the effects. `@Injected` expands to a synchronous accessor and cannot resolve such chains (the codegen emits an error if you try); resolve them manually, or use an `@injected` parameter, whose generated overload inherits the chain's effects.
 
+## Registering a type you do not declare
+
+`@Injectable<Key>` does not require the annotated declaration to *be* `Key`. The declaration is only where the providers live; the key is what they build. That is how a type from another module — `URLSession`, a vendor SDK's client, anything you cannot annotate — joins the graph:
+
+```swift
+@Injectable
+var urlSession: URLSession { URLSession(configuration: .default) }
+```
+
+That is the whole registration. `@Injectable` on a **global or static** var or func registers the type it *produces*, with the declaration as its provider:
+
+```swift
+// Generated:
+extension Zerk<URLSession> {
+    nonisolated static var urlSession: URLSession {
+        if let interjected = _$interjected(for: \.`urlSession`) { return interjected }
+        return _$zerk_provider_urlSession()
+    }
+    nonisolated static func inject() -> URLSession { urlSession }
+}
+```
+
+Full membership, not a special case: anything asking for a `URLSession` resolves through `inject()`, and the member gets an interjection point like any other.
+
+### Naming the member
+
+The member takes the declaration's own name. Two arguments change that, and they are alternatives — stating both is an error:
+
+| written | key | member |
+|---|---|---|
+| `@Injectable var urlSession: URLSession` | `URLSession` | `urlSession` |
+| `@Injectable<URLSessionProtocol> var urlSession: URLSession` | `URLSessionProtocol` | `urlSession` |
+| `@Injectable(typeNamed: true) var dummyName: URLSession` | `URLSession` | `urlSession` |
+| `@Injectable(name: "mainSession") var dummyName: URLSession` | `URLSession` | `mainSession` |
+| `@Injectable<URLSessionProtocol>(typeNamed: true) var dummyName: URLSession` | `URLSessionProtocol` | `urlSession` |
+
+`typeNamed:` reads the **produced type**, not the key — the last row is `urlSession`, not `urlSessionProtocol`. `name:` takes a string literal; Zerk reads syntax and cannot evaluate an expression or an interpolation.
+
+### Functions, including generic ones
+
+A function's parameters are dependencies like any provider's, and a generic function registers exactly as a generic type does:
+
+```swift
+@Injectable
+func makeClient(config: Config) -> Client { … }
+// static func makeClient(config: Config = Zerk<Config>.config) -> Client
+
+@Injectable(typeNamed: true)
+func makeBox<X, Y>(x: X, y: Y) -> Box<X, Y> { … }
+// static func box<X, Y>(x: X, y: Y) -> Box<X, Y> where Injectable == Box<X, Y>
+```
+
+### Where it may go
+
+Global, or `static` on a type. An instance member is refused — the generated file calls the declaration directly and has no instance to call it on — and so is anything below `internal`, since that file cannot see it. A **global** is reached through a generated private forwarding function rather than by name: inside `extension Zerk<Key>` an unqualified `urlSession` resolves to the member being defined, so reading it directly would recurse. A static member needs none; `Container.session` is already unambiguous.
+
+### Or put the key on a provider type
+
+When several factories belong together, the key can go on a type instead. The declaration carrying `@Injectable<Key>` does not have to *be* `Key`:
+
+```swift
+@Injectable<URLSession>
+enum URLSessionProvider {
+    @InjectableProviding
+    static func live(configuration: URLSessionConfiguration) -> URLSession {
+        URLSession(configuration: configuration)
+    }
+}
+```
+
+```swift
+// Generated:
+extension Zerk<URLSession> {
+    nonisolated static func live(configuration: URLSessionConfiguration = Zerk<URLSessionConfiguration>.configuration) -> URLSession {
+        if let interjected = _$interjected(for: \.`live`) { return interjected }
+        return URLSessionProvider.live(configuration: configuration)
+    }
+    nonisolated static func inject() -> URLSession { live() }
+}
+```
+
+The provider's own `configuration` dependency resolves from the graph, and `URLSessionProvider` appears nowhere except as the callee — pick any name you like, or hang several unrelated keys off separate provider types.
+
+**The wrapper is required, and it is not a workaround.** You cannot point Zerk at `URLSession.init(configuration:)` directly — by a reference, a freestanding macro, or anything else. Zerk reads syntax: it would see the name but not that `configuration` is a `URLSessionConfiguration`, so it could never emit the default that resolves it. The one-line factory is the construct that carries the type information the graph needs, and it is where you would put the wiring anyway.
+
+**`@Injectable` on an `extension` is refused**, with a message pointing at the form above. An extension is not a declaration — it states no generic parameters of its own, so `extension Wrapper` cannot say whether `Wrapper` is generic, and for a foreign type there is no way to find out. It also has no initializer to adopt implicitly, and a `where` clause would make its providers conditional on something the key cannot express.
+
+**This is not `@InjectableValue`.** A value is matched by key *and name*, and produces no `inject()`; a provider type registers a real type key. Use `@InjectableValue` for configuration the graph reads, and a provider type for a dependency the graph builds.
+
 ## Generic injectables
 
 A generic type can be registered three ways, and which one you get depends on the key you write. They are genuinely different — the same attribute with and without `parameterized:` means opposite things — so the table is worth reading before the prose:
@@ -907,7 +996,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, an imported value colliding with a local one of the same name, the same value name imported twice, two values sharing a key and a name, a value whose member name collides with a provider's, an `@ImportedInjectableValue` without a getter or with one that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Injectable(public:)` on a non-public key (warning), a non-literal `primary:` or `public:`, a generic parameter that neither the key nor the provider's arguments can bind, a generic `@InjectableProviding` factory or `@InjectableValue` function, `@Singleton` on a generic type, `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, an imported value colliding with a local one of the same name, the same value name imported twice, two values sharing a key and a name, a value whose member name collides with a provider's, an `@ImportedInjectableValue` without a getter or with one that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Injectable(public:)` on a non-public key (warning), `@Injectable` on an extension, a non-literal `primary:` or `public:`, a generic parameter that neither the key nor the provider's arguments can bind, a generic `@InjectableProviding` factory or `@InjectableValue` function, `@Singleton` on a generic type, `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

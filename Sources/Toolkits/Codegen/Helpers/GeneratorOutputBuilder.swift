@@ -253,6 +253,12 @@ struct GeneratorOutputBuilder {
             points.append(InterjectionPoint(scope: .key(value.typeKey), name: point))
         }
 
+        // A global `@Injectable` declaration is reached through a private
+        // forwarding function, for the same reason a referenced value is.
+        for resolution in emittedResolutions {
+            thunkLines += declarationThunkLines(for: resolution)
+        }
+
         if !thunkLines.isEmpty {
             output += thunkLines
             output.append("")
@@ -473,7 +479,12 @@ struct GeneratorOutputBuilder {
 
         if usesFunctionShape {
             let signature = parameterClause(parameters: allParameters, defaults: defaults)
-            let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))(\(builderArguments(allParameters, useParameterNames: true, defaults: defaults)))"
+            // A property-shaped provider is read, not called: `Config.session`,
+            // never `Config.session()`. It can still reach the function branch,
+            // since `async`/`throws` force it there with no parameters at all.
+            let construction = provider.provider.isPropertyShaped
+                ? "\(ownEffects.callPrefix)\(builderConstruction(for: provider))"
+                : "\(ownEffects.callPrefix)\(builderConstruction(for: provider))(\(builderArguments(allParameters, useParameterNames: true, defaults: defaults)))"
             lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(generics.parameters)\(signature)\(ownEffects.declarationSuffix) -> \(keyText)\(generics.whereClause) {")
             let point = pointNames[pointIdentity(for: provider)] ?? memberName
             lines += interjectionGuardLines(for: provider, point: point)
@@ -496,7 +507,9 @@ struct GeneratorOutputBuilder {
                 )
             }
         } else {
-            let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))()"
+            let construction = provider.provider.isPropertyShaped
+                ? "\(ownEffects.callPrefix)\(builderConstruction(for: provider))"
+                : "\(ownEffects.callPrefix)\(builderConstruction(for: provider))()"
             lines.append("    \(isolation.declarationPrefix)\(access)static var \(memberName): \(keyText) {")
             let point = pointNames[pointIdentity(for: provider)] ?? memberName
             lines += interjectionGuardLines(for: provider, point: point)
@@ -879,6 +892,30 @@ struct GeneratorOutputBuilder {
             return "_$zerk_ref_\(value.name)()"
         }
         return "\(path).\(value.name)"
+    }
+
+    /// The private forwarding function a **global** `@Injectable` declaration is
+    /// called through.
+    ///
+    /// Inside `extension Zerk<Key>` an unqualified name resolves to the member
+    /// being defined, so a member named after its own declaration would call
+    /// itself. Forwarding through a file-scope function that was declared
+    /// *outside* the extension is what breaks the cycle.
+    private func declarationThunkLines(for resolution: ProviderResolution) -> [String] {
+        guard case .explicit(let provider) = resolution.provider,
+              case .declaration(let reference, let isProperty, let thunk?) = provider.kind else {
+            return []
+        }
+        let generics = resolution.memberGenericParameters
+        let genericClause = generics.isEmpty ? "" : "<\(generics.joined(separator: ", "))>"
+        let signature = parameterClause(parameters: provider.parameters, defaults: [:])
+        let arguments = builderArguments(provider.parameters, useParameterNames: true, defaults: [:])
+        let call = isProperty ? reference : "\(reference)(\(arguments))"
+        let prefix = provider.isolation.actorName.map { "@\($0) " } ?? ""
+        let returns = provider.returnTypeName ?? displayName(for: resolution.injectableKey)
+        return [
+            "\(prefix)private func \(thunk)\(genericClause)\(signature)\(provider.effects.declarationSuffix) -> \(returns) { \(provider.effects.callPrefix)\(call) }"
+        ]
     }
 
     /// The mirror of `referenceRead` for assignment.
@@ -1496,6 +1533,12 @@ struct GeneratorOutputBuilder {
                 return resolution.typeName
             case .staticFunction(let name):
                 return "\(resolution.typeName).\(name)"
+            case .declaration(let reference, _, let thunk):
+                // The declaration itself, not a member of the key: the key is
+                // what it *builds*, and may be a type from another module. A
+                // global goes through its thunk, which is what keeps the member
+                // from shadowing it.
+                return thunk ?? reference
             }
         case .imported(let record):
             // Never reached while imports stay out of `resolutions`: they build

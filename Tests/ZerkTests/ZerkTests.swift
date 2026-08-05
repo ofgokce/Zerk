@@ -246,31 +246,29 @@ struct GenericInjectionTests {
 
     @Test("a generic key resolves per specialization")
     func resolvesPerSpecialization() {
-        CodecCounter.builds = []
-
         let strings: Repository<String> = Zerk<Repository<String>>.inject()
         let ints: Repository<Int> = Zerk<Repository<Int>>.inject()
 
-        // Distinct specializations, each built through its own chain.
+        // Distinct specializations, each built through its own chain. Asserted
+        // on the values in hand rather than on `CodecCounter`, which every suite
+        // resolving a `Repository` appends to — `.serialized` orders a suite's
+        // own tests, not the suites running alongside it.
         #expect(type(of: strings.codec) == Codec<String>.self)
         #expect(type(of: ints.codec) == Codec<Int>.self)
-        #expect(CodecCounter.builds == ["String", "Int"])
     }
 
     @Test("a generic member resolves its dependencies without arguments")
     func resolvesDependenciesUnaided() {
-        // `Repository` names a `Codec<Element>` and a `Logger`, and neither is
+        // `Repository` names a `Codec<Element>` and a `Stamp`, and neither is
         // passed here: one resolves through the shape of its own key, the other
-        // through an ordinary concrete one. Both loggers are freshly built,
-        // since `Logger` is not a singleton in these fixtures — what is under
-        // test is that the chain ran at all.
-        CodecCounter.builds = []
-
+        // through an ordinary concrete one. Both stamps are freshly built, since
+        // `Stamp` is not a singleton — what is under test is that the chain ran
+        // at all.
         let repository: Repository<String> = Zerk<Repository<String>>.inject()
 
-        #expect(CodecCounter.builds == ["String"])
-        #expect(repository.logger.serial > 0)
-        #expect(repository.codec.logger.serial > 0)
+        #expect(type(of: repository.codec) == Codec<String>.self)
+        #expect(repository.stamp.serial > 0)
+        #expect(repository.codec.stamp.serial > 0)
     }
 
     @Test("a concrete consumer resolves a specialization it never registered")
@@ -341,10 +339,10 @@ struct ParameterizedKeyInjectionTests {
 @Suite("Generic key interjection", .zerk)
 struct GenericKeyInterjectionTests {
 
-    /// A double whose identity is checkable: `Logger` is not a singleton here,
-    /// so a freshly built one always has a serial of its own.
+    /// A double whose identity is checkable: `Stamp` is not a singleton, so a
+    /// freshly built one always has a serial of its own.
     private func makeDouble<E>(_: E.Type) -> Repository<E> {
-        Repository<E>(codec: .init(logger: .init()), logger: .init())
+        Repository<E>(codec: .init(stamp: .init()), stamp: .init())
     }
 
     @Test("a generic key interjects per specialization, by key path")
@@ -355,11 +353,11 @@ struct GenericKeyInterjectionTests {
         // The point is scoped by the generated marker, so it reaches exactly
         // `Repository`'s specializations...
         let strings: Repository<String> = Zerk<Repository<String>>.inject()
-        #expect(strings.logger.serial == double.logger.serial)
+        #expect(strings.stamp.serial == double.stamp.serial)
 
         // ...and only the one registered. A sibling is built for real.
         let ints: Repository<Int> = Zerk<Repository<Int>>.inject()
-        #expect(ints.logger.serial != double.logger.serial)
+        #expect(ints.stamp.serial != double.stamp.serial)
     }
 
     @Test("a blanket reaches a generic key too")
@@ -368,14 +366,18 @@ struct GenericKeyInterjectionTests {
         #Interject<Repository<String>>(with: double)
 
         let resolved: Repository<String> = Zerk<Repository<String>>.inject()
-        #expect(resolved.logger.serial == double.logger.serial)
+        #expect(resolved.stamp.serial == double.stamp.serial)
 
         // Interjection does not short-circuit resolution: the member's defaults
         // are evaluated before its guard runs, so the real subtree is still
         // built. That is by design and holds for a generic key too.
-        CodecCounter.builds = []
+        //
+        // Asserted as *growth* rather than equality: `CodecCounter` is global,
+        // and a suite running alongside this one may append to it between the
+        // two reads. A monotone claim cannot fail for that reason.
+        let before = CodecCounter.builds.count
         _ = Zerk<Repository<String>>.inject() as Repository<String>
-        #expect(CodecCounter.builds == ["String"])
+        #expect(CodecCounter.builds.count > before)
     }
 
     @Test("a parameterized existential key is reachable by key")

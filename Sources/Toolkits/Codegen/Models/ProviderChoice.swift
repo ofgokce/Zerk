@@ -50,6 +50,18 @@ enum ProviderChoice {
         }
     }
 
+    /// Whether the provider is *read* rather than called, which decides whether
+    /// the emitter appends `()` to the construction expression.
+    var isPropertyShaped: Bool {
+        guard case .explicit(let provider) = self,
+              case .declaration(_, let isProperty, let thunk) = provider.kind else {
+            return false
+        }
+        // A thunked global is reached through a *function*, whatever the
+        // declaration itself was, so it takes parentheses like any other call.
+        return thunk == nil && isProperty
+    }
+
     var location: AttributeLocation {
         switch self {
         case .explicit(let provider):
@@ -81,6 +93,13 @@ enum ProviderChoice {
         case .explicit(let provider):
             if case .staticFunction(let name) = provider.kind {
                 return name
+            }
+            // `nil` for an `@Injectable` declaration asking to be named after
+            // its type — the emitter's fallback is exactly that. Otherwise the
+            // collector has already resolved `name:` or the declaration's own
+            // name into the hint.
+            if case .declaration = provider.kind {
+                return provider.memberName
             }
             return nil
         case .value(let record):

@@ -37,4 +37,9 @@ struct InjectingProvider {
     /// The factory's *own* generic parameters. See
     /// ``InitializerRecord/genericParameters``.
     var genericParameters: [String] = []
+    /// The generated member's name, when the provider states one.
+    ///
+    /// `nil` means "name it after the key's type", which is the emitter's own
+    /// fallback — how `@Injectable(typeNamed: true)` is expressed.
+    var memberName: String? = nil
 }

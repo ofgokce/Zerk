@@ -127,6 +127,20 @@ final class SourceCollector: SyntaxVisitor {
         _ = typeStack.popLast()
     }
 
+    /// `@Injectable` on an `extension` is refused. Children are still visited,
+    /// since an `@InjectableValue` inside an extension is collected as usual.
+    override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
+        if node.attributes.hasAttribute(named: "Injectable") {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: InjectableRefusal.extensionTarget(
+                    extending: node.extendedType.trimmedDescription),
+                location: location(for: Syntax(node))
+            ))
+        }
+        return .visitChildren
+    }
+
     /// Resolves the declaration's isolation once, hands it to the collectors,
     /// then pushes it so members and nested declarations inherit it.
     ///
@@ -413,6 +427,7 @@ final class SourceCollector: SyntaxVisitor {
     /// expression to resolve through. Visiting every function rather than only a
     /// type's members is deliberate — these are as likely to be global.
     override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {
+        collectInjectableFunction(node)
         collectParametricValue(node)
 
         guard node.attributes.hasAttribute(named: "ImportedInjectable"),
@@ -470,6 +485,7 @@ final class SourceCollector: SyntaxVisitor {
     /// nothing nested inside a property declaration can be any of those.
     override func visit(_ node: VariableDeclSyntax) -> SyntaxVisitorContinueKind {
         collectImportedValue(node)
+        collectInjectableProperty(node)
         collectValue(node)
         collectInjectedUse(node)
         if node.attributes.hasAttribute(named: "injected") {
@@ -1308,6 +1324,241 @@ final class SourceCollector: SyntaxVisitor {
                 ))
             }
         }
+    }
+
+
+    // MARK: - @Injectable declarations
+    //
+    // A global or static var/func carrying `@Injectable` registers the type it
+    // *produces*, with itself as the provider. This is how a type Zerk cannot
+    // annotate — one from another module — joins the graph as a real key rather
+    // than as a value matched by name.
+
+    /// Records `@Injectable` on a variable, if it carries one.
+    private func collectInjectableProperty(_ node: VariableDeclSyntax) {
+        let attributes = node.attributes.attributes(named: "Injectable")
+        guard !attributes.isEmpty else {
+            return
+        }
+        guard let binding = node.bindings.first,
+              let identifier = binding.pattern.as(IdentifierPatternSyntax.self),
+              let annotation = binding.typeAnnotation else {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Injectable on a property needs a single named binding with an explicit type — the type is the key.",
+                location: location(for: Syntax(node))
+            ))
+            return
+        }
+        collectInjectableDeclaration(
+            node: Syntax(node),
+            attributes: attributes,
+            declaredName: identifier.identifier.text,
+            producedType: annotation.type,
+            genericParameters: [],
+            parameters: [],
+            effects: ProviderEffects(from: binding.getterEffectSpecifiers),
+            modifiers: node.modifiers,
+            isProperty: true
+        )
+    }
+
+    /// Records `@Injectable` on a function, if it carries one.
+    private func collectInjectableFunction(_ node: FunctionDeclSyntax) {
+        let attributes = node.attributes.attributes(named: "Injectable")
+        guard !attributes.isEmpty else {
+            return
+        }
+        guard let returnType = node.signature.returnClause?.type,
+              returnType.normalizedTypeKey != "Void" else {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Injectable on a function needs a return type — it is the key.",
+                location: location(for: Syntax(node))
+            ))
+            return
+        }
+        let ownGenerics = node.genericParameterClause?.parameters.map { $0.name.text } ?? []
+        collectInjectableDeclaration(
+            node: Syntax(node),
+            attributes: attributes,
+            declaredName: node.name.text,
+            producedType: returnType,
+            genericParameters: ownGenerics,
+            parameters: node.signature.parameterClause.parameters
+                .parameterRecords(locatedBy: { self.location(for: $0) },
+                                  genericScope: genericScope.union(ownGenerics)),
+            effects: ProviderEffects(from: node.signature.effectSpecifiers?.trimmedDescription),
+            modifiers: node.modifiers,
+            isProperty: false
+        )
+    }
+
+    /// The shared body: one `TypeRecord` whose single provider is the
+    /// declaration itself.
+    ///
+    /// A `TypeRecord` rather than a new kind of record, because everything
+    /// downstream — election, classification, emission — already works in those
+    /// terms. `name` is the *produced type*, not the declaration, so the
+    /// emitter's own "name the member after the key's type" fallback is exactly
+    /// what `typeNamed:` asks for.
+    private func collectInjectableDeclaration(node: Syntax,
+                                              attributes: [AttributeSyntax],
+                                              declaredName: String,
+                                              producedType: TypeSyntax,
+                                              genericParameters: [String],
+                                              parameters: [ParameterRecord],
+                                              effects: ProviderEffects,
+                                              modifiers: DeclModifierListSyntax,
+                                              isProperty: Bool) {
+        let location = self.location(for: node)
+
+        // Global, or a type's static member. An instance member has no stable
+        // reference the generated file could call, and a local one is not
+        // visible to it at all.
+        guard typeStack.isEmpty || modifiers.isStatic else {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Injectable on a member needs it to be 'static': the generated file calls '\(typeStack.map(\.name).joined(separator: "."))\(typeStack.isEmpty ? "" : ".")\(declaredName)' directly, and an instance member has no such reference.",
+                location: location
+            ))
+            return
+        }
+        guard modifiers.accessRank > .fileprivate else {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Injectable on '\(declaredName)' requires it to be at least internal: the generated file is a separate file in this module and cannot reach a private declaration.",
+                location: location
+            ))
+            return
+        }
+
+        guard let memberName = injectableMemberName(from: attributes,
+                                                    declaredName: declaredName,
+                                                    at: location) else {
+            return
+        }
+
+        // A generic declaration registers exactly as `struct Box<X, Y>` does —
+        // under the shape `Box<#0, #1>`, displayed as written. A concrete one
+        // keys on the produced type itself.
+        let baseName = producedType.nominalBaseName ?? producedType.trimmedDescription
+        let ownKey = genericParameters.isEmpty
+            ? producedType.normalizedTypeKey
+            : KeyShape.text(base: baseName, arity: genericParameters.count)
+        let ownDisplayKey = genericParameters.isEmpty
+            ? producedType.displayTypeKey
+            : producedType.trimmedDescription
+
+        var injectableKeys: [String: AttributeLocation] = [:]
+        var exportedKeys: [String: AttributeLocation] = [:]
+        var primaryKeys: [String: AttributeLocation] = [:]
+        for attribute in attributes {
+            if attribute.publicArgument == .nonLiteral {
+                diagnostics.append(nonLiteralPublicDiagnostic(named: "@Injectable", at: location))
+            }
+            if attribute.primaryArgument == .nonLiteral {
+                diagnostics.append(nonLiteralPrimaryDiagnostic(at: location))
+            }
+            let written = attribute.genericArgumentKeys
+            let keys = written.isEmpty ? [ownKey] : written
+            let displays = written.isEmpty ? [ownDisplayKey] : attribute.genericArgumentDisplayKeys
+            for (offset, key) in keys.enumerated() {
+                injectableKeys[key] = location
+                recordKeyDisplayName(displays[offset], for: key)
+                if attribute.publicArgument.isTrue { exportedKeys[key] = location }
+                if attribute.primaryArgument.isTrue { primaryKeys[key] = location }
+            }
+        }
+
+        // A static member is reached by its qualified path. A global is not
+        // reachable at all from inside the extension — the member being defined
+        // shadows it — so it goes through a thunk declared at file scope.
+        let path = typeStack.map(\.name)
+        let reference = (path + [declaredName]).joined(separator: ".")
+        let thunk = path.isEmpty
+            ? "_$zerk_provider_\(declaredName)"
+            : nil
+        let provider = InjectingProvider(
+            kind: .declaration(reference: reference, isProperty: isProperty, thunk: thunk),
+            parameters: parameters,
+            effects: effects,
+            location: location,
+            returnTypeName: producedType.trimmedDescription,
+            isolation: statedIsolation(modifiers: modifiers, attributes: AttributeListSyntax([]))
+                .resolved(default: ambientIsolation),
+            isPrimary: false,
+            genericParameters: [],
+            memberName: memberName
+        )
+
+        types.append(
+            TypeRecord(
+                name: baseName,
+                injectableKeys: injectableKeys,
+                exportedKeys: exportedKeys,
+                primaryKeys: primaryKeys,
+                defaultProviders: [provider],
+                typedProviders: [:],
+                initializers: [],
+                isSingleton: false,
+                isolation: provider.isolation,
+                genericParameters: genericParameters
+            )
+        )
+    }
+
+    /// What the generated member is called: the declaration's own name by
+    /// default, the key's type under `typeNamed:`, or whatever `name:` says.
+    ///
+    /// Returns `nil` when the attributes disagree, having reported it.
+    private func injectableMemberName(from attributes: [AttributeSyntax],
+                                      declaredName: String,
+                                      at location: AttributeLocation) -> String?? {
+        var typeNamed = false
+        var explicit: String?
+
+        for attribute in attributes {
+            switch attribute.typeNamedArgument {
+            case .nonLiteral:
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "@Injectable(typeNamed:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression.",
+                    location: location
+                ))
+                return nil
+            case .literal(let value):
+                typeNamed = typeNamed || value
+            case .absent:
+                break
+            }
+
+            switch attribute.nameArgument {
+            case .nonLiteral:
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "@Injectable(name:) requires a string literal. Zerk reads this from source and cannot evaluate an expression or an interpolation.",
+                    location: location
+                ))
+                return nil
+            case .literal(let value):
+                explicit = value
+            case .absent:
+                break
+            }
+        }
+
+        if typeNamed, let explicit {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Injectable states both 'typeNamed: true' and 'name: \"\(explicit)\"'. They name the same member two ways — keep one.",
+                location: location
+            ))
+            return nil
+        }
+        // `.some(nil)` is "name it after the type", which is the emitter's own
+        // fallback; `.some(.some(name))` states one outright.
+        return typeNamed ? .some(nil) : .some(explicit ?? declaredName)
     }
 
     // MARK: @injected parameter markers

@@ -26,17 +26,50 @@ public struct InjectableMacro: PeerMacro {
                                  in context: some MacroExpansionContext) throws -> [DeclSyntax] {
         if let typeDecl = ZerkTypeDecl(declaration) {
             validateInjectableType(typeDecl, node: node, in: context)
-        } else if declaration.is(VariableDeclSyntax.self) || declaration.is(FunctionDeclSyntax.self) {
+        } else if let ext = declaration.as(ExtensionDeclSyntax.self) {
             context.zerkError(
                 node,
-                "@Injectable registers a type. Use @InjectableValue for a value \u{2014} a type is built by a provider, a value is read from a declaration, and the two are matched differently."
+                InjectableRefusal.extensionTarget(extending: ext.extendedType.trimmedDescription)
             )
+        } else if declaration.is(VariableDeclSyntax.self) || declaration.is(FunctionDeclSyntax.self) {
+            // A global or static declaration registers the type it produces,
+            // with itself as the provider. Whether it is *placed* somewhere the
+            // generated file can reach is a question about its surroundings,
+            // which a macro cannot see — the plugin settles that. What is
+            // decidable here is the attribute's own arguments.
+            validateInjectableDeclaration(node, in: context)
         }
         return []
     }
 }
 
 private extension InjectableMacro {
+    /// `@Injectable` on a var or func: the arguments that name the generated
+    /// member cannot both be given, and neither can be an expression.
+    static func validateInjectableDeclaration(_ node: AttributeSyntax,
+                                              in context: some MacroExpansionContext) {
+        if node.typeNamedArgument == .nonLiteral {
+            context.zerkError(
+                node,
+                "@Injectable(typeNamed:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression."
+            )
+            return
+        }
+        if node.nameArgument == .nonLiteral {
+            context.zerkError(
+                node,
+                "@Injectable(name:) requires a string literal. Zerk reads this from source and cannot evaluate an expression or an interpolation."
+            )
+            return
+        }
+        if node.typeNamedArgument.isTrue, let name = node.nameArgument.value {
+            context.zerkError(
+                node,
+                "@Injectable states both 'typeNamed: true' and 'name: \"\(name)\"'. They name the same member two ways — keep one."
+            )
+        }
+    }
+
     /// One provider the plugin will turn into a member, reduced to what a
     /// generic-parameter check needs.
     struct ProviderSignature {

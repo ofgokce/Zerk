@@ -85,6 +85,24 @@ public extension TypeSyntax {
         Self.shape(of: Syntax(self))
     }
 
+    /// The nominal type's name without its generic arguments — `Box` for
+    /// `Box<X, Y>`, `A.Foo` for `A.Foo<Int>`, `URLSession` for `URLSession`.
+    ///
+    /// `nil` for anything that is not a nominal type, since only a nominal one
+    /// has a name to take.
+    var nominalBaseName: String? {
+        if let someOrAny = self.as(SomeOrAnyTypeSyntax.self) {
+            return someOrAny.constraint.nominalBaseName
+        }
+        if let identifier = self.as(IdentifierTypeSyntax.self) {
+            return identifier.name.text
+        }
+        if let member = self.as(MemberTypeSyntax.self) {
+            return "\(member.baseType.normalizedTypeKey).\(member.name.text)"
+        }
+        return nil
+    }
+
     /// Which of the generic parameters in `scope` this type mentions, in the
     /// order they appear.
     ///
