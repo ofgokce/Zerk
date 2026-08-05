@@ -26,4 +26,11 @@ struct TypeContext {
     /// it sweeps up is exported. A member with its own `@Injectable(public:)`
     /// states its own answer and overrides this.
     var sweptValuesArePublic: Bool = false
+    /// This declaration's own generic parameters.
+    ///
+    /// Unlike ``sweptValueMethod`` these *are* inherited by nested declarations,
+    /// because Swift inherits them: `E` is in scope throughout the body of
+    /// `struct Cache<E>`, nested types included. The collector unions the whole
+    /// stack — see `SourceCollector.genericScope`.
+    var genericParameterNames: [String] = []
 }

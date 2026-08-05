@@ -51,6 +51,9 @@ final class SourceCollector: SyntaxVisitor {
     /// one may resolve parameters from. Kept apart from `importedInjectables`
     /// because they are matched by name as well as key.
     private(set) var importedValues: [ImportedInjectableValueRecord] = []
+    /// Protocol name -> how many primary associated types it declares. See
+    /// `visit(_: ProtocolDeclSyntax)`.
+    private(set) var protocolPrimaryAssociatedTypeCounts: [String: Int] = [:]
 
     private let settings: ZerkSettings
     private var sourceFile: String = ""
@@ -89,7 +92,7 @@ final class SourceCollector: SyntaxVisitor {
     // of whatever encloses them.
 
     override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
-        enter(node, typeKind: .classKind, isGeneric: node.genericParameterClause != nil)
+        enter(node, typeKind: .classKind, genericParameters: node.declaredGenericParameterNames)
         return .visitChildren
     }
 
@@ -98,7 +101,7 @@ final class SourceCollector: SyntaxVisitor {
     }
 
     override func visit(_ node: StructDeclSyntax) -> SyntaxVisitorContinueKind {
-        enter(node, typeKind: .structKind, isGeneric: node.genericParameterClause != nil)
+        enter(node, typeKind: .structKind, genericParameters: node.declaredGenericParameterNames)
         return .visitChildren
     }
 
@@ -107,7 +110,7 @@ final class SourceCollector: SyntaxVisitor {
     }
 
     override func visit(_ node: ActorDeclSyntax) -> SyntaxVisitorContinueKind {
-        enter(node, typeKind: .actorKind, isGeneric: node.genericParameterClause != nil)
+        enter(node, typeKind: .actorKind, genericParameters: node.declaredGenericParameterNames)
         return .visitChildren
     }
 
@@ -116,7 +119,7 @@ final class SourceCollector: SyntaxVisitor {
     }
 
     override func visit(_ node: EnumDeclSyntax) -> SyntaxVisitorContinueKind {
-        enter(node, typeKind: .enumKind, isGeneric: node.genericParameterClause != nil)
+        enter(node, typeKind: .enumKind, genericParameters: node.declaredGenericParameterNames)
         return .visitChildren
     }
 
@@ -126,12 +129,17 @@ final class SourceCollector: SyntaxVisitor {
 
     /// Resolves the declaration's isolation once, hands it to the collectors,
     /// then pushes it so members and nested declarations inherit it.
+    ///
+    /// `genericParameters` is passed down as well as pushed, because the frame
+    /// goes on the stack *after* the collectors run — the type's own isolation
+    /// is resolved against whatever encloses it, so the push cannot come first —
+    /// and the collectors need the type's own parameters in scope.
     private func enter(_ node: some DeclGroupSyntax,
                        typeKind: MarkedTypeKind,
-                       isGeneric: Bool) {
+                       genericParameters: [String]) {
         let isolation = resolveTypeIsolation(node)
-        collectType(node, isolation: isolation)
-        collectMarkedMembers(node, typeKind: typeKind, typeIsGeneric: isGeneric)
+        collectType(node, isolation: isolation, genericParameters: genericParameters)
+        collectMarkedMembers(node, typeKind: typeKind, typeIsGeneric: !genericParameters.isEmpty)
         reportInertAutoInjected(node)
 
         let sweep = node.attributes.firstAttribute(named: "InjectableValues")
@@ -145,9 +153,19 @@ final class SourceCollector: SyntaxVisitor {
                 name: node.declaredName,
                 isolation: isolation,
                 sweptValueMethod: sweep.map { statedValueMethod($0) ?? settings.valueInjectionMethod },
-                sweptValuesArePublic: sweep?.publicArgument.isTrue ?? false
+                sweptValuesArePublic: sweep?.publicArgument.isTrue ?? false,
+                genericParameterNames: genericParameters
             )
         )
+    }
+
+    /// Every generic parameter in scope at the current point of the walk.
+    ///
+    /// The union of the whole stack rather than its top, because Swift scopes
+    /// them that way: `E` remains in scope inside a type nested in
+    /// `struct Cache<E>`, so a member there can name it and Zerk has to know.
+    private var genericScope: Set<String> {
+        typeStack.reduce(into: Set<String>()) { $0.formUnion($1.genericParameterNames) }
     }
 
     /// An `actor` constructs nonisolated regardless of what surrounds it: its
@@ -431,10 +449,19 @@ final class SourceCollector: SyntaxVisitor {
         return .skipChildren
     }
 
-    /// Protocols are recorded for their access level alone. A protocol is an
-    /// injection *key*, never a provider, so its members are skipped.
+    /// Protocols are recorded for their access level and their primary
+    /// associated types. A protocol is an injection *key*, never a provider, so
+    /// its members are skipped.
+    ///
+    /// The primary count is only consulted by
+    /// `@Injectable<any P>(parameterized: true)`, to check that the key can carry
+    /// as many parameters as the type has. A protocol from another module is
+    /// absent here and the check is skipped — the compiler still catches it, at
+    /// the generated line rather than the declaration.
     override func visit(_ node: ProtocolDeclSyntax) -> SyntaxVisitorContinueKind {
         moduleAccessLevels[node.name.text] = node.modifiers.isPublic
+        protocolPrimaryAssociatedTypeCounts[node.name.text] =
+            node.primaryAssociatedTypeClause?.primaryAssociatedTypes.count ?? 0
         return .skipChildren
     }
 
@@ -468,7 +495,9 @@ final class SourceCollector: SyntaxVisitor {
     /// `@Injectable(primary:)` and `@Injectable(public:)` apply per key rather
     /// than per type, so all three are gathered as dictionaries keyed by type
     /// key.
-    private func collectType(_ node: some DeclGroupSyntax, isolation typeIsolation: ProviderIsolation) {
+    private func collectType(_ node: some DeclGroupSyntax,
+                             isolation typeIsolation: ProviderIsolation,
+                             genericParameters: [String]) {
         moduleAccessLevels[node.declaredName] = node.modifiers.isPublic
 
         let injectableAttributes = node.attributes.attributes(named: "Injectable")
@@ -476,6 +505,9 @@ final class SourceCollector: SyntaxVisitor {
 
         let isSingleton = node.attributes.hasAttribute(named: "Singleton")
         let location = self.location(for: Syntax(node))
+        // The type's own parameters are not on `typeStack` yet — `enter` pushes
+        // the frame only after this returns — so they are unioned in by hand.
+        let scope = genericScope.union(genericParameters)
 
         for attribute in injectableAttributes {
             if attribute.hasPositionalArgument {
@@ -505,32 +537,54 @@ final class SourceCollector: SyntaxVisitor {
             ))
         }
 
-        // A generic type keys on its bare name below, which is not a type — so
-        // nothing past this point can be emitted for it. Reported here rather
-        // than left to fail inside the generated file. The singleton case gets
-        // its own message because it is the one that stays refused.
-        let genericParameters = node.declaredGenericParameterNames
-        if !genericParameters.isEmpty {
-            diagnostics.append(CodegenDiagnostic(
-                severity: .error,
-                message: isSingleton
-                    ? GenericRefusal.singleton(type: node.declaredName)
-                    : GenericRefusal.injectableType(named: node.declaredName,
-                                                    parameters: genericParameters),
-                location: location
-            ))
-            return
-        }
+        // A generic type is recorded in full — parameters, providers, and which
+        // parameters each provider mentions — and refused later, by
+        // ``GenericGate``, which is the one place that knows what the emitter
+        // can spell. Reading it here and refusing there keeps this layer honest
+        // about what the source says, and makes the refusal a single seam to
+        // remove rather than a hole in the collector.
+
+        // A generic type's own key is its ``KeyShape`` — `Cache<#0>` — not the
+        // bare `Cache`, which is not a type, and not `Cache<E>`, which would
+        // file one family under as many keys as there are ways to spell the
+        // parameter. The display name keeps the spelling the emitter wants.
+        let ownKey = KeyShape.text(base: node.declaredName, arity: genericParameters.count)
+        let ownDisplayKey = genericParameters.isEmpty
+            ? node.declaredName
+            : "\(node.declaredName)<\(genericParameters.joined(separator: ", "))>"
 
         var injectableKeys: [String: AttributeLocation] = [:]
+        var parameterizedKeys: [String: AttributeLocation] = [:]
         for attribute in injectableAttributes {
+            // `parameterized: true` rewrites the written key: the type's own
+            // parameters become the protocol's primary associated types, so
+            // `@Injectable<any P>` on `Box<X, Y>` keys on `any P<X, Y>`. That is
+            // a *pattern*, exactly like the type's own key, so it files under a
+            // shape and emits through the same generic path.
+            switch parameterizedKey(for: attribute,
+                                    typeName: node.declaredName,
+                                    genericParameters: genericParameters,
+                                    at: location) {
+            case .key(let key, let display):
+                injectableKeys[key] = location
+                parameterizedKeys[key] = location
+                recordKeyDisplayName(display, for: key)
+                continue
+            case .invalid:
+                // Already reported. Falling through to the plain key path would
+                // report a second, unrelated error about the same attribute.
+                continue
+            case .notRequested:
+                break
+            }
+
             let genericKeys = attribute.genericArgumentKeys
-            let keys = genericKeys.isEmpty ? [node.declaredName] : genericKeys
+            let keys = genericKeys.isEmpty ? [ownKey] : genericKeys
             // Paired with `keys` by index: the same types, canonicalized with
-            // `any` kept. An unparameterized @Injectable keys on the type's own
-            // name, which is a bare identifier either way.
+            // `any` kept. An unparameterized @Injectable keys on the type
+            // itself, which is a bare identifier unless the type is generic.
             let displayKeys = genericKeys.isEmpty
-                ? [node.declaredName]
+                ? [ownDisplayKey]
                 : attribute.genericArgumentDisplayKeys
 
             for (offset, key) in keys.enumerated() {
@@ -545,7 +599,7 @@ final class SourceCollector: SyntaxVisitor {
         var exportedKeys: [String: AttributeLocation] = [:]
         for attribute in injectableAttributes where attribute.publicArgument.isTrue {
             let genericKeys = attribute.genericArgumentKeys
-            let keys = genericKeys.isEmpty ? [node.declaredName] : genericKeys
+            let keys = genericKeys.isEmpty ? [ownKey] : genericKeys
             for key in keys {
                 exportedKeys[key] = location
             }
@@ -556,7 +610,7 @@ final class SourceCollector: SyntaxVisitor {
         var primaryKeys: [String: AttributeLocation] = [:]
         for attribute in injectableAttributes where attribute.primaryArgument.isTrue {
             let genericKeys = attribute.genericArgumentKeys
-            let keys = genericKeys.isEmpty ? [node.declaredName] : genericKeys
+            let keys = genericKeys.isEmpty ? [ownKey] : genericKeys
             for key in keys {
                 primaryKeys[key] = location
             }
@@ -568,8 +622,16 @@ final class SourceCollector: SyntaxVisitor {
 
         for member in node.memberBlock.members {
             if let initializer = member.decl.as(InitializerDeclSyntax.self) {
+                // A provider may add generic parameters of its own —
+                // `init<Z>(x: X, y: Y, z: Z)` inside `Box<X, Y>` — and inside
+                // its signature those are in scope alongside the type's. Read
+                // with the type's scope alone, `z: Z` would look like a
+                // dependency on a module type named `Z`.
+                let initializerGenerics = initializer.genericParameterClause?
+                    .parameters.map { $0.name.text } ?? []
                 let parameters = initializer.signature.parameterClause.parameters
-                    .parameterRecords(locatedBy: { self.location(for: $0) })
+                    .parameterRecords(locatedBy: { self.location(for: $0) },
+                                      genericScope: scope.union(initializerGenerics))
                 let effects = ProviderEffects(from: initializer.signature.effectSpecifiers?.trimmedDescription)
                 let initializerLocation = self.location(for: Syntax(initializer))
                 let initializerStated = statedIsolation(
@@ -588,7 +650,8 @@ final class SourceCollector: SyntaxVisitor {
                         parameters: parameters,
                         effects: effects,
                         location: initializerLocation,
-                        isolation: initializerIsolation
+                        isolation: initializerIsolation,
+                        genericParameters: initializerGenerics
                     )
                 )
 
@@ -611,7 +674,8 @@ final class SourceCollector: SyntaxVisitor {
                             location: initializerLocation,
                             returnTypeName: nil,
                             isolation: initializerIsolation,
-                            isPrimary: attribute.primaryArgument.isTrue
+                            isPrimary: attribute.primaryArgument.isTrue,
+                            genericParameters: initializerGenerics
                         )
                     )
                 }
@@ -630,20 +694,12 @@ final class SourceCollector: SyntaxVisitor {
                 continue
             }
 
-            // A generic factory's return type mentions parameters the key does
-            // not bind, so the member built from it would not compile. Same
-            // reasoning as the type-level refusal in `collectType`.
-            let functionParameters = function.genericParameterClause?
+            // A factory may declare generic parameters of its own, exactly as an
+            // initializer may. Whether each one can actually be inferred is a
+            // question about the whole signature, so `ProviderResolver` asks it
+            // once for every provider rather than each collection site guessing.
+            let functionGenerics = function.genericParameterClause?
                 .parameters.map { $0.name.text } ?? []
-            if !functionParameters.isEmpty {
-                diagnostics.append(CodegenDiagnostic(
-                    severity: .error,
-                    message: GenericRefusal.providingFunction(named: function.name.text,
-                                                              parameters: functionParameters),
-                    location: self.location(for: Syntax(function))
-                ))
-                continue
-            }
 
             let returnType = function.signature.returnClause?.type.trimmedDescription ?? ""
             let functionLocation = self.location(for: Syntax(function))
@@ -668,12 +724,14 @@ final class SourceCollector: SyntaxVisitor {
                 let provider = InjectingProvider(
                     kind: .staticFunction(name: function.name.text),
                     parameters: function.signature.parameterClause.parameters
-                        .parameterRecords(locatedBy: { self.location(for: $0) }),
+                        .parameterRecords(locatedBy: { self.location(for: $0) },
+                                          genericScope: scope.union(functionGenerics)),
                     effects: ProviderEffects(from: function.signature.effectSpecifiers?.trimmedDescription),
                     location: functionLocation,
                     returnTypeName: returnType.isEmpty ? nil : returnType,
                     isolation: functionStated.resolved(default: typeIsolation),
-                    isPrimary: attribute.primaryArgument.isTrue
+                    isPrimary: attribute.primaryArgument.isTrue,
+                    genericParameters: functionGenerics
                 )
 
                 let genericKeys = attribute.genericArgumentKeys
@@ -696,7 +754,9 @@ final class SourceCollector: SyntaxVisitor {
             }
         }
 
-        if initializers.isEmpty, var inferredInitializer = node.inferredSynthesizedInitializer(in: location) {
+        if initializers.isEmpty,
+           var inferredInitializer = node.inferredSynthesizedInitializer(in: location,
+                                                                        genericScope: scope) {
             inferredInitializer.isolation = typeIsolation
             initializers.append(inferredInitializer)
         }
@@ -711,8 +771,91 @@ final class SourceCollector: SyntaxVisitor {
                 typedProviders: typedProviders,
                 initializers: initializers,
                 isSingleton: isSingleton,
-                isolation: typeIsolation
+                isolation: typeIsolation,
+                genericParameters: genericParameters,
+                parameterizedKeys: parameterizedKeys
             )
+        )
+    }
+
+    /// What `parameterized:` asked for, if anything.
+    ///
+    /// `invalid` is distinct from `notRequested` on purpose: the attribute did
+    /// ask, and was already reported, so the caller must not fall through to the
+    /// plain key path and report a second error about the same attribute.
+    enum ParameterizedKey {
+        case notRequested
+        case invalid
+        case key(String, display: String)
+    }
+
+    /// The key `@Injectable<any P>(parameterized: true)` asks for.
+    ///
+    /// Returns both spellings the rest of the pipeline needs: the *shape* it is
+    /// filed and matched under (`P<#0, #1>`), and the spelling emitted into the
+    /// generated file (`any P<X, Y>`, in the type's own parameter names).
+    ///
+    /// Every way of getting this wrong is a compile error in Swift with a good
+    /// message — "does not have primary associated types that can be
+    /// constrained", "specialized with too many type arguments" — but at the
+    /// *generated* line, which is the thing worth avoiding.
+    private func parameterizedKey(for attribute: AttributeSyntax,
+                                  typeName: String,
+                                  genericParameters: [String],
+                                  at location: AttributeLocation) -> ParameterizedKey {
+        guard attribute.parameterizedArgument != .absent else {
+            return .notRequested
+        }
+        if attribute.parameterizedArgument == .nonLiteral {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Injectable(parameterized:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression.",
+                location: location
+            ))
+            return .invalid
+        }
+        guard attribute.parameterizedArgument.isTrue else {
+            return .notRequested
+        }
+
+        guard !genericParameters.isEmpty else {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: GenericRefusal.parameterizedNonGeneric(type: typeName),
+                location: location
+            ))
+            return .invalid
+        }
+
+        let written = attribute.genericArgumentDisplayKeys.first
+        guard let written, written.hasPrefix("any ") else {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: GenericRefusal.parameterizedNeedsExistentialKey(type: typeName, key: written),
+                location: location
+            ))
+            return .invalid
+        }
+
+        let base = attribute.genericArgumentKeys[0]
+        if let primaryCount = protocolPrimaryAssociatedTypeCounts[base],
+           primaryCount != genericParameters.count {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: GenericRefusal.parameterizedArityMismatch(
+                    type: typeName,
+                    key: written,
+                    parameters: genericParameters,
+                    primaryCount: primaryCount
+                ),
+                location: location
+            ))
+            return .invalid
+        }
+
+        return .key(
+            KeyShape.text(base: base, arity: genericParameters.count),
+            display: "\(written)<\(genericParameters.joined(separator: ", "))>"
         )
     }
 
@@ -1137,8 +1280,10 @@ final class SourceCollector: SyntaxVisitor {
             // `Optional<…>` are one canonical spelling by the time we get here,
             // so a single unwrap covers all three.
             var typeKey = annotation.type.normalizedTypeKey
-            if typeKey.hasPrefix("Optional<"), typeKey.hasSuffix(">") {
-                typeKey = String(typeKey.dropFirst("Optional<".count).dropLast())
+            var injectedType = annotation.type
+            if let unwrapped = annotation.type.unwrappedOptional {
+                typeKey = unwrapped.normalizedTypeKey
+                injectedType = unwrapped
             }
 
             for attribute in attributes {
@@ -1153,6 +1298,10 @@ final class SourceCollector: SyntaxVisitor {
                     // `@Injected<Foo>` states the key; otherwise it is the
                     // property's own type.
                     typeKey: attribute.genericArgumentKeys.first ?? typeKey,
+                    // Read from whichever type supplied the key, so the shape
+                    // and the key can never describe different types.
+                    typeKeyShape: attribute.genericArgumentTypes.first?.typeKeyShape
+                        ?? injectedType.typeKeyShape,
                     macroName: "@\(macroName)",
                     namesMemberDirectly: namesMemberDirectly,
                     location: location(for: Syntax(node))

@@ -117,3 +117,44 @@ public macro Injectable<each T>(primary: Bool, public: Bool = false) = #external
     module: "ZerkMacros",
     type: "InjectableMacro"
 )
+
+/// Registers a generic type under a **parameterized existential** key: the
+/// type's own parameters become the protocol's primary associated types.
+///
+/// ```swift
+/// protocol Boxable<X, Y> { associatedtype X; associatedtype Y }
+///
+/// @Injectable<any Boxable>(parameterized: true)
+/// struct Box<X, Y>: Boxable {
+///     @InjectableProviding init(_ x: X, _ y: Y) { … }
+/// }
+///
+/// Zerk<any Boxable<Int, String>>.inject(1, "a")
+/// ```
+///
+/// It has to be asked for, because the same attribute without it means the
+/// opposite — erase the parameters into a plain `any Boxable` — and both are
+/// legal. The key cannot be written out in full: an attribute is resolved
+/// outside the declaration's scope, so `@Injectable<any Boxable<X, Y>>` is
+/// rejected by Swift itself with `'X' does not conform to 'Copyable'`.
+///
+/// The conformance must map positionally — the type's first parameter to the
+/// protocol's first primary associated type, and so on. Zerk reads syntax and
+/// cannot check that; a conformance that maps them differently is a compile
+/// error on the generated member, naming both real types.
+///
+/// Parameterized existentials are iOS 16 / macOS 13 and later, so the generated
+/// members carry an `@available` attribute.
+@attached(peer)
+public macro Injectable<each T>(parameterized: Bool, public: Bool = false) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)
+
+@attached(peer)
+public macro Injectable<each T>(primary: Bool,
+                                parameterized: Bool,
+                                public: Bool = false) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectableMacro"
+)

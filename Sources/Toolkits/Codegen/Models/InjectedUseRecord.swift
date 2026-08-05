@@ -14,6 +14,9 @@
 struct InjectedUseRecord {
     /// `var` so the alias pass can fold it onto its group's representative.
     var typeKey: String
+    /// The key's ``KeyShape``, so an `@Injected var cache: Cache<String>` can
+    /// reach a generic registration. See ``ParameterRecord/typeKeyShape``.
+    var typeKeyShape: String? = nil
     let macroName: String
     /// True when the attribute named a member with a key path.
     ///

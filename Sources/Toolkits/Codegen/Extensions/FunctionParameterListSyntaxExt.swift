@@ -8,7 +8,8 @@
 import SwiftSyntax
 
 extension FunctionParameterListSyntax {
-    func parameterRecords(locatedBy locator: ((Syntax) -> AttributeLocation)? = nil) -> [ParameterRecord] {
-        map { $0.parameterRecord(locatedBy: locator) }
+    func parameterRecords(locatedBy locator: ((Syntax) -> AttributeLocation)? = nil,
+                          genericScope: Set<String> = []) -> [ParameterRecord] {
+        map { $0.parameterRecord(locatedBy: locator, genericScope: genericScope) }
     }
 }

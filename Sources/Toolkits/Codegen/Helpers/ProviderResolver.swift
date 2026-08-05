@@ -5,6 +5,8 @@
 //  Created by Ömer Faruk Gökce on 27.07.2026.
 //
 
+import SharedToolkit
+
 /// Decides *which* providers satisfy each `@Injectable` key, and which single
 /// one of them backs `inject()`.
 ///
@@ -18,6 +20,10 @@ struct ProviderResolver {
     /// rewritten to representatives, so this is consulted only to *explain* a
     /// collision the developer did not literally write.
     var aliases: KeyAliases = .empty
+    /// The spelling each key was written as. For diagnostics only: keys match
+    /// with `any` stripped, and a developer who wrote `@Injectable<any Boxable>`
+    /// should not be told about `Boxable`.
+    var keyDisplayNames: [String: String] = [:]
 
     /// Collects every provider for every key, then elects one primary per key.
     ///
@@ -79,6 +85,43 @@ struct ProviderResolver {
             }
 
             resolutions += typeResolutions
+        }
+
+        // A written key erases the type's parameters, so each provider has to
+        // recover them from its own arguments. One that cannot would emit
+        // `generic parameter 'Y' is not used in function signature`, so it is
+        // dropped here rather than left to fail inside the generated file.
+        resolutions = resolutions.filter { resolution in
+            let unbound = Self.unboundParameters(of: resolution)
+            guard !unbound.fromKey.isEmpty || !unbound.fromProvider.isEmpty else {
+                return true
+            }
+            // Two different mistakes with two different fixes, so they are
+            // worded — and reported — separately.
+            if !unbound.fromKey.isEmpty {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: GenericRefusal.unboundKeyParameters(
+                        on: resolution.typeName,
+                        key: keyDisplayNames[resolution.injectableKey] ?? resolution.injectableKey,
+                        provider: resolution.provider.memberNameHint,
+                        parameters: unbound.fromKey
+                    ),
+                    location: resolution.provider.location
+                ))
+            }
+            if !unbound.fromProvider.isEmpty {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: GenericRefusal.unboundProviderParameters(
+                        on: resolution.typeName,
+                        provider: resolution.provider.memberNameHint,
+                        parameters: unbound.fromProvider
+                    ),
+                    location: resolution.provider.location
+                ))
+            }
+            return false
         }
 
         let election = Self.electPrimaries(among: resolutions, aliases: aliases)
@@ -199,6 +242,37 @@ private extension ProviderResolver {
         return resolutions
     }
 
+    /// The generic parameters this resolution's member declares but nothing in
+    /// its signature could infer, or `nil` when every one is reachable.
+    ///
+    /// Swift's own rule, said at the declaration instead of at the generated
+    /// line: a generic parameter must appear in the signature. Two things can
+    /// put it there.
+    ///
+    /// - The **return type**, but only when the key carries the type's
+    ///   parameters — `-> Cache<E>`. A key that erases them (`-> any Boxable`)
+    ///   or never had them (`-> Box`) mentions none.
+    /// - An **argument**, which is the only route for anything the provider
+    ///   declares itself: `init<Z>(z: Z)` puts `Z` there, `init<Z>()` does not.
+    static func unboundParameters(of resolution: ProviderResolution)
+    -> (fromKey: [String], fromProvider: [String]) {
+        guard resolution.memberIsGeneric else {
+            return ([], [])
+        }
+        let boundByReturnType = resolution.keyIsGeneric
+            ? Set(resolution.genericParameters)
+            : Set<String>()
+        let boundByArguments = Set(
+            resolution.provider.parameters.flatMap(\.mentionedGenericParameters))
+        func isUnbound(_ name: String) -> Bool {
+            !boundByReturnType.contains(name) && !boundByArguments.contains(name)
+        }
+        return (
+            fromKey: resolution.genericParameters.filter(isUnbound),
+            fromProvider: resolution.provider.genericParameters.filter(isUnbound)
+        )
+    }
+
     /// How a provider is named in a diagnostic: a factory by its own name, an
     /// initializer as `init`.
     static func providerDescription(_ provider: ProviderChoice) -> String {
@@ -214,7 +288,9 @@ private extension ProviderResolver {
             provider: provider,
             isTypePrimary: type.primaryKeys[key] != nil,
             isExported: type.exportedKeys[key] != nil,
-            isSingleton: type.isSingleton
+            isSingleton: type.isSingleton,
+            genericParameters: type.genericParameters,
+            isParameterizedExistential: type.parameterizedKeys[key] != nil
         )
     }
 

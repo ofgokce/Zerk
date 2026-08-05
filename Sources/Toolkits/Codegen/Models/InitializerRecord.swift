@@ -18,4 +18,11 @@ struct InitializerRecord {
     /// declaration, its enclosing type, and the ambient default at collection
     /// time.
     var isolation: ProviderIsolation = .nonisolated
+    /// The initializer's *own* generic parameters — `["Z"]` for
+    /// `init<Z>(x: X, y: Y, z: Z)` inside `Box<X, Y>`.
+    ///
+    /// Separate from the type's: the emitted member declares both, but only the
+    /// type's can be bound by the return type. Anything the member adds has to
+    /// arrive as an argument, since nothing else in the signature mentions it.
+    var genericParameters: [String] = []
 }

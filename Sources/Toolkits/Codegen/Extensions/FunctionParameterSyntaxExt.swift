@@ -19,7 +19,13 @@ extension FunctionParameterSyntax {
     /// lands on the parameter and not on the enclosing declaration. It is
     /// optional because the synthesized memberwise initializer has parameters
     /// with no source of their own.
-    func parameterRecord(locatedBy locator: ((Syntax) -> AttributeLocation)? = nil) -> ParameterRecord {
+    ///
+    /// `genericScope` is the enclosing declarations' generic parameters, which
+    /// decide whether this parameter's type is one key, a family of keys, or a
+    /// bare parameter that is none. Empty for every non-generic type, so the
+    /// default keeps existing callers exact.
+    func parameterRecord(locatedBy locator: ((Syntax) -> AttributeLocation)? = nil,
+                         genericScope: Set<String> = []) -> ParameterRecord {
         let firstName = firstName.text
         let secondName = secondName?.text
         return ParameterRecord(
@@ -30,6 +36,9 @@ extension FunctionParameterSyntax {
             isAutoInjected: attributes.hasAttribute(named: "autoinjected"),
             isNonInjected: attributes.hasAttribute(named: "noninjected"),
             feedsDependencies: attributes.hasAttribute(named: "injectable"),
-            location: locator.map { $0(Syntax(self)) })
+            location: locator.map { $0(Syntax(self)) },
+            typeKeyShape: type.typeKeyShape,
+            mentionedGenericParameters: type.mentionedGenericParameters(in: genericScope),
+            isBareGenericParameter: type.isBareGenericParameter(in: genericScope))
     }
 }

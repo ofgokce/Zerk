@@ -37,6 +37,19 @@ enum ProviderChoice {
         }
     }
 
+    /// The provider's own generic parameters, beyond whatever the key binds.
+    /// Only a written initializer or factory can declare any.
+    var genericParameters: [String] {
+        switch self {
+        case .explicit(let provider):
+            return provider.genericParameters
+        case .implicit(let initializer):
+            return initializer.genericParameters
+        case .imported, .value:
+            return []
+        }
+    }
+
     var location: AttributeLocation {
         switch self {
         case .explicit(let provider):

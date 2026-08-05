@@ -76,6 +76,17 @@ public extension AttributeSyntax {
         boolArgument(labeled: "public")
     }
 
+    /// The attribute's `parameterized:` argument — how `@Injectable<any P>` asks
+    /// for the type's own parameters to be applied to the key as `P`'s primary
+    /// associated types, giving `any P<X, Y>`.
+    ///
+    /// It has to be asked for rather than inferred. Without it the same
+    /// attribute means the opposite — erase the parameters into a plain `any P`
+    /// — and both are legal, so Zerk cannot pick for the developer.
+    var parameterizedArgument: LiteralBoolArgument {
+        boolArgument(labeled: "parameterized")
+    }
+
     /// Reads a `Bool` argument by label.
     ///
     /// Zerk reads syntax and never evaluates it, so only a `true`/`false`

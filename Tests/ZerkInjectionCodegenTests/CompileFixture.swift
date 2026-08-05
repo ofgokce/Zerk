@@ -120,9 +120,13 @@ enum CompileFixture {
 
         let aliases = KeyAliases(declarations: collector.aliasDeclarations)
         let rewriter = AliasRewriter(aliases: aliases)
+        // Mirrors CodeGenerator: registrations the emitter cannot spell are
+        // dropped before anything asks which provider backs their key.
+        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
         let resolution = ProviderResolver(
-            types: rewriter.rewrite(types: collector.types),
-            aliases: aliases
+            types: gate.types,
+            aliases: aliases,
+            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
         ).resolve()
         let imports = ImportedInjectableMerger(
             records: collector.importedInjectables.map {
@@ -138,10 +142,10 @@ enum CompileFixture {
             records: rewriter.rewrite(importedValues: collector.importedValues)
         ).merged(into: rewriter.rewrite(values: collector.values))
         return GeneratorOutputBuilder(
-            types: rewriter.rewrite(types: collector.types),
+            types: gate.types,
             values: importedValues.values,
             resolutions: resolution.resolutions,
-            primaryResolutions: imports.primaries,
+            primaryResolutions: KeyIndex(imports.primaries),
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
             markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
@@ -162,9 +166,13 @@ enum CompileFixture {
 
         let aliases = KeyAliases(declarations: collector.aliasDeclarations)
         let rewriter = AliasRewriter(aliases: aliases)
+        // Mirrors CodeGenerator: registrations the emitter cannot spell are
+        // dropped before anything asks which provider backs their key.
+        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
         let resolution = ProviderResolver(
-            types: rewriter.rewrite(types: collector.types),
-            aliases: aliases
+            types: gate.types,
+            aliases: aliases,
+            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
         ).resolve()
         let imports = ImportedInjectableMerger(
             records: collector.importedInjectables.map {
@@ -180,10 +188,10 @@ enum CompileFixture {
             records: rewriter.rewrite(importedValues: collector.importedValues)
         ).merged(into: rewriter.rewrite(values: collector.values))
         let output = GeneratorOutputBuilder(
-            types: rewriter.rewrite(types: collector.types),
+            types: gate.types,
             values: importedValues.values,
             resolutions: resolution.resolutions,
-            primaryResolutions: imports.primaries,
+            primaryResolutions: KeyIndex(imports.primaries),
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
             markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
@@ -191,8 +199,8 @@ enum CompileFixture {
             importedModules: collector.importedModules
         ).build()
 
-        return (output, collector.diagnostics + resolution.diagnostics + imports.diagnostics
-            + importedValues.diagnostics + output.diagnostics)
+        return (output, collector.diagnostics + gate.diagnostics + resolution.diagnostics
+            + imports.diagnostics + importedValues.diagnostics + output.diagnostics)
     }
 
     // MARK: - Compilation

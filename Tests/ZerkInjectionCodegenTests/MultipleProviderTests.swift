@@ -354,7 +354,7 @@ struct MultipleProviderTests {
             types: [],
             values: [],
             resolutions: [live, duplicate],
-            primaryResolutions: ProviderResolver.electPrimaries(among: [live, duplicate]).primaries
+            primaryResolutions: KeyIndex(ProviderResolver.electPrimaries(among: [live, duplicate]).primaries)
         ).build()
 
         #expect(output.diagnostics.contains {

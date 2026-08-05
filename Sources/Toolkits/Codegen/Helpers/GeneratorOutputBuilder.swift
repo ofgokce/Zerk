@@ -29,7 +29,7 @@ struct GeneratorOutputBuilder {
     /// parameter, an `@injected` argument, an `@Injected` property — goes
     /// through this rather than through `resolutions`, because those all call
     /// `inject()`.
-    var primaryResolutions: [String: ProviderResolution] = [:]
+    var primaryResolutions: KeyIndex<ProviderResolution> = KeyIndex()
     var moduleAccessLevels: [String: Bool] = [:]
     var injectedUses: [InjectedUseRecord] = []
     var markedMembers: [MarkedMemberRecord] = []
@@ -134,7 +134,7 @@ struct GeneratorOutputBuilder {
         // containing an async or throwing provider — or one that crosses an
         // isolation domain, which becomes async — cannot be resolved by it.
         for use in injectedUses where !use.namesMemberDirectly {
-            guard let unique = primaryResolutions[use.typeKey] else {
+            guard let unique = primaryResolutions[use.typeKey, shape: use.typeKeyShape] else {
                 continue
             }
             let plan = wrapperPlan(for: unique)
@@ -147,8 +147,10 @@ struct GeneratorOutputBuilder {
             }
         }
 
-        let uniqueExternalSignatures = Set(primaryResolutions.values.map { macroSignatureKey(for: wrapperPlan(for: $0).parameters) })
-            .sorted()
+        let uniqueExternalSignatures = Set(primaryResolutions.values.map {
+            macroSignatureKey(for: wrapperPlan(for: $0).parameters,
+                              genericParameters: $0.memberGenericParameters)
+        }).sorted()
 
         output += generatedInjectedMacroDeclarations(for: uniqueExternalSignatures)
 
@@ -311,7 +313,20 @@ struct GeneratorOutputBuilder {
 
             let pointNames = interjectionPointNames(for: providers)
 
-            output.append("extension Zerk<\(displayName(for: injectableKey))> {")
+            // A generic key binds `Injectable` per member, in a where clause,
+            // so its block cannot bind it in the header: `extension
+            // Zerk<Cache<E>>` has no `E` to name.
+            // A parameterized existential did not exist before iOS 16, and the
+            // plugin cannot read the target's deployment version — the same
+            // reason `ZerkSettings.json` exists. Emitted unconditionally: it
+            // costs a caller nothing to be told a member is available from 16,
+            // and without it a target deploying lower would not build at all.
+            if providers.contains(where: \.isParameterizedExistential) {
+                output.append(Self.parameterizedExistentialAvailability)
+            }
+            output.append(providers.first?.keyIsGeneric == true
+                ? "extension Zerk {"
+                : "extension Zerk<\(displayName(for: injectableKey))> {")
 
             for provider in providers {
                 let classification = classifier.classify(provider)
@@ -447,23 +462,40 @@ struct GeneratorOutputBuilder {
         }
 
         let defaults = classification.defaultExpressions
+        let generics = genericClauses(for: provider, injectableKey: injectableKey)
+        // A property takes no generic parameters, so a generic key's members are
+        // always functions — even the argument-free ones, which lose the
+        // `Zerk<Cache<String>>.cache` spelling a concrete key gets.
         let usesFunctionShape =
-            !allParameters.isEmpty || ownEffects.isAsync || ownEffects.isThrowing
+            provider.memberIsGeneric || !allParameters.isEmpty || ownEffects.isAsync || ownEffects.isThrowing
 
         var lines: [String] = []
 
         if usesFunctionShape {
             let signature = parameterClause(parameters: allParameters, defaults: defaults)
             let construction = "\(ownEffects.callPrefix)\(builderConstruction(for: provider))(\(builderArguments(allParameters, useParameterNames: true, defaults: defaults)))"
-            lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(signature)\(ownEffects.declarationSuffix) -> \(keyText) {")
+            lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(generics.parameters)\(signature)\(ownEffects.declarationSuffix) -> \(keyText)\(generics.whereClause) {")
             let point = pointNames[pointIdentity(for: provider)] ?? memberName
-            lines += interjectionGuardLines(point: "`\(point)`")
+            // A generic key has no interjection point yet: the namespace
+            // extension that would declare one cannot bind the parameter —
+            // `extension Zerk<Cache<E>>.Interjection` is "cannot find type 'E'
+            // in scope" — and the marker-protocol route that can is its own
+            // piece of work. Guarding against a point that does not exist would
+            // not compile, so a generic member carries none. `#Interject` on
+            // such a key registers, resolves nothing, and fails the test loudly
+            // rather than passing quietly.
+            if !provider.keyIsGeneric {
+                lines += interjectionGuardLines(point: "`\(point)`")
+            }
             lines.append("        return \(construction)")
             lines.append("    }")
 
-            points.append(InterjectionPoint(zerkArgument: injectableKey, name: point))
+            if !provider.keyIsGeneric {
+                points.append(InterjectionPoint(zerkArgument: injectableKey, name: point))
+            }
 
-            if hasUniqueMemberName {
+            // The companion `var` is a property too, so it goes the same way.
+            if hasUniqueMemberName, !provider.memberIsGeneric {
                 lines += keyPathReachableVariantLines(
                     memberName: memberName,
                     keyText: keyText,
@@ -507,7 +539,7 @@ struct GeneratorOutputBuilder {
         .joined(separator: ", ")
 
         lines.append("")
-        lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(resolvingSignature)\(resolvingEffects.declarationSuffix) -> \(returnClause(for: provider, key: keyText, parameters: resolvingParameters, classification: classification)) {")
+        lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(generics.parameters)\(resolvingSignature)\(resolvingEffects.declarationSuffix) -> \(returnClause(for: provider, key: keyText, parameters: resolvingParameters, classification: classification))\(generics.whereClause) {")
         lines.append("        \(ownEffects.callPrefix)\(memberName)(\(forwardedArguments))")
         lines.append("    }")
 
@@ -942,9 +974,11 @@ struct GeneratorOutputBuilder {
         let plan = wrapperPlan(for: provider)
         let memberName = memberName(for: provider)
         let isolation = provider.isolation
+        let generics = genericClauses(for: provider, injectableKey: injectableKey)
         let memberIsCallable =
             !provider.isSingleton &&
-            (!provider.provider.parameters.isEmpty ||
+            (provider.memberIsGeneric ||
+             !provider.provider.parameters.isEmpty ||
              provider.provider.effects.isAsync ||
              provider.provider.effects.isThrowing)
 
@@ -971,7 +1005,7 @@ struct GeneratorOutputBuilder {
             // resolving variant) do the work. `plan.effects` and the resolving
             // variant's effects agree here, because a defaulted dependency is
             // effect-free by construction.
-            lines.append("    \(isolation.declarationPrefix)\(accessPrefix)static func inject()\(plan.effects.declarationSuffix) -> \(returns) {")
+            lines.append("    \(isolation.declarationPrefix)\(accessPrefix)static func inject\(generics.parameters)()\(plan.effects.declarationSuffix) -> \(returns)\(generics.whereClause) {")
             if memberIsCallable {
                 if isOverloaded(memberName, in: injectableKey) {
                     // Sibling providers share this name and are told apart by
@@ -988,7 +1022,7 @@ struct GeneratorOutputBuilder {
             }
             lines.append("    }")
         } else {
-            lines.append("    \(isolation.declarationPrefix)\(accessPrefix)static func inject\(parameterClause(parameters: plan.parameters, defaults: [:]))\(plan.effects.declarationSuffix) -> \(returns) {")
+            lines.append("    \(isolation.declarationPrefix)\(accessPrefix)static func inject\(generics.parameters)\(parameterClause(parameters: plan.parameters, defaults: [:]))\(plan.effects.declarationSuffix) -> \(returns)\(generics.whereClause) {")
             lines.append("        \(provider.provider.effects.callPrefix)\(memberName)(\(memberCallArguments(for: provider, using: plan.argumentExpressions)))")
             lines.append("    }")
         }
@@ -1097,7 +1131,7 @@ struct GeneratorOutputBuilder {
                         continue
                     }
 
-                    if let unique = primaryResolutions[core.typeKey] {
+                    if let unique = primaryResolutions[core] {
                         let plan = wrapperPlan(for: unique)
                         let hops = unique.isolation.requiresHop(callingFrom: record.isolation.dependencyCallContext)
                         let callEffects = plan.effects
@@ -1235,12 +1269,12 @@ struct GeneratorOutputBuilder {
         let classifier = self.classifier
 
         var edges: [String: [String]] = [:]
-        for (key, resolution) in primaryResolutions {
+        for (key, resolution) in primaryResolutions.entries {
             for parameter in resolution.provider.parameters {
                 if classifier.injectableValue(matching: parameter) != nil {
                     continue
                 }
-                if primaryResolutions[parameter.typeKey] != nil {
+                if primaryResolutions[parameter] != nil {
                     edges[key, default: []].append(parameter.typeKey)
                 }
             }
@@ -1381,6 +1415,37 @@ struct GeneratorOutputBuilder {
             "\(indent)    return interjected",
             "\(indent)}"
         ]
+    }
+
+    /// The platforms that have parameterized existentials (SE-0346, Swift 5.7).
+    ///
+    /// visionOS and macCatalyst are listed rather than left to `*` so the
+    /// generated line says what it means on every platform Zerk supports.
+    static let parameterizedExistentialAvailability =
+        "@available(iOS 16.0, macOS 13.0, macCatalyst 16.0, tvOS 16.0, watchOS 9.0, visionOS 1.0, *)"
+
+    /// What a member for a generic key adds to its declaration: the parameter
+    /// list it introduces, and the requirement binding `Injectable` to the key.
+    ///
+    /// Empty strings for a concrete key, so every emission site interpolates
+    /// them unconditionally and concrete output stays byte-identical.
+    ///
+    /// The constraints written on the type — `struct Codec<E: Codable>` — are
+    /// deliberately *not* reproduced. `where Injectable == Codec<E>` re-derives
+    /// them from the same-type requirement, and a specialization that violates
+    /// one still fails at the call site with the constraint's own message.
+    private func genericClauses(for provider: ProviderResolution,
+                                injectableKey: String) -> (parameters: String, whereClause: String) {
+        guard provider.memberIsGeneric else {
+            return ("", "")
+        }
+        return (
+            "<\(provider.memberGenericParameters.joined(separator: ", "))>",
+            // Only a generic key needs binding. A concrete one is already bound
+            // by the extension header, and the member is an ordinary generic
+            // method whose parameters come from its arguments.
+            provider.keyIsGeneric ? " where Injectable == \(displayName(for: injectableKey))" : ""
+        )
     }
 
     /// The expression that constructs the real implementation, e.g. `Logger`
@@ -1639,7 +1704,8 @@ struct GeneratorOutputBuilder {
     /// Identifies an `inject()` overload by parameter shape, so the generated
     /// `@Injected` macro declarations are emitted once per distinct signature
     /// rather than once per provider.
-    private func macroSignatureKey(for parameters: [ParameterRecord]) -> String {
+    private func macroSignatureKey(for parameters: [ParameterRecord],
+                                   genericParameters: [String] = []) -> String {
         guard !parameters.isEmpty else {
             return ""
         }
@@ -1647,7 +1713,16 @@ struct GeneratorOutputBuilder {
             let label = parameter.label ?? "_"
             return "\(label): \(parameter.typeName)"
         }
-        return "(\(parts.joined(separator: ", ")))"
+        // A forwarded argument may be typed by one of the member's own generic
+        // parameters — `@Injected(1, "a") var box: any Boxable` against
+        // `inject<X, Y>(_ x: X, _ y: Y)`. The declaration binds exactly the ones
+        // its signature names: binding more is "generic parameter not used in
+        // function signature", and binding fewer does not resolve.
+        let named = genericParameters.filter { name in
+            parameters.contains { $0.mentionedGenericParameters.contains(name) }
+        }
+        let clause = named.isEmpty ? "" : "<\(named.joined(separator: ", "))>"
+        return "\(clause)(\(parts.joined(separator: ", ")))"
     }
 
     /// Flattens a provider's whole dependency subtree into a single `inject()`
@@ -1694,7 +1769,7 @@ struct GeneratorOutputBuilder {
                 staysExternal = true
             } else if classifier.injectableValue(matching: parameter) != nil {
                 staysExternal = false
-            } else if primaryResolutions[parameter.typeKey] != nil {
+            } else if primaryResolutions[parameter] != nil {
                 staysExternal = false
             } else {
                 staysExternal = true
@@ -1738,7 +1813,7 @@ struct GeneratorOutputBuilder {
                 continue
             }
 
-            if let dependency = primaryResolutions[parameter.typeKey] {
+            if let dependency = primaryResolutions[parameter] {
                 let dependencyPlan = wrapperPlan(for: dependency, visiting: nextVisiting)
                 let hops = dependency.isolation.requiresHop(callingFrom: memberIsolation)
                 let callEffects = dependencyPlan.effects

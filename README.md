@@ -787,7 +787,62 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 **Generated member names must be unique per key *per signature*.** Providers may share a member name when their parameters differ — two marked initializers both generate `Zerk<Key>.loader(...)`, told apart exactly as the initializers are. Two that agree on name *and* parameters (e.g. a `Service` in two files, both argument-free) collide; rename the type or use a distinctly named `@InjectableProviding` factory.
 
-**Generic types cannot be registered (yet).** `@Injectable` on `struct Cache<E>`, `@InjectableProviding` on a generic factory, and `@InjectableValue` on a generic function are all build errors, because the member Zerk would generate names a type parameter nothing binds. Register the specialization you need behind a concrete type. Generic support is planned; **`@Singleton` on a generic type is the one part that stays refused** — a singleton lives in a static stored property, which Swift does not allow in a generic type, so there is nowhere to keep one instance per specialization.
+**Generic types register under themselves, and only under themselves.** `@Injectable struct Cache<E>` becomes members of an unconstrained `extension Zerk` that bind the key per call — `static func cache<E>() -> Cache<E> where Injectable == Cache<E>` — so `Zerk<Cache<String>>.inject()` resolves, and a dependency on any specialization resolves with it. A concrete registration for one specialization coexists with the generic one and wins it, exactly as Swift's own overload resolution does. Four limits:
+
+- **No `@Singleton`.** Its storage is a static stored property, which Swift does not allow in a generic type — there is nowhere to keep one instance per specialization. This one is permanent.
+- **`@InjectableValue` on a generic function** stays refused: a value's key *is* its return type, so a free parameter there is a key nothing can register.
+- **Members are functions.** A property takes no generic parameters, so a generic key has no `Zerk<Cache<String>>.cache` spelling and no `@Injected(\.member)` key path — call `Zerk<Cache<String>>.cache()` or `inject()`.
+
+**A generic type may also register under a concrete key, erasing its parameters.** The attribute cannot name them — `@Injectable<Cache<E>>` is rejected by Swift itself — but a key that erases them works, provided every parameter arrives as an argument the caller can supply:
+
+```swift
+@Injectable<any Boxable>
+struct Box<X, Y>: Boxable {
+    @InjectableProviding init(_ x: X, _ y: Y) { … }
+}
+
+// extension Zerk<any Boxable> {
+//     static func box<X, Y>(_ x: X, _ y: Y) -> any Boxable { … }
+//     static func inject<X, Y>(_ x: X, _ y: Y) -> any Boxable { box(x, y) }
+// }
+
+@Injected(1, "a") var box: any Boxable
+```
+
+**A provider may add generic parameters of its own**, on a generic type or a plain one:
+
+```swift
+@Injectable
+struct Box { init<X, Y>(x: X, y: Y) { … } }
+// static func box<X, Y>(x: X, y: Y) -> Box
+
+@Injectable
+struct Pair<X, Y> { init<Z>(x: X, y: Y, z: Z) { … } }
+// static func pair<X, Y, Z>(x: X, y: Y, z: Z) -> Pair<X, Y> where Injectable == Pair<X, Y>
+```
+
+The rule across all of these is Swift's own, reported at your declaration rather than in generated code: **every generic parameter the member declares must appear in its signature.** The return type supplies the ones a generic key carries; everything else has to arrive as an argument. A parameter nothing can infer is a build error. And because this key is concrete, it keeps its interjection point — unlike a generic key.
+
+**Or the key can carry the parameters, with `parameterized: true`.** The protocol's primary associated types take the type's own parameters, so the specialization survives into the key instead of being erased:
+
+```swift
+protocol Boxable<X, Y> { associatedtype X; associatedtype Y }
+
+@Injectable<any Boxable>(parameterized: true)
+struct Box<X, Y>: Boxable {
+    @InjectableProviding init(_ x: X, _ y: Y) { … }
+}
+
+Zerk<any Boxable<Int, String>>.inject(1, "a")   // any Boxable<Int, String>
+```
+
+It has to be asked for: the same attribute without it means the opposite, and both are legal. The key cannot be written out in full — `@Injectable<any Boxable<X, Y>>` is rejected by Swift itself, since an attribute is resolved outside the declaration's scope.
+
+Three things are checked: the type must be generic, the key must be spelled `any P` (Zerk never *adds* `any` — it cannot tell a protocol from a class), and the protocol's primary associated types must be as many as the type's parameters. The conformance must also map them positionally; Zerk reads syntax and cannot check that, so a crossed-over conformance is a compile error on the generated member naming both real types.
+
+Parameterized existentials arrived in iOS 16 / macOS 13, so the generated extension carries an `@available` attribute. The plugin cannot read your deployment target, so it is emitted unconditionally — which costs nothing if you deploy higher.
+
+**Generic keys are not interjectable yet.** A member for a generic key carries no interjection guard, because the namespace extension that declares a point cannot bind the parameter. `#Interject<Cache<String>>(with:)` compiles and registers, but nothing reads it — a test written against it fails against the real value rather than passing quietly.
 
 **`@Singleton` constraints.** Reference types only; provider must be synchronous and non-throwing; no external arguments; no dependency in a different isolation domain, since resolving one would need `await`; exactly one provider per key, and the *same* provider across every key the type claims. A singleton injectable under several keys must be built by an initializer or by a factory returning the concrete type — its one instance is stored once and read through every key.
 
@@ -805,7 +860,7 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 All resolution errors surface at build time with source locations, pointing at your declaration rather than at generated code. Diagnostics accumulate across the whole run, so one build reports every problem instead of only the first.
 
-The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, an imported value colliding with a local one of the same name, the same value name imported twice, two values sharing a key and a name, a value whose member name collides with a provider's, an `@ImportedInjectableValue` without a getter or with one that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Injectable(public:)` on a non-public key (warning), a non-literal `primary:` or `public:`, a generic `@Injectable` type / `@InjectableProviding` factory / `@InjectableValue` function, `@Singleton` on a generic type, `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
+The ones you are most likely to meet: no provider found for a key, several providers for a key with none marked primary, several types claiming a key with none marked primary, more than one primary for a key, `@Singleton` on a value type / with effects / with external arguments / with a cross-domain dependency / with different providers for different keys / multi-key with a factory returning a key rather than the concrete type, circular dependency, member-name collision, a key both imported and declared locally, one key imported twice, an `@ImportedInjectable` body that is not a single Zerk expression, an imported value colliding with a local one of the same name, the same value name imported twice, two values sharing a key and a name, a value whose member name collides with a provider's, an `@ImportedInjectableValue` without a getter or with one that is not a single Zerk expression, `#ZerkImport` with no modules or a non-literal name, an `@autoinjected` parameter nothing can satisfy, `@autoinjected` on a declaration that is not a provider (warning), a bubbled requirement colliding with an unmarked parameter, one parameter marked both `@autoinjected` and `@noninjected`, `@ZerkAlias` on a non-typealias or a generic typealias, `#ZerkAlias` with fewer than two distinct types, `@Injectable(public:)` on a non-public key (warning), a non-literal `primary:` or `public:`, a generic parameter that neither the key nor the provider's arguments can bind, a generic `@InjectableProviding` factory or `@InjectableValue` function, `@Singleton` on a generic type, `@Injected` on an async, throwing, or cross-domain chain, `@Isolated<A>` contradicting a `nonisolated` modifier or a global-actor attribute, and — under Swift 5 language mode without an SE-0411 opt-in — an isolated provider resolving a same-domain isolated dependency.
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 

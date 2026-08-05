@@ -39,7 +39,14 @@ extension DeclGroupSyntax {
     /// one. Returns `nil` if a stored property carries no type annotation,
     /// since its type is only recoverable by evaluating the initializer
     /// expression, which reading syntax cannot do.
-    func inferredStructInitializer(in location: AttributeLocation) -> InitializerRecord? {
+    ///
+    /// Builds its `ParameterRecord`s by hand rather than through
+    /// `parameterRecord(locatedBy:genericScope:)` — a synthesized parameter has
+    /// no syntax of its own to locate — so `genericScope` has to be threaded
+    /// here separately. Easy to forget precisely because this is the one
+    /// provider path that does not go through the parameter funnel.
+    func inferredStructInitializer(in location: AttributeLocation,
+                                   genericScope: Set<String> = []) -> InitializerRecord? {
         var parameters: [ParameterRecord] = []
 
         for member in memberBlock.members {
@@ -58,7 +65,10 @@ extension DeclGroupSyntax {
                     label: name,
                     name: name,
                     typeKey: annotation.type.normalizedTypeKey,
-                    typeName: annotation.type.trimmedDescription))
+                    typeName: annotation.type.trimmedDescription,
+                    typeKeyShape: annotation.type.typeKeyShape,
+                    mentionedGenericParameters: annotation.type.mentionedGenericParameters(in: genericScope),
+                    isBareGenericParameter: annotation.type.isBareGenericParameter(in: genericScope)))
             }
         }
 
@@ -71,9 +81,10 @@ extension DeclGroupSyntax {
     /// The initializer the compiler would synthesize, if any: memberwise for a
     /// struct, otherwise the no-argument `init()` — and `nil` when neither
     /// applies, meaning the type must declare a provider explicitly.
-    func inferredSynthesizedInitializer(in location: AttributeLocation) -> InitializerRecord? {
+    func inferredSynthesizedInitializer(in location: AttributeLocation,
+                                        genericScope: Set<String> = []) -> InitializerRecord? {
         if self.as(StructDeclSyntax.self) != nil {
-            return inferredStructInitializer(in: location)
+            return inferredStructInitializer(in: location, genericScope: genericScope)
         }
         guard canInferImplicitDefaultInitializer else { return nil }
         return InitializerRecord(

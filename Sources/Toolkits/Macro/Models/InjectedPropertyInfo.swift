@@ -157,7 +157,13 @@ public struct InjectedPropertyInfo {
             return "\(target)()"
         }
 
-        let argumentList = arguments.map(\.trimmedDescription).joined(separator: ", ")
+        // The trailing comma is part of a `LabeledExprSyntax`, so rendering the
+        // node whole and joining with ", " doubles every separator — `a: 1,,
+        // b: "x"`. Invisible until an attribute carries two arguments, which is
+        // why it survived: every `@Injected(...)` seen so far had one.
+        let argumentList = arguments
+            .map { $0.with(\.trailingComma, nil).trimmedDescription }
+            .joined(separator: ", ")
         return "\(target)(\(argumentList))"
     }
 

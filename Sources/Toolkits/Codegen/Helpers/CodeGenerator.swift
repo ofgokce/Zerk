@@ -58,13 +58,14 @@ public struct CodeGenerator {
         // and generation are alias-aware without knowing aliases exist.
         let aliases = KeyAliases(declarations: collector.aliasDeclarations)
         let rewriter = AliasRewriter(aliases: aliases)
-        let types = rewriter.rewrite(types: collector.types)
+        let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
+        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
+        let types = gate.types
         let localValues = rewriter.rewrite(values: collector.values)
         let injectedUses = rewriter.rewrite(injectedUses: collector.injectedUses)
         let markedMembers = rewriter.rewrite(markedMembers: collector.markedMembers)
-        let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
 
-        let resolution = ProviderResolver(types: types, aliases: aliases).resolve()
+        let resolution = ProviderResolver(types: types, aliases: aliases, keyDisplayNames: keyDisplayNames).resolve()
 
         // Imports join the primaries only: they satisfy parameters, and emit no
         // members, because what they resolve is built in another module.
@@ -86,7 +87,7 @@ public struct CodeGenerator {
         ).merged(into: localValues)
         let values = importedValues.values
 
-        var diagnostics = collector.diagnostics + resolution.diagnostics
+        var diagnostics = collector.diagnostics + gate.diagnostics + resolution.diagnostics
             + imports.diagnostics + importedValues.diagnostics
 
         if diagnostics.contains(where: { $0.severity == .error }) {
@@ -98,7 +99,7 @@ public struct CodeGenerator {
             types: types,
             values: values,
             resolutions: resolution.resolutions,
-            primaryResolutions: imports.primaries,
+            primaryResolutions: KeyIndex(imports.primaries),
             moduleAccessLevels: collector.moduleAccessLevels,
             injectedUses: injectedUses,
             markedMembers: markedMembers,

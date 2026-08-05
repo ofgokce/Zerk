@@ -1307,7 +1307,7 @@ private func buildOutput(types: [TypeRecord] = [],
         types: types,
         values: values,
         resolutions: resolutions,
-        primaryResolutions: ProviderResolver.electPrimaries(among: resolutions).primaries,
+        primaryResolutions: KeyIndex(ProviderResolver.electPrimaries(among: resolutions).primaries),
         moduleAccessLevels: moduleAccessLevels,
         injectedUses: injectedUses,
         markedMembers: markedMembers

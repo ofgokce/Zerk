@@ -34,4 +34,7 @@ struct InjectingProvider {
     /// Whether `@InjectableProviding(primary: true)` named this provider as the
     /// one `inject()` calls, among its type's providers for the same key.
     var isPrimary: Bool = false
+    /// The factory's *own* generic parameters. See
+    /// ``InitializerRecord/genericParameters``.
+    var genericParameters: [String] = []
 }

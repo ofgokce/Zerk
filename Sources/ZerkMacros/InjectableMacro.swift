@@ -36,6 +36,63 @@ public struct InjectableMacro: PeerMacro {
     }
 }
 
+private extension InjectableMacro {
+    /// One provider the plugin will turn into a member, reduced to what a
+    /// generic-parameter check needs.
+    struct ProviderSignature {
+        let name: String?
+        let parameters: [FunctionParameterSyntax]
+        /// The provider's *own* generic parameters, beyond the type's.
+        let genericParameters: [String]
+        let node: Syntax
+    }
+
+    /// Every provider on this declaration: the marked initializers and static
+    /// factories, or the sole initializer when nothing is marked.
+    ///
+    /// Mirrors `ProviderResolver`'s fallback rather than reusing it — the
+    /// resolver works from collected records and cannot be reached from a macro,
+    /// which sees one declaration. The two agreeing is what makes this check
+    /// worth having: it says the same thing, at the declaration.
+    static func providerSignatures(of declaration: ZerkTypeDecl) -> [ProviderSignature] {
+        var marked: [ProviderSignature] = []
+        var initializers: [ProviderSignature] = []
+
+        for member in declaration.members.members {
+            if let initializer = member.decl.as(InitializerDeclSyntax.self) {
+                let signature = ProviderSignature(
+                    name: nil,
+                    parameters: Array(initializer.signature.parameterClause.parameters),
+                    genericParameters: initializer.genericParameterClause?
+                        .parameters.map { $0.name.text } ?? [],
+                    node: Syntax(initializer))
+                initializers.append(signature)
+                if initializer.attributes.hasAttribute(
+                    named: ZerkMacroNames.injectableProvidingAttributeName) {
+                    marked.append(signature)
+                }
+            } else if let function = member.decl.as(FunctionDeclSyntax.self),
+                      function.attributes.hasAttribute(
+                        named: ZerkMacroNames.injectableProvidingAttributeName) {
+                marked.append(ProviderSignature(
+                    name: function.name.text,
+                    parameters: Array(function.signature.parameterClause.parameters),
+                    genericParameters: function.genericParameterClause?
+                        .parameters.map { $0.name.text } ?? [],
+                    node: Syntax(function)))
+            }
+        }
+
+        if !marked.isEmpty {
+            return marked
+        }
+        // The synthesized memberwise initializer is not visible here, so a
+        // struct relying on it is left to the plugin, which can see the stored
+        // properties.
+        return initializers.count == 1 ? initializers : []
+    }
+}
+
 extension InjectableMacro {
     /// `public:` decides an access level the build plugin emits, and it is read
     /// from source rather than evaluated — so an expression Zerk cannot read has
@@ -69,19 +126,111 @@ private extension InjectableMacro {
             return
         }
 
-        // A generic type has no key the generator can spell — see
-        // ``GenericRefusal``. Reported before anything else, and alone: every
-        // check below is about a key this type is not going to have.
+        // A generic type registers under itself, and only under itself. The two
+        // shapes that have no legal form are reported before anything else, and
+        // alone: every check below is about a key this type is not going to
+        // have. See ``GenericRefusal``.
         let genericParameters = declaration.genericParameterNames
-        if !genericParameters.isEmpty {
+
+        // `parameterized:` applies the type's parameters to the key, so a type
+        // with none has nothing to apply. Checked ahead of everything else,
+        // since the key it describes does not exist.
+        for attribute in injectableAttributes where attribute.parameterizedArgument != .absent {
+            if attribute.parameterizedArgument == .nonLiteral {
+                context.zerkError(
+                    attribute,
+                    "@Injectable(parameterized:) requires a 'true' or 'false' literal. Zerk reads this from source and cannot evaluate an expression."
+                )
+                return
+            }
+            guard attribute.parameterizedArgument.isTrue else {
+                continue
+            }
+            if genericParameters.isEmpty {
+                context.zerkError(
+                    attribute,
+                    GenericRefusal.parameterizedNonGeneric(type: declaration.nameText)
+                )
+                return
+            }
+            if attribute.genericArgumentDisplayKeys.first == nil {
+                context.zerkError(
+                    attribute,
+                    GenericRefusal.parameterizedNeedsExistentialKey(
+                        type: declaration.nameText, key: nil)
+                )
+                return
+            }
+        }
+
+        // A parameter the provider declares itself is unreachable unless one of
+        // its own arguments mentions it — true whatever the key is, so this runs
+        // for a non-generic type too.
+        for provider in Self.providerSignatures(of: declaration) where !provider.genericParameters.isEmpty {
+            let scope = Set(genericParameters + provider.genericParameters)
+            let bound = Set(provider.parameters.flatMap {
+                $0.type.mentionedGenericParameters(in: scope)
+            })
+            let unbound = provider.genericParameters.filter { !bound.contains($0) }
+            guard !unbound.isEmpty else {
+                continue
+            }
             context.zerkError(
-                node,
-                declaration.attributes.hasAttribute(named: ZerkMacroNames.singletonAttributeName)
-                    ? GenericRefusal.singleton(type: declaration.nameText)
-                    : GenericRefusal.injectableType(named: declaration.nameText,
-                                                    parameters: genericParameters)
+                provider.node,
+                GenericRefusal.unboundProviderParameters(on: declaration.nameText,
+                                                         provider: provider.name,
+                                                         parameters: unbound)
             )
             return
+        }
+
+        if !genericParameters.isEmpty {
+            if declaration.attributes.hasAttribute(named: ZerkMacroNames.singletonAttributeName) {
+                context.zerkError(node, GenericRefusal.singleton(type: declaration.nameText))
+                return
+            }
+            // A written key erases the type's parameters, so every provider has
+            // to recover them from its own arguments. The build plugin settles
+            // this per resolution; the same answer is decidable from this
+            // declaration alone, so it is reported here too.
+            //
+            // `parameterized: true` is the exception: there the key *carries* the
+            // parameters rather than erasing them, so nothing has to recover
+            // them and the check does not apply.
+            for attribute in injectableAttributes {
+                guard let key = attribute.genericArgumentDisplayKeys.first else {
+                    continue
+                }
+                if attribute.parameterizedArgument.isTrue {
+                    guard key.hasPrefix("any ") else {
+                        context.zerkError(
+                            attribute,
+                            GenericRefusal.parameterizedNeedsExistentialKey(
+                                type: declaration.nameText, key: key)
+                        )
+                        return
+                    }
+                    continue
+                }
+                for provider in Self.providerSignatures(of: declaration) {
+                    let scope = Set(genericParameters + provider.genericParameters)
+                    let bound = Set(provider.parameters.flatMap {
+                        $0.type.mentionedGenericParameters(in: scope)
+                    })
+                    let unbound = genericParameters.filter { !bound.contains($0) }
+                    guard !unbound.isEmpty else {
+                        continue
+                    }
+                    context.zerkError(
+                        provider.node,
+                        GenericRefusal.unboundKeyParameters(on: declaration.nameText,
+                                                            key: key,
+                                                            provider: provider.name,
+                                                            parameters: unbound)
+                    )
+                    return
+                }
+            }
         }
 
         for attribute in injectableAttributes {

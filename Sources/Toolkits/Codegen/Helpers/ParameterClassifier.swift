@@ -17,14 +17,18 @@ struct ParameterClassifier {
     /// The provider `inject()` calls, per key — the only one a dependency may
     /// be resolved through. A key whose providers were ambiguous is absent, and
     /// parameters of that type fall back to **E**.
-    let primaryResolutions: [String: ProviderResolution]
+    ///
+    /// A ``KeyIndex`` rather than a dictionary, so a dependency can also be
+    /// answered by a generic registration covering its family. With none
+    /// registered the two are the same lookup.
+    let primaryResolutions: KeyIndex<ProviderResolution>
 
     /// Parametric values by `"key|name"`. A value is matched by name, so it
     /// cannot be found through `primaryResolutions` — but building one is a
     /// provider's job, so it needs a resolution to recurse into.
     let parametricResolutions: [String: ProviderResolution]
 
-    init(values: [InjectableValueRecord], primaryResolutions: [String: ProviderResolution]) {
+    init(values: [InjectableValueRecord], primaryResolutions: KeyIndex<ProviderResolution>) {
         self.values = values
         self.primaryResolutions = primaryResolutions
         self.parametricResolutions = Dictionary(
@@ -68,7 +72,7 @@ struct ParameterClassifier {
 
             if isExplicit,
                injectableValue(matching: parameter) == nil,
-               primaryResolutions[parameter.typeKey] == nil,
+               primaryResolutions[parameter] == nil,
                !visiting.contains(parameter.typeKey) {
                 // Marked, but nothing in the module can satisfy it. Reported
                 // against the parameter; a cycle is excluded because it is
@@ -129,7 +133,7 @@ struct ParameterClassifier {
 
             guard
                 !visiting.contains(parameter.typeKey),
-                let dependency = primaryResolutions[parameter.typeKey]
+                let dependency = primaryResolutions[parameter]
             else {
                 classified.append(ClassifiedParameter(parameter: parameter, binding: .external))
                 continue
@@ -207,6 +211,11 @@ struct ParameterClassifier {
     /// name match — the name match is what keeps two `String` values from
     /// being interchangeable.
     func injectableValue(matching parameter: ParameterRecord) -> InjectableValueRecord? {
+        // Same reasoning as `KeyIndex[parameter]`: a bare generic parameter is
+        // not a key, so a value that happens to be typed `E` must not answer it.
+        guard !parameter.isBareGenericParameter else {
+            return nil
+        }
         let matches = values.filter { value in
             value.typeKey == parameter.typeKey && value.name == parameter.name
         }

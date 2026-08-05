@@ -235,3 +235,105 @@ private func resetFixtureState() {
     LiveUserService.factoryCount = 0
     SeededToken.factoryCount = 0
 }
+
+// MARK: - Generic injectables
+
+/// Serialized for the same reason as the suite above: two cases assert on
+/// `CodecCounter.builds`, a shared record of which specializations were
+/// constructed, and it races when they run concurrently.
+@Suite("Generic injection", .serialized)
+struct GenericInjectionTests {
+
+    @Test("a generic key resolves per specialization")
+    func resolvesPerSpecialization() {
+        CodecCounter.builds = []
+
+        let strings: Repository<String> = Zerk<Repository<String>>.inject()
+        let ints: Repository<Int> = Zerk<Repository<Int>>.inject()
+
+        // Distinct specializations, each built through its own chain.
+        #expect(type(of: strings.codec) == Codec<String>.self)
+        #expect(type(of: ints.codec) == Codec<Int>.self)
+        #expect(CodecCounter.builds == ["String", "Int"])
+    }
+
+    @Test("a generic member resolves its dependencies without arguments")
+    func resolvesDependenciesUnaided() {
+        // `Repository` names a `Codec<Element>` and a `Logger`, and neither is
+        // passed here: one resolves through the shape of its own key, the other
+        // through an ordinary concrete one. Both loggers are freshly built,
+        // since `Logger` is not a singleton in these fixtures — what is under
+        // test is that the chain ran at all.
+        CodecCounter.builds = []
+
+        let repository: Repository<String> = Zerk<Repository<String>>.inject()
+
+        #expect(CodecCounter.builds == ["String"])
+        #expect(repository.logger.serial > 0)
+        #expect(repository.codec.logger.serial > 0)
+    }
+
+    @Test("a concrete consumer resolves a specialization it never registered")
+    func concreteConsumerResolvesASpecialization() {
+        // Nothing registers `Repository<String>`; matching it to `Repository<#0>`
+        // is what makes this resolve at all.
+        let feed: StringFeed = Zerk<StringFeed>.inject()
+        #expect(type(of: feed.repository.codec) == Codec<String>.self)
+    }
+
+    @Test("the named member is reachable directly, like any other")
+    func namedMemberIsReachable() {
+        let codec: Codec<Bool> = Zerk<Codec<Bool>>.codec()
+        #expect(type(of: codec) == Codec<Bool>.self)
+    }
+}
+
+@Suite("Generic member, concrete key")
+struct ErasedGenericInjectionTests {
+
+    @Test("the member infers its parameter from the argument")
+    func inferredFromArgument() {
+        let report: any Describing = Zerk<any Describing>.inject(42)
+        #expect(report.describedValue == "42")
+        #expect(report is ValueReport<Int>)
+    }
+
+    @Test("each call may erase a different specialization")
+    func differentSpecializationsPerCall() {
+        #expect(Zerk<any Describing>.inject("hi") is ValueReport<String>)
+        #expect(Zerk<any Describing>.inject(true) is ValueReport<Bool>)
+    }
+
+    @Test("the key is concrete, so it is still interjectable", .zerk)
+    func stillInterjectable() {
+        // A generic *key* has no point yet. This one does, because the point
+        // hangs off the key and this key is `any Describing`.
+        #Interject<any Describing>(with: ValueReport(0))
+        #expect(Zerk<any Describing>.inject(42).describedValue == "0")
+    }
+}
+
+/// No `@available` needed, and swift-testing would reject one: the package's
+/// macOS minimum is 14, above the 13 a parameterized existential requires.
+@Suite("Parameterized existential key")
+struct ParameterizedKeyInjectionTests {
+
+    @Test("the key carries the specialization, rather than erasing it")
+    func keyCarriesTheSpecialization() {
+        let pair: any Pairing<Int, String> = Zerk<any Pairing<Int, String>>.inject(1, "a")
+        #expect(pair.described == "1|a")
+        // Statically `any Pairing<Int, String>`, not a bare `any Pairing`: the
+        // associated types survive into the key.
+        let first: Int = 1
+        #expect(type(of: pair) == Pair<Int, String>.self)
+        #expect(first == 1)
+    }
+
+    @Test("different specializations are different keys")
+    func specializationsAreDistinctKeys() {
+        let ints: any Pairing<Int, Int> = Zerk<any Pairing<Int, Int>>.inject(1, 2)
+        let mixed: any Pairing<String, Bool> = Zerk<any Pairing<String, Bool>>.inject("x", true)
+        #expect(ints.described == "1|2")
+        #expect(mixed.described == "x|true")
+    }
+}

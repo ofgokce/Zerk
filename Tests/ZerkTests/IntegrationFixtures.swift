@@ -398,3 +398,100 @@ final class AuditTrail {
         self.label = label
     }
 }
+
+// MARK: - Generic injectables
+//
+// Registered under their shape (`Codec<#0>`, `Repository<#0>`), emitted as
+// members of an unconstrained `extension Zerk` that bind `Injectable` per call.
+// The counters prove specializations are genuinely distinct at runtime rather
+// than one erased instance handed out twice.
+
+/// The build counter cannot live on `Codec` itself: static stored properties
+/// are illegal in a generic type, which is the same fact that makes a generic
+/// `@Singleton` impossible.
+enum CodecCounter {
+    nonisolated(unsafe) static var builds: [String] = []
+}
+
+@Injectable
+struct Codec<Element> {
+    let logger: Logger
+
+    @InjectableProviding
+    init(logger: Logger) {
+        self.logger = logger
+        CodecCounter.builds.append(String(describing: Element.self))
+    }
+}
+
+@Injectable
+struct Repository<Element> {
+    let codec: Codec<Element>
+    let logger: Logger
+
+    @InjectableProviding
+    init(codec: Codec<Element>, logger: Logger) {
+        self.codec = codec
+        self.logger = logger
+    }
+}
+
+/// A concrete consumer naming one specialization. Nothing registers
+/// `Repository<String>` — matching it to `Repository<#0>` is what turns this
+/// parameter from caller-supplied into resolved.
+@Injectable
+struct StringFeed {
+    let repository: Repository<String>
+
+    @InjectableProviding
+    init(repository: Repository<String>) {
+        self.repository = repository
+    }
+}
+
+// MARK: - A generic type under a concrete key
+//
+// The other generic mode: `any Describing` erases X, so the member recovers it
+// from its own argument and the result is erased into the key. The key stays
+// concrete, so unlike a generic key this one keeps its interjection point.
+
+protocol Describing {
+    var describedValue: String { get }
+}
+
+@Injectable<any Describing>
+struct ValueReport<X>: Describing {
+    let value: X
+    var describedValue: String { "\(value)" }
+
+    @InjectableProviding
+    init(_ value: X) {
+        self.value = value
+    }
+}
+
+// MARK: - A parameterized existential key
+//
+// `parameterized: true` applies the type's own parameters to the protocol's
+// primary associated types, so the key is `any Pairing<A, B>` rather than a
+// plain erased `any Pairing`. Gated on iOS 16 / macOS 13, which is where
+// parameterized existentials arrived.
+
+protocol Pairing<A, B> {
+    associatedtype A
+    associatedtype B
+    var described: String { get }
+}
+
+@Injectable<any Pairing>(parameterized: true)
+struct Pair<A, B>: Pairing {
+    let first: A
+    let second: B
+    var described: String { "\(first)|\(second)" }
+
+    @InjectableProviding
+    init(_ first: A, _ second: B) {
+        self.first = first
+        self.second = second
+    }
+}

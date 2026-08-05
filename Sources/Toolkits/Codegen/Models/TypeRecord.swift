@@ -30,4 +30,16 @@ struct TypeRecord {
     var initializers: [InitializerRecord]
     let isSingleton: Bool
     var isolation: ProviderIsolation = .nonisolated
+    /// The type's own generic parameters, in declaration order — `["K", "V"]`
+    /// for `Store<K, V>`, empty for everything else.
+    ///
+    /// Names only. The constraints are deliberately not captured: a member
+    /// emitted as `where Injectable == Codec<E>` re-derives `E: Codable` from
+    /// the same-type requirement, and a specialization violating it still fails
+    /// at the call site. Recording them would be work with nothing reading it.
+    var genericParameters: [String] = []
+    /// Keys this type claims with `@Injectable<any P>(parameterized: true)`, i.e.
+    /// the ones spelled `any P<X, Y>` and gated on the availability of
+    /// parameterized existentials.
+    var parameterizedKeys: [String: AttributeLocation] = [:]
 }
