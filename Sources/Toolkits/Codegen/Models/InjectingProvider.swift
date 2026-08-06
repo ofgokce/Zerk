@@ -37,6 +37,9 @@ struct InjectingProvider {
     /// The factory's *own* generic parameters. See
     /// ``InitializerRecord/genericParameters``.
     var genericParameters: [String] = []
+    /// Requirements on those parameters, as written. See
+    /// ``InitializerRecord/genericConstraints``.
+    var genericConstraints: [String] = []
     /// The generated member's name, already resolved. Every way of arriving at
     /// one is settled at collection rather than at emission — see
     /// ``ProviderMemberName``.

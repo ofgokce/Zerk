@@ -37,13 +37,13 @@ The member takes the declaration's own name. Two arguments change that, and they
 |---|---|---|
 | `@Injectable var urlSession: URLSession` | `URLSession` | `urlSession` |
 | `@Injectable<URLSessionProtocol> var urlSession: URLSession` | `URLSessionProtocol` | `urlSession` |
-| `@Injectable(typeNamed: true) var dummyName: URLSession` | `URLSession` | `uRLSession` |
+| `@Injectable(typeNamed: true) var dummyName: URLSession` | `URLSession` | `urlSession` |
 | `@Injectable(name: "mainSession") var dummyName: URLSession` | `URLSession` | `mainSession` |
-| `@Injectable<URLSessionProtocol>(typeNamed: true) var dummyName: URLSession` | `URLSessionProtocol` | `uRLSession` |
+| `@Injectable<URLSessionProtocol>(typeNamed: true) var dummyName: URLSession` | `URLSessionProtocol` | `urlSession` |
 
 `typeNamed:` reads the **produced type**, not the key — the last row is named from `URLSession`, not from `URLSessionProtocol`. `name:` takes a string literal; Zerk reads syntax and cannot evaluate an expression or an interpolation.
 
-`typeNamed:` lowercases the first character and nothing else — `ApiService` gives `apiService`, and a type whose name opens on an acronym gives `uRLSession`. Where that reads badly, `name:` says what you mean.
+An acronym that begins the name is lowercased whole, per the Swift API Design Guidelines: `URLSession` gives `urlSession`, `APIService` gives `apiService`, `UTF8Decoder` gives `utf8Decoder`. The same rule names every member Zerk derives from a type — see [Member naming](../Getting%20Started/Terminology.md#member-naming).
 
 ## Functions, including generic ones
 

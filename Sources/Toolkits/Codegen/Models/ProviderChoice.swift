@@ -50,6 +50,19 @@ enum ProviderChoice {
         }
     }
 
+    /// Requirements on those parameters, as written. See
+    /// ``InitializerRecord/genericConstraints``.
+    var genericConstraints: [String] {
+        switch self {
+        case .explicit(let provider):
+            return provider.genericConstraints
+        case .implicit(let initializer):
+            return initializer.genericConstraints
+        case .imported, .value:
+            return []
+        }
+    }
+
     /// Whether the provider is *read* rather than called, which decides whether
     /// the emitter appends `()` to the construction expression.
     var isPropertyShaped: Bool {

@@ -643,8 +643,8 @@ final class SourceCollector: SyntaxVisitor {
                 // its signature those are in scope alongside the type's. Read
                 // with the type's scope alone, `z: Z` would look like a
                 // dependency on a module type named `Z`.
-                let initializerGenerics = initializer.genericParameterClause?
-                    .parameters.map { $0.name.text } ?? []
+                let initializerGenerics = initializer.declaredGenericParameters
+                let initializerRequirements = initializer.declaredGenericRequirements
                 let parameters = initializer.signature.parameterClause.parameters
                     .parameterRecords(locatedBy: { self.location(for: $0) },
                                       genericScope: scope.union(initializerGenerics))
@@ -667,7 +667,8 @@ final class SourceCollector: SyntaxVisitor {
                         effects: effects,
                         location: initializerLocation,
                         isolation: initializerIsolation,
-                        genericParameters: initializerGenerics
+                        genericParameters: initializerGenerics,
+                        genericConstraints: initializerRequirements
                     )
                 )
 
@@ -705,6 +706,7 @@ final class SourceCollector: SyntaxVisitor {
                             isolation: initializerIsolation,
                             isPrimary: attribute.primaryArgument.isTrue,
                             genericParameters: initializerGenerics,
+                            genericConstraints: initializerRequirements,
                             memberName: memberName
                         )
                     )
@@ -728,8 +730,8 @@ final class SourceCollector: SyntaxVisitor {
             // initializer may. Whether each one can actually be inferred is a
             // question about the whole signature, so `ProviderResolver` asks it
             // once for every provider rather than each collection site guessing.
-            let functionGenerics = function.genericParameterClause?
-                .parameters.map { $0.name.text } ?? []
+            let functionGenerics = function.declaredGenericParameters
+            let functionRequirements = function.declaredGenericRequirements
 
             let returnType = function.signature.returnClause?.type.trimmedDescription ?? ""
             // What `typeNamed:` names the member after: the type the factory
@@ -781,6 +783,7 @@ final class SourceCollector: SyntaxVisitor {
                     isolation: functionStated.resolved(default: typeIsolation),
                     isPrimary: attribute.primaryArgument.isTrue,
                     genericParameters: functionGenerics,
+                    genericConstraints: functionRequirements,
                     memberName: memberName
                 )
 
@@ -1412,13 +1415,18 @@ final class SourceCollector: SyntaxVisitor {
             ))
             return
         }
-        let ownGenerics = node.genericParameterClause?.parameters.map { $0.name.text } ?? []
+        let ownGenerics = node.declaredGenericParameters
         collectInjectableDeclaration(
             node: Syntax(node),
             attributes: attributes,
             declaredName: node.name.text,
             producedType: returnType,
             genericParameters: ownGenerics,
+            // A declaration's parameters are the *key's*, so a constraint the
+            // produced type declares for itself is re-derived. One the function
+            // adds on top is not: `@Injectable func make<X: Hashable, Y>() ->
+            // Box<X, Y>` over a plain `Box<X, Y>` has nothing to re-derive it.
+            genericRequirements: node.declaredGenericRequirements,
             parameters: node.signature.parameterClause.parameters
                 .parameterRecords(locatedBy: { self.location(for: $0) },
                                   genericScope: genericScope.union(ownGenerics)),
@@ -1440,6 +1448,7 @@ final class SourceCollector: SyntaxVisitor {
                                               declaredName: String,
                                               producedType: TypeSyntax,
                                               genericParameters: [String],
+                                              genericRequirements: [String] = [],
                                               parameters: [ParameterRecord],
                                               effects: ProviderEffects,
                                               modifiers: DeclModifierListSyntax,
@@ -1530,6 +1539,7 @@ final class SourceCollector: SyntaxVisitor {
                 .resolved(default: ambientIsolation),
             isPrimary: false,
             genericParameters: [],
+            genericConstraints: genericRequirements,
             memberName: memberName
         )
 

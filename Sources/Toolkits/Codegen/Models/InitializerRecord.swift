@@ -25,4 +25,19 @@ struct InitializerRecord {
     /// type's can be bound by the return type. Anything the member adds has to
     /// arrive as an argument, since nothing else in the signature mentions it.
     var genericParameters: [String] = []
+    /// Requirements on the provider's *own* generic parameters, as written —
+    /// `["Z: Numeric"]` for `init<Z: Numeric>`.
+    ///
+    /// Carried for exactly the reason ``genericParameters`` is separate. The
+    /// type's constraints need no recording: `where Injectable == Codec<E>`
+    /// re-derives them, because the same-type requirement makes `Codec<E>` be
+    /// well-formed. Nothing re-derives these — `Z` appears nowhere in the return
+    /// type — so a member that dropped them would call an initializer whose
+    /// requirements it does not satisfy, and fail inside the generated file.
+    ///
+    /// Held as requirement text rather than as an inheritance clause because
+    /// that is the form the member emits: a parameter's `: Numeric` is sugar for
+    /// a `where` requirement, and the member already has a `where` clause to
+    /// join.
+    var genericConstraints: [String] = []
 }

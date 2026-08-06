@@ -118,6 +118,51 @@ struct Pair<X, Y> { init<Z>(x: X, y: Y, z: Z) { … } }
 // static func pair<X, Y, Z>(x: X, y: Y, z: Z) -> Pair<X, Y> where Injectable == Pair<X, Y>
 ```
 
+## Constraints
+
+You never restate the constraints written on the **type**. `where Injectable == Codec<E>`
+makes `Codec<E>` well-formed, and being well-formed *is* satisfying the type's own
+requirements — so they come back on their own, whatever form they were written in:
+
+```swift
+@Injectable struct Foo<A: Hashable, B> { … }             // identical
+@Injectable struct Bar<A, B> where A: Hashable { … }     // identical
+```
+
+Zerk reads parameter *names* only, so those two are indistinguishable by the time anything
+is emitted. Inline inheritance, composition (`A: Hashable & Codable`), associated-type
+requirements (`where A.Element: Hashable`) and cross-parameter ones (`where A.Element == B`)
+all survive the same way.
+
+A constraint on the **provider's own** parameters is different, and it is the same
+difference that governs inference: nothing in the return type mentions `Z`, so nothing
+binds it and nothing re-derives it either. Those are carried onto the member, verbatim:
+
+```swift
+@Injectable
+struct Adder<A: Hashable> {
+    @InjectableProviding
+    init<Z: Numeric>(a: A, z: Z) { … }
+}
+// static func adder<A, Z>(a: A, z: Z) -> Adder<A> where Injectable == Adder<A>, Z: Numeric
+```
+
+The key's binding and the provider's requirements share one `where` clause. A parameter's
+`: Numeric` and a written `where Z: Numeric` mean the same thing to Swift, so both arrive
+as requirements — and a requirement naming an associated type is copied exactly as you
+wrote it, since Zerk reads syntax and cannot resolve one:
+
+```swift
+@InjectableProviding
+init<Z: Collection>(z: Z) where Z.Element: Hashable { … }
+// static func assocProv<Z>(z: Z) -> AssocProv where Z: Collection, Z.Element: Hashable
+```
+
+The same applies to a constraint an `@Injectable` function adds beyond what its produced
+type declares — `@Injectable func makeBox<X: Hashable, Y>(…) -> Box<X, Y>` over a plain
+`Box<X, Y>` has nothing to re-derive `X: Hashable`, so the member and its forwarding thunk
+both carry it.
+
 The type's parameters come first, then the provider's own.
 
 The rule across all of these is Swift's own, reported at your declaration rather than in generated code: **every generic parameter the member declares must appear in its signature.** The return type supplies the ones a generic key carries; everything else has to arrive as an argument. A parameter nothing can infer is a build error. And because this key is concrete, it keeps its interjection point — unlike a generic key.

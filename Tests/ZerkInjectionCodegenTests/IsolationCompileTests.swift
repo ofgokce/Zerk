@@ -160,7 +160,7 @@ struct Swift5LanguageModeTests {
             settings: settings
         )
 
-        #expect(output.output.contains("@MainActor static func uICache(store: Storing = Zerk<Storing>.inject())"))
+        #expect(output.output.contains("@MainActor static func uiCache(store: Storing = Zerk<Storing>.inject())"))
         #expect(!output.usesIsolatedDefaultArguments)
     }
 

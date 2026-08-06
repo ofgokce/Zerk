@@ -95,11 +95,11 @@ The member takes the declaration's own name. Two arguments change that, and they
 |---|---|---|
 | `@Injectable var urlSession: URLSession` | `URLSession` | `urlSession` |
 | `@Injectable<URLSessionProtocol> var urlSession: URLSession` | `URLSessionProtocol` | `urlSession` |
-| `@Injectable(typeNamed: true) var dummyName: URLSession` | `URLSession` | `uRLSession` |
+| `@Injectable(typeNamed: true) var dummyName: URLSession` | `URLSession` | `urlSession` |
 | `@Injectable(name: "mainSession") var dummyName: URLSession` | `URLSession` | `mainSession` |
-| `@Injectable<URLSessionProtocol>(typeNamed: true) var dummyName: URLSession` | `URLSessionProtocol` | `uRLSession` |
+| `@Injectable<URLSessionProtocol>(typeNamed: true) var dummyName: URLSession` | `URLSessionProtocol` | `urlSession` |
 
-`typeNamed:` reads the **produced type**, not the key — the last row is named from `URLSession`, not from `URLSessionProtocol`. It lowercases the first character and nothing else, which is why a name opening on an acronym comes out `uRLSession`; where that reads badly, `name:` says what you mean. `name:` takes a string literal; Zerk reads syntax and cannot evaluate an expression or an interpolation.
+`typeNamed:` reads the **produced type**, not the key — the last row is named from `URLSession`, not from `URLSessionProtocol`. `name:` takes a string literal; Zerk reads syntax and cannot evaluate an expression or an interpolation.
 
 `typeNamed:` and `name:` exist on `@InjectableProviding` too, and mean the same thing there.
 

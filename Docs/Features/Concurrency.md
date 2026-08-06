@@ -37,6 +37,33 @@ final class ApiService: ApiServicing {
 
 The setting itself is `defaultActorIsolation` in [Settings](../Plugin/Settings.md); it must match the build setting, because if the two disagree Zerk infers the wrong isolation and the generated code will not compile.
 
+## How a provider throws
+
+Effects propagate up a chain and only ever widen — if anything a provider needs is `async` or throwing, the member built for it is too.
+
+`throws` and `rethrows` are kept apart, because collapsing them is not free. Widening `rethrows` to `throws` would force `try` on a call site passing a non-throwing closure, and a `try` needs a throwing context — so the widening would climb the *caller's* stack for no reason. A `rethrows` provider keeps `rethrows`:
+
+```swift
+@Injectable
+struct Mapper {
+    @InjectableProviding
+    init(transform: () throws -> Int) rethrows {}
+}
+
+// static func mapper(transform: () throws -> Int) rethrows -> Mapper
+// static func inject(transform: () throws -> Int) rethrows -> Mapper
+
+Zerk<Mapper>.inject(transform: { 1 })            // no `try` — the closure cannot throw
+try Zerk<Mapper>.inject(transform: aThrowingOne) // `try` only where it is earned
+```
+
+It widens to `throws` in the two places it must, and both are Swift's rules rather than Zerk's:
+
+- **Something else in the chain throws outright.** A `rethrows` provider with a dependency that `throws` yields a resolving variant that says `throws` — once anything throws unconditionally, so does the member. The explicit variant, which takes that dependency as a parameter rather than resolving it, keeps `rethrows`.
+- **Nothing is left to rethrow from.** Swift requires a `rethrows` function to have a throwing function parameter. If the closure resolves from the graph, `inject()` may take no parameters at all, so it says `throws`.
+
+A **typed** throw (`throws(MyError)`) widens to an untyped `throws`. The member would have to restate the error type, and the moment two providers in a chain name different ones there is no single type left to restate; the concrete error is still yours to catch.
+
 ## Effectful and cross-domain dependencies
 
 `await` cannot appear in a default argument at all. So a dependency whose resolution is effectful or crosses a domain is not exposed as a defaulted parameter — the member splits in two.

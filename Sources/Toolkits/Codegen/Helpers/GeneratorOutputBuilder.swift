@@ -74,6 +74,20 @@ struct GeneratorOutputBuilder {
         /// declares. Carried out rather than reported in place, because
         /// `wrapperPlan` runs many times per provider.
         var collisions: [BubbleResolver.Collision] = []
+
+        /// Narrowing `rethrows` happens here rather than at each use, because
+        /// `inject()`'s parameters are exactly this plan's: a provider's
+        /// throwing closure may have been resolved away into the subtree, and
+        /// `inject()` frequently ends up taking nothing at all.
+        init(parameters: [ParameterRecord],
+             argumentExpressions: [String],
+             effects: ProviderEffects,
+             collisions: [BubbleResolver.Collision] = []) {
+            self.parameters = parameters
+            self.argumentExpressions = argumentExpressions
+            self.effects = effects.resolved(forParameters: parameters)
+            self.collisions = collisions
+        }
     }
 
     /// One `@Singleton`'s shared instance, as it appears in `_$zerk_singletons`.
@@ -443,7 +457,9 @@ struct GeneratorOutputBuilder {
         let memberName = memberName(for: provider)
         let isolation = provider.isolation
         let allParameters = provider.provider.parameters
-        let ownEffects = provider.provider.effects
+        // `rethrows` only survives onto a signature that kept a throwing
+        // function parameter to rethrow from.
+        let ownEffects = provider.provider.effects.resolved(forParameters: allParameters)
         let keyText = displayName(for: injectableKey)
         let access = exportedAccessPrefix(for: provider, injectableKey: injectableKey)
 
@@ -527,7 +543,10 @@ struct GeneratorOutputBuilder {
 
         // Resolving variant: same name, without the body-resolved parameters.
         let resolvingParameters = classification.resolvingVariantParameters
-        let resolvingEffects = ownEffects.merged(with: classification.dependencyEffects)
+        let resolvingEffects = ownEffects
+            .merged(with: classification.dependencyEffects)
+            .resolved(forParameters: resolvingParameters)
+
         let resolvingSignature = parameterClause(parameters: resolvingParameters, defaults: defaults)
         let forwardedArguments = classification.parameters.map { classified -> String in
             let expression: String
@@ -728,7 +747,7 @@ struct GeneratorOutputBuilder {
         let defaults = classification.defaultExpressions
 
         return SingletonStorage(
-            memberName: provider.typeName.lowerCamelCased,
+            memberName: provider.typeName.memberNameForType,
             typeName: provider.singletonStorageTypeName,
             construction: "\(builderConstruction(for: provider))(\(builderArguments(provider.provider.parameters, useParameterNames: false, defaults: defaults)))",
             isolation: provider.isolation
@@ -913,8 +932,15 @@ struct GeneratorOutputBuilder {
         let call = isProperty ? reference : "\(reference)(\(arguments))"
         let prefix = provider.isolation.actorName.map { "@\($0) " } ?? ""
         let returns = provider.returnTypeName ?? displayName(for: resolution.injectableKey)
+        // The thunk calls the declaration directly, so it needs the declaration's
+        // requirements as much as the member does — and it has no `Injectable`
+        // to re-derive any of them from, not being inside the extension.
+        let constraints = provider.genericConstraints
+        let whereClause = constraints.isEmpty
+            ? ""
+            : " where \(constraints.joined(separator: ", "))"
         return [
-            "\(prefix)private func \(thunk)\(genericClause)\(signature)\(provider.effects.declarationSuffix) -> \(returns) { \(provider.effects.callPrefix)\(call) }"
+            "\(prefix)private func \(thunk)\(genericClause)\(signature)\(provider.effects.declarationSuffix) -> \(returns)\(whereClause) { \(provider.effects.callPrefix)\(call) }"
         ]
     }
 
@@ -1505,21 +1531,33 @@ struct GeneratorOutputBuilder {
     /// Empty strings for a concrete key, so every emission site interpolates
     /// them unconditionally and concrete output stays byte-identical.
     ///
-    /// The constraints written on the type — `struct Codec<E: Codable>` — are
-    /// deliberately *not* reproduced. `where Injectable == Codec<E>` re-derives
+    /// The constraints written on the *type* — `struct Codec<E: Codable>` — are
+    /// deliberately not reproduced. `where Injectable == Codec<E>` re-derives
     /// them from the same-type requirement, and a specialization that violates
     /// one still fails at the call site with the constraint's own message.
+    ///
+    /// The constraints written on the *provider* are reproduced, because that
+    /// argument does not reach them: `init<Z: Numeric>` puts `Z` nowhere in the
+    /// return type, so nothing binds it and nothing re-derives it. They are
+    /// emitted as `where` requirements, which is what a parameter's inheritance
+    /// clause means anyway and composes with the binding already there.
     private func genericClauses(for provider: ProviderResolution,
                                 injectableKey: String) -> (parameters: String, whereClause: String) {
         guard provider.memberIsGeneric else {
             return ("", "")
         }
+        // Only a generic key needs binding. A concrete one is already bound by
+        // the extension header, and the member is an ordinary generic method
+        // whose parameters come from its arguments.
+        var requirements: [String] = []
+        if provider.keyIsGeneric {
+            requirements.append("Injectable == \(displayName(for: injectableKey))")
+        }
+        requirements += provider.provider.genericConstraints
+
         return (
             "<\(provider.memberGenericParameters.joined(separator: ", "))>",
-            // Only a generic key needs binding. A concrete one is already bound
-            // by the extension header, and the member is an ordinary generic
-            // method whose parameters come from its arguments.
-            provider.keyIsGeneric ? " where Injectable == \(displayName(for: injectableKey))" : ""
+            requirements.isEmpty ? "" : " where \(requirements.joined(separator: ", "))"
         )
     }
 

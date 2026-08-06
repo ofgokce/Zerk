@@ -95,6 +95,36 @@ an initializer builds, or the declaration — or after whatever `name:`/`typeNam
 Every one opens with an interjection lookup and then constructs. Members are `internal`
 unless the key was exported with `public: true`.
 
+### Member naming
+
+When the name comes from a *type* rather than from a declaration — an initializer-backed
+member, `typeNamed:`, or a singleton's storage — the type name is converted to an
+identifier by two rules.
+
+A qualification is dropped, because it says where a type lives rather than what it is
+called, and `keychain.Store` is not an identifier. And an acronym that begins the name is
+lowercased **whole**, per the Swift API Design Guidelines:
+
+| type | member |
+|---|---|
+| `ApiService` | `apiService` |
+| `URLSession` | `urlSession` |
+| `HTTPClient` | `httpClient` |
+| `UTF8Decoder` | `utf8Decoder` |
+| `URL` | `url` |
+| `Keychain.Store` | `store` |
+
+The last capital of a leading run usually begins the next word — `URLSession` is `URL` +
+`Session`, so the `S` survives. That does not hold when the run is the whole name (`URL`),
+when a digit follows it (`UTF8Decoder`), or when a single letter follows rather than a
+word, which is how a plural stays intact (`URLs` gives `urls`).
+
+That last one is a heuristic and the single place the rule cannot be exact: nothing in the
+spelling separates the plural `URLs` from the two words of `URLId`. It resolves in favour
+of the plural, so a type genuinely spelled `URLId` gives `urlid`. Name the member yourself
+with [`@Injectable(name:)`](../Macros%20and%20Markers/Injectable.md) if a type lands on the
+wrong side of it.
+
 ```swift
 extension Zerk<ApiServicing> {
     nonisolated static func apiService(baseURL: String = Zerk<String>.baseURL) -> ApiServicing {
