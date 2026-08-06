@@ -250,7 +250,18 @@ struct GeneratorOutputBuilder {
 
         // A global `@Injectable` declaration is reached through a private
         // forwarding function, for the same reason a referenced value is.
+        //
+        // Deduped by thunk name: a declaration registered under several keys has
+        // one resolution per key but is still one declaration, and emitting its
+        // thunk per key is `invalid redeclaration` in the generated file.
         for resolution in resolutions {
+            guard case .explicit(let provider) = resolution.provider,
+                  case .declaration(_, _, let thunk?) = provider.kind else {
+                continue
+            }
+            guard emittedThunks.insert(thunk).inserted else {
+                continue
+            }
             thunkLines += declarationThunkLines(for: resolution)
         }
 
@@ -726,10 +737,17 @@ struct GeneratorOutputBuilder {
 
         let defaults = classification.defaultExpressions
 
+        // Every other provider is *called*, so the parentheses are
+        // unconditional there. An `@Injectable` static property is read, and
+        // `Container.session()` calls a property that is not a function.
+        let construction = provider.provider.isPropertyShaped
+            ? builderConstruction(for: provider)
+            : "\(builderConstruction(for: provider))(\(builderArguments(provider.provider.parameters, useParameterNames: false, defaults: defaults)))"
+
         return SingletonStorage(
             memberName: provider.typeName.memberNameForType,
             typeName: provider.singletonStorageTypeName,
-            construction: "\(builderConstruction(for: provider))(\(builderArguments(provider.provider.parameters, useParameterNames: false, defaults: defaults)))",
+            construction: construction,
             isolation: provider.isolation
         )
     }

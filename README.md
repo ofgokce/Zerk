@@ -1,9 +1,9 @@
 # Zerk
 
 [![Swift Package Manager](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg?style=flat)](https://github.com/apple/swift-package-manager)
+[![Swift Version](https://img.shields.io/badge/Swift-6.2-F16D39.svg?style=flat)](https://developer.apple.com/swift)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-iOS%2013%2B%20%7C%20macOS%2014%2B%20%7C%20macCatalyst%2013%2B%20%7C%20watchOS%206%2B%20%7C%20tvOS%2013%2B%20%7C%20visionOS%201%2B-lightgrey.svg)](#requirements)
-[![Swift Version](https://img.shields.io/badge/Swift-6.2-F16D39.svg?style=flat)](https://developer.apple.com/swift)
 
 Zerk is a compile-time dependency injection framework for Swift. Instead of a runtime container, it combines Swift macros with a build-tool plugin that scans your module's source, resolves the dependency graph during the build, and generates plain static factory code on a `Zerk<Key>` namespace. There is nothing to register at runtime, resolution failures are build errors with file/line locations, and injected code is ordinary Swift you can step through.
 
@@ -13,7 +13,7 @@ Generic types are registered like any other: `@Injectable struct Cache<E>` makes
 
 ## 📖 Documentation
 
-Full documentation lives in **[Docs/](Docs/TableOfContents.md)**.
+**[See full documentation](Docs/TableOfContents.md)**
 
 | | |
 |---|---|
@@ -46,6 +46,18 @@ targets: [
 ```
 
 See [Installation](Docs/Getting%20Started/Installation.md) for Xcode projects, the three vended products, and targets in Swift 5 language mode.
+
+### Important Notice
+
+When adding Zerk as a dependency to an Xcode project, Xcode presents a dialog asking you to select which modules should be added to your targets.
+
+Although Zerk's package manifest exposes only `Zerk`, `ZerkTesting`, and `ZerkPlugin` as products, the dialog may also show `ZerkCodegen` as a module that can be added to a target.
+
+`ZerkCodegen` is an executable target used internally by `ZerkPlugin`. It is **not** an independent module and should not be added directly as a dependency to any target.
+
+Do **not** select a target for `ZerkCodegen`.
+
+Instead, add `ZerkPlugin` as a build tool plugin to the target for which you want to generate the dependency graph. You can do this under the target's **Build Phases**.
 
 ## Quick start
 
@@ -143,18 +155,6 @@ See [How it works](Docs/Plugin/HowItWorks.md) and [Limitations](Docs/Plugin/Limi
 ## Migrating from Zerk 1.x
 
 Zerk 2 is a ground-up replacement for the original runtime container: registration moved from `Zerk.store.singleton(...)` calls to source annotations, resolution moved from `Zerk.standardStorage.restore()` to generated members, and what used to fail at runtime now fails during the build. Migrate one module at a time — see [Migration](Docs/Getting%20Started/Migration.md).
-
-## Contributing
-
-The package builds with `swift build`. To run the tests:
-
-```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
-```
-
-The `DEVELOPER_DIR` prefix is needed when `xcode-select` points at the Command Line Tools, whose swift-testing install is incomplete; a bare `swift test` then fails to launch with a missing `Testing` module or `lib_TestingInterop.dylib`.
-
-Isolation and effects cannot be verified by comparing generated strings — text can look right and still not compile. `Tests/ZerkInjectionCodegenTests` therefore includes a compile harness that runs the codegen over a fixture and type-checks the result with a real `swiftc`, across both language modes and both `SWIFT_DEFAULT_ACTOR_ISOLATION` values. Add a case there for anything touching isolation, effects, or `sending`.
 
 ## License
 

@@ -302,4 +302,229 @@ struct InjectableDeclarationTests {
         #expect(output.contains("var `urlSession`: Void {}"))
         #expect(output.contains("if let interjected = _$interjected(for: \\.`urlSession`)"))
     }
+
+    // MARK: - @Singleton
+
+    @Test("a declaration may be a singleton")
+    func declarationCanBeASingleton() throws {
+        // Without this the marker was silently inert: the member called the
+        // thunk on every resolution, so `@Singleton` bought a fresh instance
+        // each time and said nothing about it.
+        let source = """
+        final class Session { init() {} }
+
+        @Singleton
+        @Injectable
+        var urlSession: Session { Session() }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(result.diagnostics.isEmpty)
+        // Stored once, built through the thunk. Storage is named after the
+        // *produced type*, not the declaration — it is per type, which is what
+        // lets every key claiming it read the same instance.
+        #expect(result.output.output.contains(
+            "nonisolated(unsafe) static let session: Session = _$zerk_provider_urlSession()"))
+        // The lookup stays in the getter, so a double is consulted per read.
+        #expect(result.output.output.contains("return _$zerk_singletons.session"))
+        #expect(result.output.output.contains("if let interjected = _$interjected(for: \\.`urlSession`)"))
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)")
+    }
+
+    @Test("a static member declaration may be a singleton")
+    func staticMemberCanBeASingleton() throws {
+        let source = """
+        final class Session { init() {} }
+
+        enum Container {
+            @Singleton
+            @Injectable
+            static var session: Session { Session() }
+        }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(result.diagnostics.isEmpty)
+        // A static member needs no thunk; storage calls it by its qualified path.
+        #expect(result.output.output.contains(
+            "nonisolated(unsafe) static let session: Session = Container.session"))
+        #expect(!result.output.output.contains("_$zerk_provider"))
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)")
+    }
+
+    @Test("one instance is shared across every key the declaration claims")
+    func singletonDeclarationIsSharedAcrossKeys() throws {
+        let source = """
+        protocol Sessioning: AnyObject {}
+        protocol Caching: AnyObject {}
+        final class Session: Sessioning, Caching { init() {} }
+
+        @Singleton
+        @Injectable<Sessioning>
+        @Injectable<Caching>
+        var session: Session { Session() }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(result.diagnostics.isEmpty)
+        // One storage declaration, read by both keys' members.
+        #expect(result.output.output.contains("static let session: Session ="))
+        #expect(result.output.output.contains("extension Zerk<Sessioning>"))
+        #expect(result.output.output.contains("extension Zerk<Caching>"))
+        // And exactly one thunk, however many keys resolve through it.
+        #expect(result.output.output.components(
+            separatedBy: "private func _$zerk_provider_session").count - 1 == 1)
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)")
+    }
+
+    @Test("a singleton declaration keeps every other singleton constraint", arguments: [
+        // An external argument cannot be supplied to storage built once.
+        ("@Singleton\n@Injectable(typeNamed: true)\nfunc make(port: Int) -> Session { Session() }",
+         "cannot accept external arguments"),
+        // Storage is initialized synchronously.
+        ("@Singleton\n@Injectable\nvar session: Session { get async { Session() } }",
+         "cannot be async or throwing"),
+        // No static stored property exists to hold one per specialization.
+        ("@Singleton\n@Injectable(typeNamed: true)\nfunc make<X>(x: X) -> Box<X> { Box() }",
+         "@Singleton cannot be applied to the generic type"),
+    ])
+    func singletonConstraintsStillApply(source: String, message: String) {
+        let result = CompileFixture.generateWithResolution(source: """
+        final class Session { init() {} }
+        final class Box<X> { init() {} }
+
+        \(source)
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains(message)
+        })
+    }
+
+    // MARK: - Isolation
+
+    @Test("a declaration's isolation reaches its member and its thunk")
+    func declarationIsolationIsMirrored() throws {
+        // Without this the member said `nonisolated` while calling a
+        // `@MainActor` global, which does not compile: "main actor-isolated var
+        // 'session' can not be referenced from a nonisolated context".
+        let source = """
+        final class Session { init() {} }
+
+        @MainActor
+        @Injectable
+        var session: Session { Session() }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(result.diagnostics.isEmpty)
+        #expect(result.output.output.contains("@MainActor static var session: Session {"))
+        // The thunk calls the declaration directly, so it needs the isolation too.
+        #expect(result.output.output.contains(
+            "@MainActor private func _$zerk_provider_session() -> Session { session }"))
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)")
+    }
+
+    @Test("an isolated function declaration is mirrored too")
+    func isolatedFunctionDeclaration() throws {
+        let source = """
+        final class Store { init() {} }
+
+        @MainActor
+        @Injectable(typeNamed: true)
+        func makeStore() -> Store { Store() }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(result.diagnostics.isEmpty)
+        #expect(result.output.output.contains("@MainActor static var store: Store {"))
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)")
+    }
+
+    @Test("@Isolated states isolation the plugin cannot see")
+    func isolatedMarkerOnADeclaration() {
+        // A custom global actor whose name does not end in `Actor` is invisible
+        // to the attribute heuristic — which is the case `@Isolated` exists for,
+        // and it has to work here as it does on a type.
+        let output = CompileFixture.generate(source: """
+        final class Session { init() {} }
+
+        @Isolated<DataStore>
+        @DataStore
+        @Injectable
+        var session: Session { Session() }
+        """)
+
+        #expect(output.contains("@DataStore static var session: Session {"))
+        #expect(output.contains("@DataStore private func _$zerk_provider_session()"))
+    }
+
+    @Test("@Isolated contradicting nonisolated is reported on a declaration")
+    func contradictoryIsolationIsReported() {
+        let result = CompileFixture.generateWithResolution(source: """
+        final class Session { init() {} }
+
+        @Isolated<DataStore>
+        @Injectable
+        nonisolated var session: Session { Session() }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error
+                && $0.message.contains("@Isolated<DataStore> contradicts the 'nonisolated' modifier")
+        })
+    }
+
+    @Test("nonisolated opts a declaration out of the ambient default")
+    func nonisolatedUnderAmbientMainActor() {
+        var settings = ZerkSettings.default
+        settings.defaultActorIsolation = .globalActor("MainActor")
+
+        let output = CompileFixture.generate(source: """
+        final class Session { init() {} }
+
+        @Injectable
+        nonisolated var session: Session { Session() }
+        """, settings: settings)
+
+        #expect(output.contains("nonisolated static var session: Session {"))
+    }
+
+    @Test("isolation and @Singleton combine on one declaration")
+    func isolatedSingletonDeclaration() {
+        // Global-actor isolation already protects the storage, so it gets no
+        // `nonisolated(unsafe)` escape hatch.
+        let output = CompileFixture.generate(source: """
+        final class Cache { init() {} }
+
+        @MainActor
+        @Singleton
+        @Injectable
+        var cache: Cache { Cache() }
+        """)
+
+        #expect(output.contains("@MainActor static let cache: Cache = _$zerk_provider_cache()"))
+        #expect(output.contains("@MainActor static var cache: Cache {"))
+        #expect(!output.contains("nonisolated(unsafe) static let cache"))
+    }
 }

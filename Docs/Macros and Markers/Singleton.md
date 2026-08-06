@@ -169,6 +169,12 @@ This is the one diagnostic that comes from the compiler rather than from Zerk.
 non-throwing; no external arguments; and no dependency in a different isolation domain,
 since resolving one would need `await`.
 
+The reference-type rule is checked where it can be seen. On a type declaration Zerk reads
+`struct` or `enum` and refuses. On an [`@Injectable` declaration](../Features/ForeignTypes.md)
+the produced type is only a *name* — Zerk reads syntax and never resolves it — so the check
+cannot be made and the developer's word is taken, as `@Isolated`'s is. Marking a value type
+that way shares a copy per read rather than an instance: inert rather than unsound.
+
 **Exactly one provider — in total, not per key.** This is the constraint most worth stating
 plainly, because the weaker reading is self-contradictory. One instance is built once and
 stored once; every key is a way of *reading* that storage, not a way of building it. So a
@@ -192,6 +198,7 @@ The corresponding errors, in Zerk's own words:
 | what you wrote | error |
 |---|---|
 | `@Singleton` on a struct or enum | `@Singleton can only be applied to reference types (class or actor).` |
+| `@Singleton` on a generic `@Injectable` declaration | `@Singleton cannot be applied to the generic type 'Box'. …` |
 | a provider with a parameter the graph cannot satisfy | `@Singleton injectables cannot accept external arguments.` |
 | an `async` or `throws` provider | `@Singleton providers cannot be async or throwing.` |
 | two providers for one key | `@Singleton 'Loader' declares multiple providers for 'Loading'. A singleton is stored once and read through every key it claims, so it has exactly one provider in total — not one per key. Keep whichever builds the shared instance.` |

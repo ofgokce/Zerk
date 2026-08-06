@@ -1314,6 +1314,7 @@ final class SourceCollector: SyntaxVisitor {
             parameters: [],
             effects: ProviderEffects(from: binding.getterEffectSpecifiers),
             modifiers: node.modifiers,
+            allAttributes: node.attributes,
             isProperty: true
         )
     }
@@ -1350,6 +1351,7 @@ final class SourceCollector: SyntaxVisitor {
                                   genericScope: genericScope.union(ownGenerics)),
             effects: ProviderEffects(from: node.signature.effectSpecifiers?.trimmedDescription),
             modifiers: node.modifiers,
+            allAttributes: node.attributes,
             isProperty: false
         )
     }
@@ -1370,6 +1372,7 @@ final class SourceCollector: SyntaxVisitor {
                                               parameters: [ParameterRecord],
                                               effects: ProviderEffects,
                                               modifiers: DeclModifierListSyntax,
+                                              allAttributes: AttributeListSyntax,
                                               isProperty: Bool) {
         let location = self.location(for: node)
 
@@ -1439,6 +1442,20 @@ final class SourceCollector: SyntaxVisitor {
             }
         }
 
+        // The declaration's own isolation, read exactly as a type's or a
+        // factory's is: a global-actor attribute, `@Isolated<A>` where the
+        // plugin cannot see one, or `nonisolated`. Passing an empty attribute
+        // list here meant an isolated declaration generated a `nonisolated`
+        // member that called it — which does not compile.
+        let stated = statedIsolation(modifiers: modifiers, attributes: allAttributes)
+        validateStatedIsolation(
+            stated,
+            modifiers: modifiers,
+            attributes: allAttributes,
+            location: location
+        )
+        let declaredIsolation = stated.resolved(default: ambientIsolation)
+
         // A static member is reached by its qualified path. A global is not
         // reachable at all from inside the extension — the member being defined
         // shadows it — so it goes through a thunk declared at file scope.
@@ -1453,13 +1470,31 @@ final class SourceCollector: SyntaxVisitor {
             effects: effects,
             location: location,
             returnTypeName: producedType.trimmedDescription,
-            isolation: statedIsolation(modifiers: modifiers, attributes: AttributeListSyntax([]))
-                .resolved(default: ambientIsolation),
+            isolation: declaredIsolation,
             isPrimary: false,
             genericParameters: [],
             genericConstraints: genericRequirements,
             memberName: memberName
         )
+
+        // The produced type is a *name*, so the "reference types only" check a
+        // type declaration gets cannot be made here — Zerk reads syntax and
+        // cannot tell a class from a struct it never sees. The developer's word
+        // is taken, exactly as `@Isolated`'s is; storing a value type shares a
+        // copy per read rather than an instance, which is inert rather than
+        // unsound.
+        var isSingleton = allAttributes.hasAttribute(named: "Singleton")
+        if isSingleton, !genericParameters.isEmpty {
+            // Same reason a generic type cannot be one: static stored
+            // properties are illegal in a generic context, so there is nowhere
+            // to keep an instance per specialization.
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: GenericRefusal.singleton(type: baseName),
+                location: location
+            ))
+            isSingleton = false
+        }
 
         types.append(
             TypeRecord(
@@ -1470,7 +1505,7 @@ final class SourceCollector: SyntaxVisitor {
                 defaultProviders: [provider],
                 typedProviders: [:],
                 initializers: [],
-                isSingleton: false,
+                isSingleton: isSingleton,
                 isolation: provider.isolation,
                 genericParameters: genericParameters
             )

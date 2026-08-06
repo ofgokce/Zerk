@@ -72,6 +72,72 @@ private func _$zerk_provider_urlSession() -> URLSession { urlSession }
 
 The thunk carries a function's parameters through as well — `private func _$zerk_provider_makeBox<X, Y>(x: X, y: Y) -> Box<X, Y> { makeBox(x: x, y: y) }`.
 
+## Isolation
+
+A declaration's isolation is mirrored onto the member built for it, exactly as a type's is —
+a global-actor attribute, or [`@Isolated<A>`](../Macros%20and%20Markers/Isolated.md) where
+the plugin cannot see one:
+
+```swift
+@MainActor
+@Injectable
+var session: Session { Session() }
+```
+
+```swift
+@MainActor private func _$zerk_provider_session() -> Session { session }
+
+extension Zerk<Session> {
+    @MainActor static var session: Session { … }
+}
+```
+
+The forwarding thunk carries it too: it calls the declaration directly, so a `nonisolated`
+thunk reaching a `@MainActor` global would not compile.
+
+`@Isolated<A>` is for the isolation a syntax-only plugin cannot see — a custom global actor
+whose name does not end in `Actor`, or isolation inherited through a conformance. Use
+Swift's own `nonisolated` for the opposite; it is real, and Zerk reads it, including to opt
+a declaration out of an ambient `SWIFT_DEFAULT_ACTOR_ISOLATION`. Stating `@Isolated<A>` and
+`nonisolated` together is an error.
+
+## One shared instance
+
+A foreign type is built afresh on every resolution, like anything else. `@Singleton` on the
+declaration stores it once instead:
+
+```swift
+@Singleton
+@Injectable
+var urlSession: URLSession { URLSession(configuration: .default) }
+```
+
+```swift
+private func _$zerk_provider_urlSession() -> URLSession { urlSession }
+
+private enum _$zerk_singletons {
+    nonisolated(unsafe) static let urlSession: URLSession = _$zerk_provider_urlSession()
+}
+
+extension Zerk<URLSession> {
+    nonisolated static var urlSession: URLSession {
+        if let interjected = _$interjected(for: \.`urlSession`) { return interjected }
+        return _$zerk_singletons.urlSession
+    }
+    nonisolated static func inject() -> URLSession { urlSession }
+}
+```
+
+Storage is named after the type produced rather than the declaration, because it is **per
+type**: a declaration registered under several keys stores one instance and every key reads
+it. The interjection lookup stays in the getter, so a test double is consulted on every read
+and interjecting one never builds the real instance.
+
+Every other [`@Singleton`](../Macros%20and%20Markers/Singleton.md) rule applies unchanged —
+synchronous, non-throwing, no external arguments, no cross-domain dependency, and not
+generic. The one that cannot apply is "reference types only": the produced type is a name
+Zerk never resolves, so it takes your word for it.
+
 ## Or put the key on a provider type
 
 When several factories belong together, the key can go on a type instead. The declaration carrying `@Injectable<Key>` does not have to *be* `Key`:
