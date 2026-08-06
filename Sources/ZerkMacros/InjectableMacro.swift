@@ -261,12 +261,6 @@ private extension InjectableMacro {
         }
 
         for attribute in injectableAttributes {
-            if attribute.hasPositionalArgument {
-                context.zerkError(
-                    attribute,
-                    "The injection method applies to @InjectableValue only. A type is built by a provider, not read from a declaration, so there is nothing to copy or reference."
-                )
-            }
             if attribute.primaryArgument == .nonLiteral {
                 context.zerkError(
                     attribute,

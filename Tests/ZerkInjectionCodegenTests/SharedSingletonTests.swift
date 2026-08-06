@@ -277,4 +277,99 @@ struct SharedSingletonTests {
         #expect(result.output.output.contains("static let dep: Dep = Dep()"))
         #expect(!result.output.output.contains("static let dep: Dep = {"))
     }
+
+    // MARK: - One provider in total, not one per key
+
+    @Test("a multi-key singleton with two providers for one key is an error")
+    func multiKeySingletonWithTwoProvidersForOneKey() {
+        // The per-key half of the rule, on a type where the cross-key half also
+        // has something to say. Both members would read the same storage, so
+        // asking for `two` would hand back whatever `one` built.
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol A {}
+        protocol B {}
+
+        @Singleton
+        @Injectable<A>
+        @Injectable<B>
+        final class L: A, B {
+            @InjectableProviding
+            static func one() -> L { .init() }
+
+            @InjectableProviding
+            static func two() -> L { .init() }
+
+            init() {}
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error
+                && $0.message.contains("@Singleton 'L' declares multiple providers for")
+                && $0.message.contains("exactly one provider in total")
+        })
+        // Nothing is emitted for a type with no legal shared instance.
+        #expect(!result.output.output.contains("_$zerk_singletons"))
+    }
+
+    @Test("the two checks together mean exactly one provider", arguments: [
+        // Every key served by one untyped factory.
+        "@InjectableProviding\n    static func common() -> L { .init() }",
+        // One factory bound to each key explicitly — still one declaration.
+        "@InjectableProviding<A>\n    @InjectableProviding<B>\n    static func common() -> L { .init() }",
+    ])
+    func oneDeclarationServingEveryKeyIsAccepted(provider: String) throws {
+        // A factory bound to two keys yields one record per attribute, and the
+        // cross-key check compares *locations* precisely so that reads as one
+        // provider rather than two.
+        let source = """
+        protocol A {}
+        protocol B {}
+
+        @Singleton
+        @Injectable<A>
+        @Injectable<B>
+        final class L: A, B {
+            \(provider)
+
+            init() {}
+        }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(result.diagnostics.isEmpty)
+        // One instance, stored once, read through both keys.
+        #expect(result.output.output.contains("static let l: L = L.common()"))
+        #expect(result.output.output.contains("extension Zerk<A>"))
+        #expect(result.output.output.contains("extension Zerk<B>"))
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)")
+    }
+
+    @Test("a key left without the marked provider is caught")
+    func keyWithoutTheMarkedProviderIsCaught() {
+        // `@InjectableProviding<A>` serves only A, so B falls through to the
+        // initializer — which is a second way to build the one instance.
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol A {}
+        protocol B {}
+
+        @Singleton
+        @Injectable<A>
+        @Injectable<B>
+        final class L: A, B {
+            @InjectableProviding<A>
+            static func liveA() -> L { .init() }
+
+            init() {}
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("resolves to different providers")
+        })
+    }
 }

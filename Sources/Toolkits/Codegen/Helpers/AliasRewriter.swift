@@ -44,11 +44,6 @@ struct AliasRewriter {
             let representative = aliases.representative(for: value.typeKey)
             var rewritten = value
             rewritten.typeKey = representative
-            // A parametric value's parameters are a provider's, and fold like
-            // one's — without this an aliased dependency of a parametric value
-            // would bubble to the caller instead of resolving.
-            rewritten.parameters = value.parameters.map(rewrite(parameter:))
-
             // The emitted spelling has to follow the key. A value declared
             // `var names: Names` keys on `Array<String>` once the alias is
             // known, and emitting `extension Zerk<Names>` around it would put

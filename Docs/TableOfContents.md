@@ -30,7 +30,7 @@ Every attribute and freestanding macro Zerk vends, except the testing ones.
 |---|---|
 | [`@Injectable`](Macros%20and%20Markers/Injectable.md) | Registering a type — or a declaration that produces one. Keys, `primary:`, `public:`, `typeNamed:`, `name:` |
 | [`@InjectableProviding`](Macros%20and%20Markers/InjectableProviding.md) | Marking how a key is built. Provider inference, `primary:`, and naming the generated member |
-| [`@InjectableValue`](Macros%20and%20Markers/InjectableValue.md) | Values, `@InjectableValues` sweeps, `@NonInjectable`, copied vs referenced, effectful and parametric values |
+| [`@InjectableValue`](Macros%20and%20Markers/InjectableValue.md) | Values, `@InjectableValues` sweeps, `@NonInjectable`, copied vs referenced, and effectful values |
 | [`@Singleton`](Macros%20and%20Markers/Singleton.md) | One instance per type, the generated storage, and why it lives where it does |
 | [`@Isolated`](Macros%20and%20Markers/Isolated.md) | Telling Zerk about isolation it cannot see |
 | [`@Injected`](Macros%20and%20Markers/Injected.md) | The property macro — every variant, and the one macro that generates code |

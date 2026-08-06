@@ -176,9 +176,7 @@ warning: @autoinjected has no effect here: 'Inert' is not @Injectable, so it has
 provider whose parameters Zerk resolves.
 ```
 
-A parametric [`@InjectableValue`](InjectableValue.md) function is not inert: it resolves its
-own parameters whatever encloses it, so the type it lives in need not be `@Injectable` for
-the mark to mean something.
+A function is never a provider: [`@InjectableValue`](InjectableValue.md) does not apply to one at all, and a `static func` without `@InjectableProviding` is not something Zerk resolves — so a marker on either is inert and reported as such.
 
 ## `@noninjected` — keeps a parameter out of resolution
 

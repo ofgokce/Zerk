@@ -67,22 +67,6 @@ public macro Injectable<each T>(public: Bool) = #externalMacro(
     type: "InjectableMacro"
 )
 
-/// Not a real overload. It exists so that `@Injectable(.referenced)` reports
-/// what to write instead — overload resolution would otherwise say "type 'Bool'
-/// has no member 'referenced'", which names neither the problem nor the fix.
-/// See ``InjectableValue(_:public:)``.
-@attached(peer)
-public macro Injectable(_ method: ValueInjectionMethod) = #externalMacro(
-    module: "ZerkMacros",
-    type: "InjectableMacro"
-)
-
-@attached(peer)
-public macro Injectable<each T>(_ method: ValueInjectionMethod) = #externalMacro(
-    module: "ZerkMacros",
-    type: "InjectableMacro"
-)
-
 /// Registers a **type** and claims its keys for `Zerk<Key>.inject()`.
 ///
 /// When several types are injectable under one key, exactly one of them must

@@ -132,7 +132,7 @@ It has to be asked for, because the same attribute without it means the opposite
 
 **`@Injectable` on an `extension` is refused**, with a message pointing at a provider type instead. An extension is not a declaration — it states no generic parameters of its own, so `extension Wrapper` cannot say whether `Wrapper` is generic, and for a foreign type there is no way to find out. It also has no initializer to adopt implicitly, and a `where` clause would make its providers conditional on something the key cannot express.
 
-**An injection method is refused.** `@Injectable(_ method: ValueInjectionMethod)` is declared, but it is not a real overload: it exists so that `@Injectable(.referenced)` reports what to write instead — overload resolution would otherwise say "type 'Bool' has no member 'referenced'", which names neither the problem nor the fix. On a type the message is that the injection method applies to `@InjectableValue` only, since a type is built by a provider, not read from a declaration, so there is nothing to copy or reference. See [@InjectableValue](InjectableValue.md).
+**An injection method is refused.** There is no `@Injectable` overload taking one, so `@Injectable(.referenced)` is a Swift error before Zerk sees it. The build plugin reads syntax rather than resolving overloads, so it reports the useful version alongside: the injection method applies to values only, since a type is built by a provider rather than read from a declaration and so has nothing to copy or reference. See [`@InjectableValue`](InjectableValue.md).
 
 **`primary:` on a value is refused**, for the reason above: a value is the sole provider for its key, so there is nothing to be primary over.
 
@@ -154,7 +154,6 @@ Both `primary` and `public` must be written as `true`/`false` literals — Zerk 
 | `@Injectable(name:primary:public:)` | on a declaration: names the member outright |
 | `@Injectable<each T>(parameterized:public:)` | the type's parameters become the key's |
 | `@Injectable<each T>(primary:parameterized:public:)` | both at once |
-| `@Injectable(_ method: ValueInjectionMethod)` | not a real overload — reports `@InjectableValue` as the fix |
 
 Every form is declared twice — once bare, once with a `<each T>` key list — except `parameterized:`, which exists only in the keyed form, since without a written key there is nothing to parameterize. `primary` and `public` are `false` unless stated.
 

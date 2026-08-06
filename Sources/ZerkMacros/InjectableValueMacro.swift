@@ -133,13 +133,12 @@ private extension InjectableValueMacro {
         }
     }
 
-    // MARK: - Parametric form
+    // MARK: - Functions
 
-    /// `@InjectableValue static func greeting(name: String) -> String`.
+    /// `@InjectableValue` on a function, which is refused.
     ///
-    /// The return type is the key and the parameters behave as a provider's do.
-    /// A ``ValueInjectionMethod`` has no meaning here: there is no declaration to
-    /// read through to, only a body, which is reproduced either way.
+    /// Decidable from the declaration alone, so it is reported here as well as
+    /// by the plugin — see ``InjectableValueRefusal/functionTarget``.
     static func validate(_ declaration: FunctionDeclSyntax,
                          node: AttributeSyntax,
                          in context: some MacroExpansionContext) {
@@ -147,48 +146,6 @@ private extension InjectableValueMacro {
         guard context.isFirstAttribute(node, among: attributes) else {
             return
         }
-
-        if Syntax(declaration).enclosingTypeName != nil, !declaration.modifiers.isStatic {
-            context.zerkError(
-                node,
-                "@InjectableValue functions declared inside a type must be marked static."
-            )
-        }
-
-        guard let returnType = declaration.signature.returnClause?.type,
-              returnType.normalizedTypeKey != "Void" else {
-            context.zerkError(
-                node,
-                "@InjectableValue functions must declare a return type — it is the injection key."
-            )
-            return
-        }
-
-        if declaration.body == nil {
-            context.zerkError(node, "@InjectableValue functions must have a body; it is what produces the value.")
-        }
-
-        if declaration.genericParameterClause != nil {
-            context.zerkError(node, GenericRefusal.injectableValueFunction)
-        }
-
-        validateArguments(attributes, in: context)
-        validateDistinctKeys(attributes, in: context)
-
-        for attribute in attributes {
-            if attribute.hasPositionalArgument {
-                context.zerkError(
-                    attribute,
-                    "The injection method applies to a property only. A function has no declaration to read through to — its body is reproduced either way."
-                )
-            }
-            for expectedType in attribute.genericArgumentTypes
-            where expectedType.normalizedTypeKey != returnType.normalizedTypeKey {
-                context.zerkError(
-                    attribute,
-                    "@InjectableValue<\(expectedType.normalizedTypeKey)> does not match declared return type '\(returnType.normalizedTypeKey)'."
-                )
-            }
-        }
+        context.zerkError(node, InjectableValueRefusal.functionTarget)
     }
 }

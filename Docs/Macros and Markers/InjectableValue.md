@@ -2,7 +2,7 @@
 
 Values are the half of the graph that is *read* rather than *built*. This page covers
 `@InjectableValue` on a property and on a function, copied versus referenced values,
-effectful and parametric values, the `@InjectableValues` sweep over a namespace, and
+effectful values, the `@InjectableValues` sweep over a namespace, and
 `@NonInjectable`.
 
 ## A value is not a type
@@ -153,50 +153,40 @@ An effectful value is read-only — Swift has no effectful setter — and cannot
 `@Injected` or a key path, the same limits an effectful provider already carries. See
 [Concurrency](../Features/Concurrency.md).
 
-## Parametric values
+## Only a property
 
-Applied to a function, the return type is the key and the parameters behave exactly as an
-`@InjectableProviding` provider's: resolved from the graph where they can be, bubbled to the
-consumer where they cannot, and honouring `@autoinjected`, `@noninjected` and `@injectable`.
+`@InjectableValue` does not apply to a function, and writing it on one is an error naming
+the replacement:
 
-```swift
-enum Formatting {
-    @InjectableValue
-    static func caption(logger: Logger, label: String) -> String { "\(label)#\(logger.serial)" }
-}
-
-Zerk<String>.caption(label: "x")     // `logger` resolved, `label` supplied
-Zerk<Holder>.inject(label: "x")      // `label` bubbles all the way up
+```
+@InjectableValue cannot be applied to a function. A value is read from a declaration and
+matched by key and name, while a function with parameters is something the graph builds —
+write '@Injectable' on it instead, which registers the type it returns with the function
+as its provider. For a value that takes no arguments, use a property.
 ```
 
+The distinction is the one the two markers exist to draw. A value is **read** from a
+declaration and matched by key *and* name; it never wins its key's `inject()`, and
+`primary:` means nothing to it. Something taking arguments is **built**, and building is
+what [`@Injectable`](Injectable.md) on a global or `static` func already registers — as a
+real type key, reached through `inject()` like anything else:
+
 ```swift
-extension Zerk<String> {
-    nonisolated static func caption(logger: Logger = Zerk<Logger>.inject(), label: String) -> String {
-        if let interjected = _$interjected(for: \.`caption`) {
-            return interjected
-        }
-        return Formatting.caption(logger: logger, label: label)
-    }
+struct Caption { let text: String }
+
+@Injectable(typeNamed: true)
+func makeCaption(logger: Logger, label: String) -> Caption {
+    Caption(text: "\(label)#\(logger.serial)")
 }
 
-extension Zerk<Holder> {
-    nonisolated static func holder(caption: String) -> Holder { … }
-
-    nonisolated static func inject(label: String) -> Holder {
-        holder(caption: Zerk<String>.caption(label: label))
-    }
-}
+Zerk<Caption>.caption(label: "x")   // `logger` resolved, `label` supplied
+Zerk<Holder>.inject(label: "x")     // `label` bubbles all the way up
 ```
 
-It is still a *value*: matched by name, so it never wins `inject()` for its key. The
-generated member calls your function rather than copying it, and `ValueInjectionMethod` does
-not apply — there is no declaration to read through to, only a body. Stating a method
-anyway is an error saying so.
-
-A parametric value must declare a return type other than `Void` — the return type *is* the
-key — must have a body, must be `static` when nested in a type, and cannot be generic:
-Zerk reads syntax, so it cannot substitute a type parameter into the key. Like a top-level
-`.referenced` property, a top-level parametric value is reached through a private thunk.
+Same resolution, same bubbling, same parameter markers — the difference is that `Caption`
+is a key the graph can answer for, rather than a `String` that only a parameter *named*
+`caption` could ever have matched. See [Foreign types](../Features/ForeignTypes.md) for the
+declaration form in full.
 
 ## `@InjectableValues` — sweeping a namespace
 
@@ -239,9 +229,11 @@ extension Zerk<Int> {
 }
 ```
 
-Functions are swept too, becoming parametric values: a `static func` with a return type is
-picked up on the same terms, and skipped when it is generic, returns `Void`, or is an
-instance method. A property is swept up when it is `static`, at least `internal`, and
+Functions are **not** swept: the sweep takes properties only, and passes a function over in
+silence rather than reporting it — the marker is a statement about the type, not a promise
+about every member. (A function in a swept namespace may still carry its own `@Injectable`,
+which registers the type it returns; the sweep simply has no opinion about it.) A property
+is swept up when it is `static`, at least `internal`, and
 declares an explicit type — the type *is* the injection key, and a syntax-only plugin cannot
 infer it, so a missing annotation is an error rather than a silent skip. `private` and
 `fileprivate` members, instance properties, instance methods, and nested types are left
@@ -253,8 +245,7 @@ Which members the sweep takes:
 | Member | Swept |
 |---|---|
 | `static let`/`static var` with an explicit type, `internal` or wider | yes — computed or stored |
-| `static func` with a non-`Void` return type, a body, `internal` or wider | yes, as a parametric value |
-| Same, but generic | no — skipped silently |
+| Any `static func` | no — a function is not a value; skipped silently |
 | `private` / `fileprivate` member | no — unreachable from the generated file |
 | Instance property or instance method | no — there is no instance to read from |
 | Member of a nested type | no — the sweep does not recurse |
@@ -350,10 +341,8 @@ declare.
 |---|---|
 | `@InjectableValue registers a value. Use @Injectable to register the type itself, or @InjectableValues to sweep up its static properties.` | The attribute is on a type declaration |
 | `@InjectableValue properties declared inside a type must be marked static.` | An instance property — there is no instance to read from |
-| `@InjectableValue functions declared inside a type must be marked static.` | The same, for the parametric form |
+| `@InjectableValue cannot be applied to a function. …` | The attribute is on a function; write `@Injectable` on it instead |
 | `@InjectableValue must declare a single named binding with an explicit type.` | A tuple binding, or no type annotation |
-| `@InjectableValue functions must declare a return type — it is the injection key.` | A `Void` or return-less function |
-| `@InjectableValue cannot be applied to a generic function.` | The key is the return type, and syntax cannot substitute a type parameter |
 | `'primary' applies to types only.` | `primary:` on a value |
 | `'x' is private, so the generated file cannot reference it. Raise it to internal, or use .copied.` | A `.referenced` value narrower than `internal` |
 | `'dup' is declared as a 'String' value more than once` | Two values of one key and name |

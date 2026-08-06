@@ -26,7 +26,7 @@ Most of these are raised twice — once by the macro, against the declaration, s
 | A singleton's provider is `async` or `throws` | Singleton storage is initialized synchronously — drop the effects, or drop `@Singleton` |
 | A singleton's provider takes external arguments | A singleton is built once, so there is no call site to supply them |
 | A singleton depends on something in a different isolation domain | Resolving it would need `await`. Make the dependency share the singleton's isolation, or drop `@Singleton` and resolve through `inject()` |
-| A singleton declares more than one provider for one key | A singleton must have exactly one provider per key |
+| A singleton declares more than one provider for one key | A singleton has exactly one provider in total — the same one for every key it claims — keep whichever builds the shared instance |
 | A singleton resolves to different providers for different keys | One instance means one provider across all its keys |
 | A multi-key singleton whose provider returns a key rather than the concrete type | The provider must return the concrete type — storage typed as one key cannot serve the others |
 | Two singleton types would store under the same generated member name | Rename one of the types |

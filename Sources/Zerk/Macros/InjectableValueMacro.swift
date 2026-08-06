@@ -37,26 +37,25 @@
 /// cannot be reached by `@Injected` or a key path — the same limits an effectful
 /// provider already carries.
 ///
-/// ## Parametric values
+/// ## Only a property
 ///
-/// Applied to a `static func`, the return type is the key and the declaration's
-/// parameters behave exactly as an ``InjectableProviding()`` provider's do: each
-/// is resolved from the graph where it can be, bubbles up to the consumer where
-/// it cannot, and honours the parameter markers — `@autoinjected`,
-/// `@noninjected` and `@injectable`.
+/// This does not apply to a function. A value is *read* from a declaration and
+/// matched by key **and** name; it never wins its key's `inject()`, and
+/// `primary:` means nothing to it. Something with parameters is built rather
+/// than read — which is what ``Injectable()`` on a global or `static` func
+/// registers, with the declaration as its provider and the returned type as a
+/// real key:
 ///
 /// ```swift
-/// @InjectableValue
-/// static func greeting(config: Config, name: String) -> String {
-///     "\(config.salutation), \(name)"
-/// }
+/// @Injectable(typeNamed: true)
+/// func makeGreeting(config: Config, name: String) -> Greeting { … }
 ///
-/// Zerk<Greeter>.inject(name: "Ada")   // `config` resolved, `name` bubbled
+/// Zerk<Greeting>.inject(name: "Ada")   // `config` resolved, `name` supplied
 /// ```
 ///
-/// ``ValueInjectionMethod`` applies to a stored or computed *property* only —
-/// there is nothing to read through to on a function, whose body is reproduced
-/// either way.
+/// A function marked `@InjectableValue` is an error naming that replacement,
+/// and ``InjectableValues()`` passes functions over in silence.
+///
 @attached(peer)
 public macro InjectableValue() = #externalMacro(
     module: "ZerkMacros",

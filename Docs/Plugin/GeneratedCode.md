@@ -642,12 +642,11 @@ and its generic clause. From `@Injectable func makeBox<X, Y>(x: X, y: Y) -> Box<
 private func _$zerk_provider_makeBox<X, Y>(x: X, y: Y) -> Box<X, Y> { makeBox(x: x, y: y) }
 ```
 
-Top-level values solve the same problem the same way. A referenced one gets
-`_$zerk_ref_<name>()`, plus `_$zerk_set_<name>(_:)` when it is settable; a
-parametric one gets `_$zerk_call_<name>(…)`:
+Top-level values solve the same problem the same way: a referenced one gets
+`_$zerk_ref_<name>()`, plus `_$zerk_set_<name>(_:)` when it is settable.
 
 ```swift
-private func _$zerk_call_greeting(name: String) -> String { greeting(name: name) }
+private func _$zerk_ref_baseURL() -> String { baseURL }
 ```
 
 ## Emission order
@@ -657,8 +656,8 @@ sorted:
 
 1. Header comment, `import Zerk`, then any `#ZerkImport` modules.
 2. The `macro Injected` declarations.
-3. `extension Zerk<Key>` for each non-parametric injectable value, by value name.
-4. File-scope thunks — value references, parametric values, global declarations.
+3. `extension Zerk<Key>` for each injectable value, by value name.
+4. File-scope thunks — value references and global `@Injectable` declarations.
 5. `private enum _$zerk_singletons`, if the module declares any.
 6. `extension Zerk<Key>` per key, keys sorted; within a key, members by name,
    then `inject()`.

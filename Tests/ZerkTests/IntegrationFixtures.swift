@@ -255,13 +255,16 @@ final class TokenHolder {
     }
 }
 
-/// A parametric value: `logger` resolves from the graph, `label` bubbles to the
-/// consumer's `inject(label:)`.
-enum Formatting {
-    @InjectableValue
-    static func caption(logger: Logger, label: String) -> String {
-        "\(label)#\(logger.serial)"
-    }
+/// The replacement for the old parametric-value form: a function that registers
+/// the type it *returns*, with itself as the provider. `logger` resolves from
+/// the graph; `label` bubbles to the consumer's `inject(label:)`.
+struct Caption {
+    let text: String
+}
+
+@Injectable(typeNamed: true)
+func makeCaption(logger: Logger, label: String) -> Caption {
+    Caption(text: "\(label)#\(logger.serial)")
 }
 
 @Injectable
@@ -269,8 +272,8 @@ final class CaptionHolder {
     let caption: String
 
     @InjectableProviding
-    init(caption: String) {
-        self.caption = caption
+    init(caption: Caption) {
+        self.caption = caption.text
     }
 }
 

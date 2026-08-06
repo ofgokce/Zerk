@@ -19,10 +19,6 @@ enum ProviderChoice {
     /// nothing locally — resolving it is a call into the other module — so it
     /// never becomes a generated member, only a way to satisfy a parameter.
     case imported(ImportedInjectableRecord)
-    /// A parametric `@InjectableValue` function. It is a value — matched by key
-    /// *and* name, and never the key's primary — but everything about *building*
-    /// it is a provider's job, so it travels the provider path to be emitted.
-    case value(InjectableValueRecord)
 
     var parameters: [ParameterRecord] {
         switch self {
@@ -31,8 +27,6 @@ enum ProviderChoice {
         case .implicit(let initializer):
             initializer.parameters
         case .imported(let record):
-            record.parameters
-        case .value(let record):
             record.parameters
         }
     }
@@ -45,7 +39,7 @@ enum ProviderChoice {
             return provider.genericParameters
         case .implicit(let initializer):
             return initializer.genericParameters
-        case .imported, .value:
+        case .imported:
             return []
         }
     }
@@ -58,7 +52,7 @@ enum ProviderChoice {
             return provider.genericConstraints
         case .implicit(let initializer):
             return initializer.genericConstraints
-        case .imported, .value:
+        case .imported:
             return []
         }
     }
@@ -83,8 +77,6 @@ enum ProviderChoice {
             initializer.location
         case .imported(let record):
             record.location
-        case .value(let record):
-            record.location
         }
     }
 
@@ -95,8 +87,6 @@ enum ProviderChoice {
         case .implicit(let initializer):
             initializer.effects
         case .imported(let record):
-            record.effects
-        case .value(let record):
             record.effects
         }
     }
@@ -112,8 +102,6 @@ enum ProviderChoice {
         switch self {
         case .explicit(let provider):
             return provider.memberName.text
-        case .value(let record):
-            return record.name
         case .implicit, .imported:
             return nil
         }
@@ -136,8 +124,6 @@ enum ProviderChoice {
             case .declaration(let reference, _, _):
                 return reference
             }
-        case .value(let record):
-            return record.name
         case .implicit, .imported:
             return nil
         }
@@ -151,8 +137,6 @@ enum ProviderChoice {
             initializer.isolation
         case .imported(let record):
             record.isolation
-        case .value(let record):
-            record.isolation
         }
     }
 
@@ -165,8 +149,6 @@ enum ProviderChoice {
         case .implicit:
             nil
         case .imported(let record):
-            record.typeName
-        case .value(let record):
             record.typeName
         }
     }
@@ -186,12 +168,6 @@ enum ProviderChoice {
             return arguments.isEmpty
                 ? "\(record.callee)()"
                 : "\(record.callee)(\(arguments.joined(separator: ", ")))"
-        case .value(let record):
-            // Named, not `inject()`: a value never wins its key, so the only way
-            // to reach it is by the name it was declared under.
-            return arguments.isEmpty
-                ? "Zerk<\(record.keyText)>.\(record.name)()"
-                : "Zerk<\(record.keyText)>.\(record.name)(\(arguments.joined(separator: ", ")))"
         case .explicit, .implicit:
             return nil
         }
@@ -203,7 +179,7 @@ enum ProviderChoice {
         switch self {
         case .explicit(let provider):
             provider.isPrimary
-        case .implicit, .imported, .value:
+        case .implicit, .imported:
             false
         }
     }

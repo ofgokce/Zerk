@@ -274,12 +274,6 @@ final class SourceCollector: SyntaxVisitor {
             let parameters: FunctionParameterListSyntax
             let isProvider: Bool
             let subject: String
-            /// A parametric `@InjectableValue` resolves its own parameters
-            /// whatever encloses it: the type is a namespace, not the thing
-            /// being built, so it need not be `@Injectable` for the mark to
-            /// mean something.
-            var resolvesItsOwnParameters = false
-
             if let initializer = member.decl.as(InitializerDeclSyntax.self) {
                 parameters = initializer.signature.parameterClause.parameters
                 // A sole initializer is adopted implicitly, but only while the
@@ -291,8 +285,6 @@ final class SourceCollector: SyntaxVisitor {
                 parameters = function.signature.parameterClause.parameters
                 isProvider = function.attributes.hasAttribute(named: "InjectableProviding")
                     && function.modifiers.isStatic
-                resolvesItsOwnParameters = function.attributes.hasAttribute(named: "InjectableValue")
-                    && function.signature.returnClause != nil
                 subject = "'\(function.name.text)'"
             } else {
                 continue
@@ -312,9 +304,6 @@ final class SourceCollector: SyntaxVisitor {
             guard let marked = parameters.first(where: {
                 $0.attributes.hasAttribute(named: "autoinjected")
             }) else {
-                continue
-            }
-            guard !resolvesItsOwnParameters else {
                 continue
             }
             guard !isProvider || !isInjectable else {
@@ -428,7 +417,7 @@ final class SourceCollector: SyntaxVisitor {
     /// type's members is deliberate — these are as likely to be global.
     override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {
         collectInjectableFunction(node)
-        collectParametricValue(node)
+        refuseValueFunction(node)
 
         guard node.attributes.hasAttribute(named: "ImportedInjectable"),
               let returnType = node.signature.returnClause?.type else {
@@ -526,10 +515,14 @@ final class SourceCollector: SyntaxVisitor {
         let scope = genericScope.union(genericParameters)
 
         for attribute in injectableAttributes {
+            // `@Injectable` has no overload taking one, so Swift rejects this
+            // first with "type 'Bool' has no member 'referenced'" — which names
+            // neither the problem nor the fix. The plugin reads syntax rather
+            // than resolving overloads, so it can still say what to write.
             if attribute.hasPositionalArgument {
                 diagnostics.append(CodegenDiagnostic(
                     severity: .error,
-                    message: "The injection method applies to values only. A type is built by a provider, not read from a declaration, so there is nothing to copy or reference.",
+                    message: "The injection method applies to values only. A type is built by a provider, not read from a declaration, so there is nothing to copy or reference — write it on an @InjectableValue instead.",
                     location: location
                 ))
             }
@@ -912,105 +905,30 @@ final class SourceCollector: SyntaxVisitor {
         )
     }
 
-    /// `@InjectableValue static func greeting(name: String) -> String` — a value
-    /// computed from parameters.
+    /// `@InjectableValue` on a function, which is refused.
     ///
-    /// The return type is the key and the declaration's name is what a parameter
-    /// must be called to match it, exactly as for the property form. What is
-    /// different is the parameters: they behave as an `@InjectableProviding`
-    /// provider's do, so they are collected the same way, markers included, and
-    /// classified by the same machinery.
-    private func collectParametricValue(_ node: FunctionDeclSyntax) {
+    /// A value is *read* from a declaration and matched by key **and** name. A
+    /// function with parameters is not that shape — it is something the graph
+    /// builds, which `@Injectable` on a global or `static` func already
+    /// registers, with the declaration as its provider.
+    ///
+    /// A function swept up by an enclosing `@InjectableValues` is skipped in
+    /// silence rather than reported: the marker is a statement about the type,
+    /// not a promise about every member, which is the same rule the property
+    /// sweep follows. Only an explicit annotation is a promise, so only that is
+    /// an error.
+    private func refuseValueFunction(_ node: FunctionDeclSyntax) {
         let attributes = node.attributes.attributes(named: "InjectableValue")
-        guard let returnType = node.signature.returnClause?.type else {
+        guard let first = attributes.first else {
             return
         }
-        // Annotated, or swept up by an enclosing `@InjectableValues`. A swept
-        // member that cannot be injected is skipped rather than reported: the
-        // marker is a statement about the type, not a promise about every
-        // member — the same rule the property sweep follows.
-        if attributes.isEmpty {
-            guard typeStack.last?.sweptValueMethod != nil,
-                  !node.attributes.hasAttribute(named: "NonInjectable"),
-                  node.modifiers.isStatic,
-                  node.modifiers.accessRank > .fileprivate,
-                  node.genericParameterClause == nil,
-                  node.body != nil,
-                  returnType.normalizedTypeKey != "Void" else {
-                return
-            }
-        }
-
-        let location = self.location(for: Syntax(node))
-
-        // A swept member is already filtered out above, silently, because the
-        // sweep is a statement about the type rather than a promise about every
-        // member. An annotation is a promise, so this one is reported.
-        if node.genericParameterClause != nil {
-            diagnostics.append(CodegenDiagnostic(
-                severity: .error,
-                message: GenericRefusal.injectableValueFunction,
-                location: location
-            ))
-            return
-        }
-
-        for attribute in attributes where attribute.publicArgument == .nonLiteral {
-            diagnostics.append(nonLiteralPublicDiagnostic(named: "@InjectableValue", at: location))
-        }
-
-        let stated = statedIsolation(modifiers: node.modifiers, attributes: node.attributes)
-        validateStatedIsolation(
-            stated,
-            modifiers: node.modifiers,
-            attributes: node.attributes,
-            location: location
-        )
-
-        let genericKeys = attributes.flatMap(\.genericArgumentKeys)
-        let keys = genericKeys.isEmpty ? [returnType.normalizedTypeKey] : genericKeys
-        let displayKeys = genericKeys.isEmpty
-            ? [returnType.displayTypeKey]
-            : attributes.flatMap(\.genericArgumentDisplayKeys)
-
-        let isExported = attributes
-            .map(\.publicArgument)
-            .first { $0 != .absent }
-            .map(\.isTrue)
-            ?? (typeStack.last?.sweptValuesArePublic ?? false)
-
-        for (offset, key) in keys.enumerated() {
-            recordKeyDisplayName(displayKeys[offset], for: key)
-            values.append(
-                InjectableValueRecord(
-                    name: node.name.text,
-                    typeKey: key,
-                    typeName: returnType.trimmedDescription,
-                    keyDisplayName: displayKeys[offset],
-                    // The generated member calls the declaration rather than
-                    // reproducing its body, so there is nothing to copy.
-                    bodyText: nil,
-                    location: location,
-                    isolation: stated.resolved(default: ambientIsolation),
-                    injectionMethod: .referenced,
-                    enclosingTypePath: enclosingTypePath,
-                    parameters: node.signature.parameterClause.parameters
-                        .parameterRecords(locatedBy: { self.location(for: $0) }),
-                    effects: ProviderEffects(from: node.signature.effectSpecifiers?.trimmedDescription),
-                    isExported: isExported
-                )
-            )
-        }
+        diagnostics.append(CodegenDiagnostic(
+            severity: .error,
+            message: InjectableValueRefusal.functionTarget,
+            location: location(for: Syntax(first))
+        ))
     }
 
-    /// `@ImportedInjectableValue var apiKey: String { Zerk<String>.apiKey }` — a
-    /// value from another module, matched here by key *and* name.
-    ///
-    /// Nothing calls the declaration, so where it sits and how visible it is do
-    /// not matter: only the annotation (the key), the declaration's own name
-    /// (what parameters must be called), and the expression to read through.
-    /// The macro has already refused every shape this cannot read, so anything
-    /// incomplete is simply skipped rather than reported twice.
     private func collectImportedValue(_ node: VariableDeclSyntax) {
         guard node.attributes.hasAttribute(named: "ImportedInjectableValue"),
               let binding = node.bindings.first,

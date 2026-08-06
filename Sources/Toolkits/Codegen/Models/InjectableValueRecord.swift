@@ -5,8 +5,13 @@
 //  Created by Ömer Faruk Gökce on 27.07.2026.
 //
 
-/// An `@Injectable` *value* — a static property rather than a type, e.g.
-/// `@Injectable static var apiKey: String`.
+/// An `@InjectableValue` — a static property rather than a type, e.g.
+/// `@InjectableValue static var apiKey: String`.
+///
+/// A property, always: `@InjectableValue` does not apply to a function. A value
+/// is *read* from a declaration, and something with parameters is built rather
+/// than read — which is what `@Injectable` on a global or `static` func
+/// registers, as a real type key.
 ///
 /// Values are matched to parameters by type key **and name** together, which is
 /// what stops two unrelated `String` values from being interchangeable.
@@ -41,13 +46,6 @@ struct InjectableValueRecord {
     /// unqualified reference would recurse. Top-level values have no qualifier
     /// available and go through a file-scope thunk instead.
     var enclosingTypePath: String? = nil
-    /// The parameters of a `@InjectableValue static func`, empty for a property.
-    ///
-    /// A parametric value is matched by key and name like any other, but its own
-    /// parameters behave exactly as a provider's: resolved from the graph where
-    /// they can be, bubbled to the consumer where they cannot, and honouring the
-    /// parameter markers. `var` so the alias pass can fold their keys.
-    var parameters: [ParameterRecord] = []
     /// The `async`/`throws` a getter declares, which the generated member
     /// restates and every resolution through it propagates — exactly as a
     /// provider's do.
@@ -82,37 +80,6 @@ struct InjectableValueRecord {
 
     /// Whether this record came from another module, and so emits nothing here.
     var isImported: Bool { importedExpression != nil }
-
-    /// Whether the value is a function rather than a property, and so is built
-    /// through the provider machinery instead of emitted as a `static var`.
-    var isParametric: Bool { !parameters.isEmpty }
-
-    /// How the generated member reaches the developer's own declaration.
-    ///
-    /// A nested one is qualified; a top-level one cannot be, because an
-    /// unqualified name inside `extension Zerk<Key>` resolves to the generated
-    /// member itself and would recurse — the same reason a `.referenced` value
-    /// goes through a file-scope thunk.
-    var parametricCallee: String {
-        enclosingTypePath.map { "\($0).\(name)" } ?? "_$zerk_call_\(name)"
-    }
-
-    /// The parametric form as a `ProviderResolution`, so it can travel the
-    /// provider path — parameter classification, defaults, bubbling, the split
-    /// variants, the interjection requirement — instead of duplicating it.
-    ///
-    /// Never a primary: a value is reached by name, so it cannot win its key's
-    /// `inject()` however many parameters it takes.
-    var providerResolution: ProviderResolution {
-        ProviderResolution(
-            typeName: typeName,
-            injectableKey: typeKey,
-            provider: .value(self),
-            isTypePrimary: false,
-            isExported: isExported,
-            isSingleton: false
-        )
-    }
 
     /// Identity in the parametric lookup: values are matched by key *and* name.
     var matchIdentity: String { "\(typeKey)|\(name)" }

@@ -62,14 +62,16 @@ struct ProviderResolver {
                     continue
                 }
 
-                // A singleton is one shared instance by definition, so a second
-                // way to build it would mean a second instance under the same
-                // key — which is the one thing @Singleton promises cannot
-                // happen.
+                // A singleton is one shared instance by definition, so a
+                // second way to build it is a contradiction: both members
+                // would read the *same* storage, so asking for one factory
+                // would hand back what the other built. Half the rule — the
+                // other half, that every key names the same provider, needs
+                // all the keys resolved and lives in `validatedSingleton`.
                 if type.isSingleton, providers.count > 1 {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
-                        message: "@Singleton '\(type.name)' declares multiple providers for '\(key)'. A singleton must have exactly one provider per key.",
+                        message: "@Singleton '\(type.name)' declares multiple providers for '\(key)'. A singleton is stored once and read through every key it claims, so it has exactly one provider in total — not one per key. Keep whichever builds the shared instance.",
                         location: providers[1].location
                     ))
                     continue
@@ -201,9 +203,11 @@ private extension ProviderResolver {
     /// Both follow from the same fact: a singleton is *one* instance, stored
     /// once and read through every key it claims.
     ///
-    /// 1. **One provider across all keys.** Per-key uniqueness is checked at
-    ///    collection; this catches the other shape, where each key names a
-    ///    different factory. One instance cannot be built two ways.
+    /// 1. **One provider across all keys.** Per-key uniqueness is checked as
+    ///    each key resolves, above; this catches the other shape, where every
+    ///    key names one provider but not the *same* one. Together the two mean
+    ///    a singleton has exactly one provider — one instance cannot be built
+    ///    two ways.
     /// 2. **A multi-key singleton's provider returns the concrete type.** The
     ///    shared storage is typed as the provider's return type, so a factory
     ///    declaring one of the keys produces storage the *other* keys cannot be

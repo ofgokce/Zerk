@@ -200,7 +200,7 @@ struct GenericRefusalTests {
         })
     }
 
-    @Test("a generic injectable value function is refused")
+    @Test("a generic injectable value function is refused for being a function")
     func genericInjectableValueFunctionIsRefused() {
         let source = """
         struct Box<E> {}
@@ -213,9 +213,11 @@ struct GenericRefusalTests {
 
         let result = CompileFixture.generateWithResolution(source: source)
 
+        // Genericity never comes into it any more: `@InjectableValue` does not
+        // apply to a function at all, so that is the reason reported.
         #expect(result.diagnostics.contains {
             $0.severity == .error
-                && $0.message == GenericRefusal.injectableValueFunction
+                && $0.message == InjectableValueRefusal.functionTarget
         })
         #expect(!result.output.output.contains("extension Zerk<Box<E>>"))
     }

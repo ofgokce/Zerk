@@ -83,11 +83,6 @@ public enum GenericRefusal {
         "@Singleton cannot be applied to the generic type '\(name)'. A singleton is stored in a static stored property, which Swift does not allow in a generic type — there is nowhere to keep one instance per specialization."
     }
 
-    /// The wording `InjectableValueMacro` already used, kept verbatim so the two
-    /// reports of the same mistake read the same.
-    public static let injectableValueFunction =
-        "@InjectableValue cannot be applied to a generic function. The key is the return type, and Zerk reads syntax so it cannot substitute a type parameter."
-
     /// `'E'`, `'E' and 'F'`, `'A', 'B' and 'C'` — the parameters named the way a
     /// sentence names them.
     static func list(_ names: [String]) -> String {

@@ -41,19 +41,9 @@ struct GeneratorOutputBuilder {
     /// came from.
     var importedModules: Set<String> = []
 
-    /// Parametric values, as resolutions to emit members for.
     ///
     /// They join what is emitted but never `primaryResolutions`: a value is
     /// reached by name, so it never becomes a key's `inject()`.
-    var parametricResolutions: [ProviderResolution] {
-        values.filter(\.isParametric).filter { !$0.isImported }.map(\.providerResolution)
-    }
-
-    /// Every member to emit: providers plus parametric values.
-    var emittedResolutions: [ProviderResolution] {
-        resolutions + parametricResolutions
-    }
-
     /// How a key is written in the generated file.
     ///
     /// Differs from the key itself only in `any`: keys match with it stripped,
@@ -182,15 +172,6 @@ struct GeneratorOutputBuilder {
             guard !value.isImported else {
                 continue
             }
-            if value.isParametric {
-                // Emitted through the provider path instead; only its thunk, if
-                // it needs one, belongs to this loop.
-                if emittedThunks.insert(value.name).inserted {
-                    thunkLines += parametricThunkLines(for: value)
-                }
-                continue
-            }
-
             let readExpression: String
             switch value.injectionMethod {
             case .copied:
@@ -269,7 +250,7 @@ struct GeneratorOutputBuilder {
 
         // A global `@Injectable` declaration is reached through a private
         // forwarding function, for the same reason a referenced value is.
-        for resolution in emittedResolutions {
+        for resolution in resolutions {
             thunkLines += declarationThunkLines(for: resolution)
         }
 
@@ -281,7 +262,7 @@ struct GeneratorOutputBuilder {
         // Ahead of the extensions, which read from it.
         output += singletonStorageLines(singletonStorage)
 
-        let grouped = Dictionary(grouping: emittedResolutions, by: \.injectableKey)
+        let grouped = Dictionary(grouping: resolutions, by: \.injectableKey)
         for injectableKey in grouped.keys.sorted() {
             let providers = grouped[injectableKey]!.sorted { lhs, rhs in
                 memberName(for: lhs) < memberName(for: rhs)
@@ -308,7 +289,7 @@ struct GeneratorOutputBuilder {
             var seenMemberSignatures: [String: String] = [:]
             var valueOwnedSignatures = Set<String>()
             for value in values
-            where value.typeKey == injectableKey && !value.isImported && !value.isParametric {
+            where value.typeKey == injectableKey && !value.isImported {
                 let signature = "\(value.name)()"
                 seenMemberSignatures[signature] = "the @InjectableValue '\(value.name)'"
                 valueOwnedSignatures.insert(signature)
@@ -319,7 +300,6 @@ struct GeneratorOutputBuilder {
                 for signature in memberSignatureKeys(for: provider, name: name) {
                     if let existing = seenMemberSignatures[signature] {
                         let involvesValue = valueOwnedSignatures.contains(signature)
-                            || { if case .value = provider.provider { return true } else { return false } }()
                         diagnostics.append(CodegenDiagnostic(
                             severity: .error,
                             message: "Generated member '\(name)' for '\(provider.typeName)' collides with \(existing) in Zerk<\(displayName(for: injectableKey))>: same name, same parameters. \(Self.collisionRemedy(involvesValue: involvesValue))",
@@ -424,7 +404,7 @@ struct GeneratorOutputBuilder {
         return GeneratorOutput(
             output: output.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + "\n",
             diagnostics: diagnostics,
-            usesIsolatedDefaultArguments: emittedResolutions.contains {
+            usesIsolatedDefaultArguments: resolutions.contains {
                 classifier.classify($0).usesIsolatedDefaultArgument
             }
         )
@@ -974,35 +954,6 @@ struct GeneratorOutputBuilder {
         return lines
     }
 
-    /// A file-scope thunk for a **top-level** parametric value.
-    ///
-    /// Same problem `.referenced` values have, and the same answer: inside
-    /// `extension Zerk<Key>` an unqualified `greeting(…)` resolves to the
-    /// generated member of that name rather than the developer's function, so it
-    /// would call itself. A nested declaration is qualified by its type and
-    /// needs none of this.
-    private func parametricThunkLines(for value: InjectableValueRecord) -> [String] {
-        guard value.enclosingTypePath == nil else {
-            return []
-        }
-        let prefix = value.isolation.actorName.map { "@\($0) " } ?? ""
-        let parameters = value.parameters.map { parameter -> String in
-            let label = parameter.label ?? "_"
-            return label == parameter.name
-                ? "\(label): \(parameter.typeName)"
-                : "\(label) \(parameter.name): \(parameter.typeName)"
-        }
-        let arguments = value.parameters.map { parameter -> String in
-            guard let label = parameter.label else {
-                return parameter.name
-            }
-            return "\(label): \(parameter.name)"
-        }
-        return [
-            "\(prefix)private func \(value.parametricCallee)(\(parameters.joined(separator: ", ")))\(value.effects.declarationSuffix) -> \(value.typeName) { \(value.effects.callPrefix)\(value.name)(\(arguments.joined(separator: ", "))) }"
-        ]
-    }
-
     /// The generated member's return type: always the injectable key, so a type
     /// registered as `@Injectable<Storing>` returns `Storing` rather than its
     /// concrete type.
@@ -1379,7 +1330,7 @@ struct GeneratorOutputBuilder {
     /// name — i.e. whether the name is an overload set rather than a single
     /// member. Two of a type's initializers are the usual way this happens.
     private func isOverloaded(_ name: String, in injectableKey: String) -> Bool {
-        emittedResolutions.filter {
+        resolutions.filter {
             $0.injectableKey == injectableKey && memberName(for: $0) == name
         }
         .count > 1
@@ -1583,8 +1534,6 @@ struct GeneratorOutputBuilder {
             // nothing here, so no member is emitted for them. Answering with the
             // resolving expression keeps this total rather than fatal.
             return record.callee
-        case .value(let record):
-            return record.parametricCallee
         case .implicit:
             return resolution.typeName
         }
@@ -1942,23 +1891,10 @@ struct GeneratorOutputBuilder {
                 var callEffects = value.effects.merged(
                     with: ProviderEffects(isAsync: hops, isThrowing: false))
 
-                guard value.isParametric else {
-                    effects = effects.merged(with: callEffects)
-                    argumentExpressions.append("\(callEffects.callPrefix)\(value.resolutionExpression)")
-                    continue
-                }
-
-                // Parametric: whatever it cannot resolve for itself bubbles up
-                // here, the same as a provider dependency's does.
-                let valuePlan = wrapperPlan(for: value.providerResolution, visiting: nextVisiting)
-                callEffects = callEffects.merged(with: valuePlan.effects)
+                // A value is read rather than built, so nothing of its own can
+                // bubble; the read is the whole expression.
                 effects = effects.merged(with: callEffects)
-                requests.append(BubbleResolver.Request(
-                    sourceName: parameter.name,
-                    requirements: valuePlan.parameters
-                ))
-                dependencyCalls[parameter.name] = (callEffects.callPrefix, value.providerResolution, parameter.typeName)
-                argumentExpressions.append("\u{0}\(parameter.name)")
+                argumentExpressions.append("\(callEffects.callPrefix)\(value.resolutionExpression)")
                 continue
             }
 

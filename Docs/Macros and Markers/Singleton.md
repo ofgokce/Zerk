@@ -166,11 +166,26 @@ This is the one diagnostic that comes from the compiler rather than from Zerk.
 ## Constraints
 
 **`@Singleton` constraints.** Reference types only; provider must be synchronous and
-non-throwing; no external arguments; no dependency in a different isolation domain, since
-resolving one would need `await`; exactly one provider per key, and the *same* provider across
-every key the type claims. A singleton injectable under several keys must be built by an
-initializer or by a factory returning the concrete type — its one instance is stored once and
-read through every key.
+non-throwing; no external arguments; and no dependency in a different isolation domain,
+since resolving one would need `await`.
+
+**Exactly one provider — in total, not per key.** This is the constraint most worth stating
+plainly, because the weaker reading is self-contradictory. One instance is built once and
+stored once; every key is a way of *reading* that storage, not a way of building it. So a
+singleton injectable under three keys still has one provider, and all three keys resolve
+through it.
+
+Zerk enforces that as two checks, because the two ways of breaking it are different
+mistakes with different fixes:
+
+- **Two providers for one key.** Both members would read the same storage, so asking for
+  one factory would hand back whatever the other built.
+- **A different provider per key.** Each key names one provider, but not the *same* one —
+  and one instance cannot be built two ways.
+
+A singleton injectable under several keys must also be built by an initializer or by a
+factory returning the concrete type: its one instance is stored once and read through every
+key, so storage typed as one of the keys cannot serve the others.
 
 The corresponding errors, in Zerk's own words:
 
@@ -179,7 +194,7 @@ The corresponding errors, in Zerk's own words:
 | `@Singleton` on a struct or enum | `@Singleton can only be applied to reference types (class or actor).` |
 | a provider with a parameter the graph cannot satisfy | `@Singleton injectables cannot accept external arguments.` |
 | an `async` or `throws` provider | `@Singleton providers cannot be async or throwing.` |
-| two providers for one key | `@Singleton 'Loader' declares multiple providers for 'Loading'. A singleton must have exactly one provider per key.` |
+| two providers for one key | `@Singleton 'Loader' declares multiple providers for 'Loading'. A singleton is stored once and read through every key it claims, so it has exactly one provider in total — not one per key. Keep whichever builds the shared instance.` |
 | a different factory per key | `@Singleton 'Dep' resolves to different providers for … A singleton has one instance, so it must have one provider across all its keys.` |
 | a multi-key factory returning a key | `@Singleton 'Dep' is injectable under 2 keys, so its provider must return 'Dep' rather than 'TypeA'. One instance is shared by every key, and storage typed 'TypeA' cannot serve the others.` |
 
