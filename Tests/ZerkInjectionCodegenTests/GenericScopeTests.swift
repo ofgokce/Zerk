@@ -12,9 +12,10 @@ import SharedToolkit
 /// Coverage of the reading layer for generics: which generic parameters a type
 /// mentions, and how the collector knows which are in scope where.
 ///
-/// Nothing here is emitted yet — `GenericGate` still refuses every generic
-/// registration. What is under test is that the records are *right*, so that
-/// matching and emission can be built on them rather than on a re-read.
+/// This is the reading layer alone: what is under test is that the records are
+/// *right*, independent of what is later done with them. Emission is covered by
+/// `GenericEmissionTests`, matching by `KeyShapeTests`, so a failure here points
+/// at the walk rather than at anything downstream.
 ///
 /// The analysis is a syntax walk, and the cases below are the reason: every
 /// plausible string test gets one of them wrong.

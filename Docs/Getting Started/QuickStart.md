@@ -85,11 +85,11 @@ extension Zerk<ApiServicing> {
 }
 
 extension Zerk<ApiServicing>.Interjection {
-    var `apiService`: Void {}
+    nonisolated var `apiService`: Void {}
 }
 
 extension Zerk<String>.Interjection {
-    var `baseURL`: Void {}
+    nonisolated var `baseURL`: Void {}
 }
 ```
 

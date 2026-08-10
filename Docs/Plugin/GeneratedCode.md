@@ -6,18 +6,18 @@ result pasted verbatim.
 
 ## Where the file is
 
-One file per target: `ZerkGenerated/ZerkInjections.swift`, inside the plugin's
+One file per target: `Zerk.generated.swift`, inside the plugin's
 work directory in the build directory. It is declared as the codegen command's
 only output, so the build system reruns codegen exactly when a source file or
 `ZerkSettings.json` changes.
 
 Under SwiftPM the path is
-`.build/plugins/outputs/<package>/<target>/destination/ZerkPlugin/ZerkGenerated/ZerkInjections.swift`.
+`.build/plugins/outputs/<package>/<target>/destination/ZerkPlugin/Zerk.generated.swift`.
 Under Xcode the same file lands in the project's DerivedData. In both cases the
 reliable way to find it is to search for its name:
 
 ```bash
-find . ~/Library/Developer/Xcode/DerivedData -name ZerkInjections.swift
+find . ~/Library/Developer/Xcode/DerivedData -name Zerk.generated.swift
 ```
 
 **Never edit it.** It is rewritten from scratch on every build that touches a
@@ -501,7 +501,7 @@ protocol `_$ZerkInjectable_Cache` {}
 extension Cache: `_$ZerkInjectable_Cache` {}
 
 extension Zerk.Interjection where Injectable: `_$ZerkInjectable_Cache` {
-    var `cache`: Void {}
+    nonisolated var `cache`: Void {}
 }
 ```
 
@@ -610,7 +610,7 @@ var urlSession: Session { .init() }
 ```
 
 ```swift
-private func _$zerk_provider_urlSession() -> Session { urlSession }
+nonisolated private func _$zerk_provider_urlSession() -> Session { urlSession }
 
 extension Zerk<Session> {
     nonisolated static var urlSession: Session {
@@ -639,14 +639,14 @@ the declaration's isolation and effects, and a generic one carries its parameter
 and its generic clause. From `@Injectable func makeBox<X, Y>(x: X, y: Y) -> Box<X, Y>`:
 
 ```swift
-private func _$zerk_provider_makeBox<X, Y>(x: X, y: Y) -> Box<X, Y> { makeBox(x: x, y: y) }
+nonisolated private func _$zerk_provider_makeBox<X, Y>(x: X, y: Y) -> Box<X, Y> { makeBox(x: x, y: y) }
 ```
 
 Top-level values solve the same problem the same way: a referenced one gets
 `_$zerk_ref_<name>()`, plus `_$zerk_set_<name>(_:)` when it is settable.
 
 ```swift
-private func _$zerk_ref_baseURL() -> String { baseURL }
+nonisolated private func _$zerk_ref_baseURL() -> String { baseURL }
 ```
 
 ## Emission order

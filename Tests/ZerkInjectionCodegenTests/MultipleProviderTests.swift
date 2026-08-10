@@ -353,7 +353,6 @@ struct MultipleProviderTests {
         )
 
         let output = GeneratorOutputBuilder(
-            types: [],
             values: [],
             resolutions: [live, duplicate],
             primaryResolutions: KeyIndex(ProviderResolver.electPrimaries(among: [live, duplicate]).primaries)

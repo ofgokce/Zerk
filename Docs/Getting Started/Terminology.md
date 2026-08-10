@@ -264,7 +264,7 @@ member, named — via a raw identifier — verbatim after that member's signatur
 
 ```swift
 extension Zerk<ApiServicing>.Interjection {
-    var `apiService`: Void {}
+    nonisolated var `apiService`: Void {}
 }
 ```
 

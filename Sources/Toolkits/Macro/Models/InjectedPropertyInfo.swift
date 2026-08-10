@@ -107,8 +107,12 @@ public struct InjectedPropertyInfo {
         // declared type with a layer of Optional removed. Compatibility is left
         // to the compiler: the generated peer assigns one to the other, so a
         // mismatch is rejected there, with the two real types named.
+        // Read structurally, not from the text: `unwrappedOptional` handles
+        // `Foo?`, `Foo!` and `Optional<Foo>` from the syntax, which is the same
+        // helper the collector uses — so the macro and the plugin can never
+        // disagree about what a property's key is.
         let injectedType = info.genericArguments.first?.trimmedDescription
-            ?? Self.injectedTypeName(from: declaredType)
+            ?? (typeAnnotation.type.unwrappedOptional ?? typeAnnotation.type).trimmedDescription
 
         // A key path names a member outright, so it replaces the `inject()`
         // call rather than adding arguments to it.
@@ -167,24 +171,5 @@ public struct InjectedPropertyInfo {
         return "\(target)(\(argumentList))"
     }
 
-    /// Strips one level of Optional, so `@Injected var x: Foo?` resolves `Foo`
-    /// rather than looking for a registered `Foo?`.
-    ///
-    /// Both spellings are handled, `Foo?`/`Foo!` and `Optional<Foo>`. The
-    /// property keeps its declared type; only the lookup key is unwrapped.
-    private static func injectedTypeName(from declaredType: String) -> String {
-        let trimmed = declaredType.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasSuffix("?") || trimmed.hasSuffix("!") {
-            return String(trimmed.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        if trimmed.hasPrefix("Optional<"), trimmed.hasSuffix(">") {
-            let start = trimmed.index(trimmed.startIndex, offsetBy: "Optional<".count)
-            let end = trimmed.index(before: trimmed.endIndex)
-            return String(trimmed[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        return trimmed
-    }
 
 }

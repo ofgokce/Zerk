@@ -78,7 +78,7 @@ A member's dependencies are resolved before the lookup runs, so an interjected v
 
 ### Generated code is per-build
 
-The plugin output lives in the build directory (`ZerkGenerated/ZerkInjections.swift`). Never edit it; regenerate by building.
+The plugin output lives in the build directory (`Zerk.generated.swift`). Never edit it; regenerate by building.
 
 ---
 

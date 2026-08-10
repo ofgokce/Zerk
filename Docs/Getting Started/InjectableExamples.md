@@ -38,7 +38,7 @@ extension Zerk<Clock> {
 }
 
 extension Zerk<Clock>.Interjection {
-    var `clock`: Void {}
+    nonisolated var `clock`: Void {}
 }
 ```
 
@@ -99,7 +99,7 @@ extension Zerk<ApiServicing> {
 }
 
 extension Zerk<ApiServicing>.Interjection {
-    var `apiService`: Void {}
+    nonisolated var `apiService`: Void {}
 }
 ```
 
@@ -154,11 +154,11 @@ extension Zerk<Writing> {
 }
 
 extension Zerk<Reading>.Interjection {
-    var `store`: Void {}
+    nonisolated var `store`: Void {}
 }
 
 extension Zerk<Writing>.Interjection {
-    var `store`: Void {}
+    nonisolated var `store`: Void {}
 }
 ```
 
@@ -209,8 +209,8 @@ extension Zerk<Loading> {
 }
 
 extension Zerk<Loading>.Interjection {
-    var `liveLoader`: Void {}
-    var `mockLoader`: Void {}
+    nonisolated var `liveLoader`: Void {}
+    nonisolated var `mockLoader`: Void {}
 }
 ```
 
@@ -261,7 +261,7 @@ extension Zerk<Mailing> {
 }
 
 extension Zerk<Mailing>.Interjection {
-    var `mailer`: Void {}
+    nonisolated var `mailer`: Void {}
 }
 ```
 
@@ -325,15 +325,15 @@ extension Zerk<TimeInterval> {
 }
 
 extension Zerk<Int>.Interjection {
-    var `retries`: Void {}
+    nonisolated var `retries`: Void {}
 }
 
 extension Zerk<String>.Interjection {
-    var `baseURL`: Void {}
+    nonisolated var `baseURL`: Void {}
 }
 
 extension Zerk<TimeInterval>.Interjection {
-    var `timeout`: Void {}
+    nonisolated var `timeout`: Void {}
 }
 ```
 
@@ -396,11 +396,11 @@ extension Zerk<Writing> {
 }
 
 extension Zerk<Reading>.Interjection {
-    var `store`: Void {}
+    nonisolated var `store`: Void {}
 }
 
 extension Zerk<Writing>.Interjection {
-    var `store`: Void {}
+    nonisolated var `store`: Void {}
 }
 ```
 
@@ -459,7 +459,7 @@ extension Zerk<Rendering> {
 }
 
 extension Zerk<Rendering>.Interjection {
-    var `renderer`: Void {}
+    nonisolated var `renderer`: Void {}
 }
 ```
 
@@ -513,11 +513,11 @@ protocol `_$ZerkInjectable_Cache` {}
 extension Cache: `_$ZerkInjectable_Cache` {}
 
 extension Zerk<Int>.Interjection {
-    var `capacity`: Void {}
+    nonisolated var `capacity`: Void {}
 }
 
 extension Zerk.Interjection where Injectable: `_$ZerkInjectable_Cache` {
-    var `cache`: Void {}
+    nonisolated var `cache`: Void {}
 }
 ```
 
@@ -549,7 +549,7 @@ var urlSession: URLSession { URLSession(configuration: .default) }
 
 ```swift
 // Generated:
-private func _$zerk_provider_urlSession() -> URLSession { urlSession }
+nonisolated private func _$zerk_provider_urlSession() -> URLSession { urlSession }
 
 extension Zerk<URLSession> {
     nonisolated static var urlSession: URLSession {
@@ -566,7 +566,7 @@ extension Zerk<URLSession> {
 }
 
 extension Zerk<URLSession>.Interjection {
-    var `urlSession`: Void {}
+    nonisolated var `urlSession`: Void {}
 }
 ```
 
@@ -596,7 +596,7 @@ enum URLSessionProvider {
 
 ```swift
 // Generated:
-private func _$zerk_provider_configuration() -> URLSessionConfiguration { configuration }
+nonisolated private func _$zerk_provider_configuration() -> URLSessionConfiguration { configuration }
 
 extension Zerk<URLSession> {
     nonisolated static func live(configuration: URLSessionConfiguration = Zerk<URLSessionConfiguration>.inject()) -> URLSession {
@@ -631,11 +631,11 @@ extension Zerk<URLSessionConfiguration> {
 }
 
 extension Zerk<URLSession>.Interjection {
-    var `live`: Void {}
+    nonisolated var `live`: Void {}
 }
 
 extension Zerk<URLSessionConfiguration>.Interjection {
-    var `configuration`: Void {}
+    nonisolated var `configuration`: Void {}
 }
 ```
 

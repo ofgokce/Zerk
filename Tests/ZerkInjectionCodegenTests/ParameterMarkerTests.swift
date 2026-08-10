@@ -389,4 +389,111 @@ struct ParameterMarkerTests {
                 && $0.message.contains("marked both @autoinjected and @noninjected")
         })
     }
+
+    // MARK: - Global functions
+
+    @Test("@injected on a global function generates a file-scope overload")
+    func globalFunctionOverload() throws {
+        // A type's members are collected by walking its member block; a global
+        // has no type to walk, so it used to be skipped in silence — the one
+        // outcome an explicit marker exists to rule out.
+        let source = """
+        @Injectable
+        final class Logger { init() {} }
+
+        func audit(@injected logger: Logger, label: String) {}
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(result.diagnostics.isEmpty)
+        // File-scope, so no `extension` wrapper and no indent.
+        #expect(result.output.output.contains("""
+        nonisolated func audit(label: String) {
+            audit(logger: Zerk<Logger>.inject(), label: label)
+        }
+        """))
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)")
+    }
+
+    @Test("a global overload keeps its return type and isolation")
+    func globalFunctionReturnAndIsolation() {
+        let output = CompileFixture.generate(source: """
+        @Injectable
+        final class Logger { init() {} }
+
+        @MainActor
+        func caption(@injected logger: Logger, label: String) -> String { label }
+        """)
+
+        #expect(output.contains("@MainActor func caption(label: String) -> String {"))
+    }
+
+    @Test("a local function is not a global", arguments: [
+        // Inside an accessor…
+        """
+        var accessor: Int {
+            func local(@injected logger: Logger) {}
+            return 0
+        }
+        """,
+        // …and inside a function body.
+        """
+        func outer() {
+            func local(@injected logger: Logger) {}
+        }
+        """,
+    ])
+    func localFunctionsAreNotCollected(declaration: String) {
+        // Nothing outside the file can call an overload of a local function, so
+        // "top level" is read from the tree rather than from an empty type
+        // stack — which is also empty inside a global accessor.
+        let output = CompileFixture.generate(source: """
+        @Injectable
+        final class Logger { init() {} }
+
+        \(declaration)
+        """)
+
+        #expect(!output.contains("func local("))
+    }
+
+    @Test("global overloads obey the same constraints as members", arguments: [
+        ("private func hidden(@injected logger: Logger) {}", "at least internal"),
+        ("func generic<T>(@injected logger: Logger, t: T) {}", "generic types or generic members"),
+    ])
+    func globalConstraints(declaration: String, message: String) {
+        let result = CompileFixture.generateWithResolution(source: """
+        @Injectable
+        final class Logger { init() {} }
+
+        \(declaration)
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains(message)
+        })
+    }
+
+    @Test("two globals generating one overload are reported")
+    func globalOverloadCollision() {
+        let result = CompileFixture.generateWithResolution(source: """
+        @Injectable
+        final class Logger { init() {} }
+
+        @Injectable
+        final class Other { init() {} }
+
+        func dup(@injected logger: Logger, x: Int) {}
+        func dup(@injected other: Other, x: Int) {}
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error
+                && $0.message.contains("Two @injected global functions generate the same overload")
+        })
+    }
 }

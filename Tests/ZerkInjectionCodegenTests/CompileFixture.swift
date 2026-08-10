@@ -142,7 +142,6 @@ enum CompileFixture {
             records: rewriter.rewrite(importedValues: collector.importedValues)
         ).merged(into: rewriter.rewrite(values: collector.values))
         return GeneratorOutputBuilder(
-            types: gate.types,
             values: importedValues.values,
             resolutions: resolution.resolutions,
             primaryResolutions: KeyIndex(imports.primaries),
@@ -188,7 +187,6 @@ enum CompileFixture {
             records: rewriter.rewrite(importedValues: collector.importedValues)
         ).merged(into: rewriter.rewrite(values: collector.values))
         let output = GeneratorOutputBuilder(
-            types: gate.types,
             values: importedValues.values,
             resolutions: resolution.resolutions,
             primaryResolutions: KeyIndex(imports.primaries),
@@ -199,8 +197,15 @@ enum CompileFixture {
             importedModules: collector.importedModules
         ).build()
 
-        return (output, collector.diagnostics + gate.diagnostics + resolution.diagnostics
-            + imports.diagnostics + importedValues.diagnostics + output.diagnostics)
+        // Accumulated rather than summed in one expression: a six-way `+` chain
+        // of arrays trips the type-checker's complexity limit.
+        var diagnostics: [CodegenDiagnostic] = collector.diagnostics
+        diagnostics += gate.diagnostics
+        diagnostics += resolution.diagnostics
+        diagnostics += imports.diagnostics
+        diagnostics += importedValues.diagnostics
+        diagnostics += output.diagnostics
+        return (output, diagnostics)
     }
 
     // MARK: - Compilation
@@ -218,7 +223,7 @@ enum CompileFixture {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let fixtureURL = directory.appendingPathComponent("Fixture.swift")
-        let generatedURL = directory.appendingPathComponent("ZerkInjections.swift")
+        let generatedURL = directory.appendingPathComponent("Zerk.generated.swift")
 
         try (preamble + "\n" + stripZerkMacros(from: source)).write(to: fixtureURL, atomically: true, encoding: .utf8)
         try standalone(generated).write(to: generatedURL, atomically: true, encoding: .utf8)
@@ -264,6 +269,14 @@ enum CompileFixture {
     /// The generic parameter's *name* is load-bearing, not cosmetic: generated
     /// code may constrain it (`where Injectable == …`), and it shadows any
     /// module type spelled the same. Keep it in step with Sources/Zerk/Zerk.swift.
+    ///
+    /// The interjection surface is spelled `nonisolated` **explicitly**. The real
+    /// `Zerk` module is built without an ambient default, so its declarations are
+    /// nonisolated whatever the consumer sets — but this preamble is compiled
+    /// *with* the fixture's own flags, so under `-default-isolation MainActor` an
+    /// unannotated declaration here would become `@MainActor` and no real module
+    /// ever would. Without this, any fixture with a nonisolated member is
+    /// unverifiable under an ambient default.
     private static let preamble = """
     // Generated test scaffolding.
     public enum Zerk<Injectable> {}
@@ -275,8 +288,8 @@ enum CompileFixture {
     // behaviour is covered against the real module in ZerkTests.
     public extension Zerk {
         enum Interjection {}
-        static func _$interjected(for keyPath: KeyPath<Interjection, Void>) -> Injectable? { nil }
-        static func _$interjected() -> Injectable? { nil }
+        nonisolated static func _$interjected(for keyPath: KeyPath<Interjection, Void>) -> Injectable? { nil }
+        nonisolated static func _$interjected() -> Injectable? { nil }
     }
 
     @propertyWrapper

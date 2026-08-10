@@ -67,7 +67,7 @@ Global, or `static` on a type. An instance member is refused — the generated f
 
 ```swift
 // Generated alongside the extension, for a global:
-private func _$zerk_provider_urlSession() -> URLSession { urlSession }
+nonisolated private func _$zerk_provider_urlSession() -> URLSession { urlSession }
 ```
 
 The thunk carries a function's parameters through as well — `private func _$zerk_provider_makeBox<X, Y>(x: X, y: Y) -> Box<X, Y> { makeBox(x: x, y: y) }`.
@@ -113,7 +113,7 @@ var urlSession: URLSession { URLSession(configuration: .default) }
 ```
 
 ```swift
-private func _$zerk_provider_urlSession() -> URLSession { urlSession }
+nonisolated private func _$zerk_provider_urlSession() -> URLSession { urlSession }
 
 private enum _$zerk_singletons {
     nonisolated(unsafe) static let urlSession: URLSession = _$zerk_provider_urlSession()

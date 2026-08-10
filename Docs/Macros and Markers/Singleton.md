@@ -78,11 +78,11 @@ extension Zerk<Writing> {
 }
 
 extension Zerk<Reading>.Interjection {
-    var `store`: Void {}
+    nonisolated var `store`: Void {}
 }
 
 extension Zerk<Writing>.Interjection {
-    var `store`: Void {}
+    nonisolated var `store`: Void {}
 }
 ```
 

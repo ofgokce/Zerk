@@ -20,7 +20,6 @@ import SharedToolkit
 /// Output is assembled as strings rather than syntax nodes, so nearly every
 /// helper here returns a line or a fragment of one.
 struct GeneratorOutputBuilder {
-    let types: [TypeRecord]
     let values: [InjectableValueRecord]
     /// Every (key, provider) pair: one generated member each.
     let resolutions: [ProviderResolution]
@@ -275,8 +274,18 @@ struct GeneratorOutputBuilder {
 
         let grouped = Dictionary(grouping: resolutions, by: \.injectableKey)
         for injectableKey in grouped.keys.sorted() {
+            // Sorted by name, then by source location. Swift's sort is not
+            // stable, and providers sharing a member name is the normal case —
+            // two marked initializers are both named after their type — so
+            // without the tiebreaker their order is unspecified and the
+            // generated file can differ between builds of identical source.
             let providers = grouped[injectableKey]!.sorted { lhs, rhs in
-                memberName(for: lhs) < memberName(for: rhs)
+                let left = memberName(for: lhs)
+                let right = memberName(for: rhs)
+                if left != right {
+                    return left < right
+                }
+                return lhs.provider.location < rhs.provider.location
             }
 
             // Keyed on name *and* parameter shape, because same-named members
@@ -928,7 +937,7 @@ struct GeneratorOutputBuilder {
         let signature = parameterClause(parameters: provider.parameters, defaults: [:])
         let arguments = builderArguments(provider.parameters, useParameterNames: true, defaults: [:])
         let call = isProperty ? reference : "\(reference)(\(arguments))"
-        let prefix = provider.isolation.actorName.map { "@\($0) " } ?? ""
+        let prefix = provider.isolation.declarationPrefix
         let returns = provider.returnTypeName ?? displayName(for: resolution.injectableKey)
         // The thunk calls the declaration directly, so it needs the declaration's
         // requirements as much as the member does — and it has no `Injectable`
@@ -953,14 +962,20 @@ struct GeneratorOutputBuilder {
     /// File-scope accessors for a top-level referenced value.
     ///
     /// They carry the value's isolation for the same reason generated members
-    /// do — a nonisolated thunk cannot read `@MainActor` state. `nonisolated`
-    /// is spelled as the absence of an attribute here, which is what a global
-    /// function accepts.
+    /// do — a nonisolated thunk cannot read `@MainActor` state — and they spell
+    /// `nonisolated` **explicitly**, exactly as a member does.
+    ///
+    /// Leaving it off is not the same thing. Under
+    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` an unannotated global
+    /// function *is* `@MainActor`, so an omitted `nonisolated` silently flips
+    /// the thunk into the ambient domain and the nonisolated member that calls
+    /// it stops compiling. Everything Zerk writes is pinned; the settings file
+    /// governs how Zerk reads source, never what it emits.
     private func referenceThunkLines(for value: InjectableValueRecord) -> [String] {
         guard value.enclosingTypePath == nil else {
             return []
         }
-        let prefix = value.isolation.actorName.map { "@\($0) " } ?? ""
+        let prefix = value.isolation.declarationPrefix
         var lines = [
             "\(prefix)private func _$zerk_ref_\(value.name)()\(value.effects.declarationSuffix) -> \(value.typeName) { \(value.effects.callPrefix)\(value.name) }"
         ]
@@ -1103,8 +1118,10 @@ struct GeneratorOutputBuilder {
         var lines: [String] = []
         var seenOverloads = Set<String>()
 
+        // Globals group under `nil`, which has no ordering of its own — sorted
+        // by the empty string so they come first, deterministically.
         let grouped = Dictionary(grouping: markedMembers, by: \.typeName)
-        for typeName in grouped.keys.sorted() {
+        for typeName in grouped.keys.sorted(by: { ($0 ?? "") < ($1 ?? "") }) {
             var memberLines: [String] = []
 
             for record in grouped[typeName]! {
@@ -1234,7 +1251,7 @@ struct GeneratorOutputBuilder {
                 switch record.kind {
                 case .initializer:
                     let keyword = record.typeKind == .classKind ? "convenience init" : "init"
-                    overloadKey = "\(typeName).init\(signature)"
+                    overloadKey = "\(typeName ?? "").init\(signature)"
                     declarationLines = [
                         "    \(isolationPrefix)\(accessPrefix)\(keyword)\(signature)\(effects.declarationSuffix) {",
                         "        \(record.effects.callPrefix)self.init(\(callArguments))",
@@ -1243,18 +1260,28 @@ struct GeneratorOutputBuilder {
                 case .method(let name, let isStatic, let returnType):
                     let staticPrefix = isStatic ? "static " : ""
                     let returnSuffix = returnType.map { " -> \($0)" } ?? ""
-                    overloadKey = "\(typeName).\(staticPrefix)\(name)\(signature)"
+                    overloadKey = "\(typeName ?? "").\(staticPrefix)\(name)\(signature)"
                     declarationLines = [
                         "    \(isolationPrefix)\(accessPrefix)\(staticPrefix)func \(name)\(signature)\(effects.declarationSuffix)\(returnSuffix) {",
                         "        \(record.effects.callPrefix)\(name)(\(callArguments))",
                         "    }"
+                    ]
+                case .globalFunction(let name, let returnType):
+                    // No enclosing type, so the overload is a file-scope
+                    // function: no `extension` wrapper and no indent.
+                    let returnSuffix = returnType.map { " -> \($0)" } ?? ""
+                    overloadKey = "func \(name)\(signature)"
+                    declarationLines = [
+                        "\(isolationPrefix)\(accessPrefix)func \(name)\(signature)\(effects.declarationSuffix)\(returnSuffix) {",
+                        "    \(record.effects.callPrefix)\(name)(\(callArguments))",
+                        "}"
                     ]
                 }
 
                 if !seenOverloads.insert(overloadKey).inserted {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
-                        message: "Two @injected members of '\(typeName)' generate the same overload \(overloadKey). Differentiate the remaining parameters.",
+                        message: "Two @injected \(typeName.map { "members of '\($0)'" } ?? "global functions") generate the same overload \(overloadKey). Differentiate the remaining parameters.",
                         location: record.location
                     ))
                     continue
@@ -1265,9 +1292,13 @@ struct GeneratorOutputBuilder {
             }
 
             if !memberLines.isEmpty {
-                lines.append("extension \(typeName) {")
-                lines.append(contentsOf: memberLines.dropLast())
-                lines.append("}")
+                if let typeName {
+                    lines.append("extension \(typeName) {")
+                    lines.append(contentsOf: memberLines.dropLast())
+                    lines.append("}")
+                } else {
+                    lines.append(contentsOf: memberLines.dropLast())
+                }
                 lines.append("")
             }
         }
@@ -1298,8 +1329,12 @@ struct GeneratorOutputBuilder {
                 if classifier.injectableValue(matching: parameter) != nil {
                     continue
                 }
-                if primaryResolutions[parameter] != nil {
-                    edges[key, default: []].append(parameter.typeKey)
+                // The edge names the *resolved* key, not the parameter's own
+                // spelling: nodes come from the registration keys, so a generic
+                // registration is a shape and a parameter naming one of its
+                // specializations would point at a node that does not exist.
+                if let dependency = primaryResolutions[parameter] {
+                    edges[key, default: []].append(dependency.injectableKey)
                 }
             }
         }
@@ -1316,7 +1351,10 @@ struct GeneratorOutputBuilder {
                    let location = primaryResolutions[node]?.provider.location {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
-                        message: "Circular dependency detected: \(cycle.joined(separator: " -> ")). Break the cycle by removing one dependency.",
+                        // Spelled as the developer would write it: a generic
+                        // key's node is a shape (`Cache<#0>`), which is Zerk's
+                        // own notation and appears nowhere in their source.
+                        message: "Circular dependency detected: \(cycle.map { displayName(for: $0) }.joined(separator: " -> ")). Break the cycle by removing one dependency.",
                         location: location
                     ))
                 }
@@ -1401,7 +1439,10 @@ struct GeneratorOutputBuilder {
             }
             return "\(label) \(parameter.name): \(parameter.typeName)"
         }
-        return "(\(parts.joined(separator: ", ")) )".replacingOccurrences(of: " )", with: ")")
+        // The empty case handled directly. Building "( )" and rewriting " )"
+        // globally would also rewrite it anywhere inside a parameter's type or
+        // default expression.
+        return parts.isEmpty ? "()" : "(\(parts.joined(separator: ", ")))"
     }
 
     /// Forwards a parameter to an inner call by name, keeping its label.
@@ -1703,7 +1744,15 @@ struct GeneratorOutputBuilder {
                 lines.append("extension Zerk.Interjection where Injectable: `\(protocolName)` {")
             }
             for name in names where seen.insert(name).inserted {
-                lines.append("    var `\(name)`: Void {}")
+                // Pinned `nonisolated`, and not from the member's isolation: a
+                // point is a `Void` marker with no state, and every member has
+                // to form a key path to it. Left unannotated it inherits the
+                // ambient default, so under `SWIFT_DEFAULT_ACTOR_ISOLATION =
+                // MainActor` a *nonisolated* member cannot form the key path at
+                // all — "cannot form key path to main actor-isolated property".
+                // Nonisolated is reachable from every domain, including an
+                // isolated member's.
+                lines.append("    nonisolated var `\(name)`: Void {}")
             }
             lines.append("}")
             lines.append("")
@@ -1906,7 +1955,7 @@ struct GeneratorOutputBuilder {
                 let hops = value.isolation.requiresHop(callingFrom: memberIsolation)
                 // The value's own `async`/`throws` merge with the hop: reading
                 // it costs both, and `inject()` has to declare both.
-                var callEffects = value.effects.merged(
+                let callEffects = value.effects.merged(
                     with: ProviderEffects(isAsync: hops, isThrowing: false))
 
                 // A value is read rather than built, so nothing of its own can

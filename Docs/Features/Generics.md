@@ -53,7 +53,7 @@ protocol `_$ZerkInjectable_Cache` {}
 extension Cache: `_$ZerkInjectable_Cache` {}
 
 extension Zerk.Interjection where Injectable: `_$ZerkInjectable_Cache` {
-    var `cache`: Void {}
+    nonisolated var `cache`: Void {}
 }
 ```
 
@@ -98,7 +98,7 @@ extension Zerk<any Boxable> {
 }
 
 extension Zerk<any Boxable>.Interjection {
-    var `box`: Void {}
+    nonisolated var `box`: Void {}
 }
 ```
 
@@ -213,7 +213,7 @@ extension Zerk {
 protocol `_$ZerkInjectable_Cache` {}
 extension Cache: `_$ZerkInjectable_Cache` {}
 extension Zerk.Interjection where Injectable: `_$ZerkInjectable_Cache` {
-    var `cache`: Void {}
+    nonisolated var `cache`: Void {}
 }
 ```
 

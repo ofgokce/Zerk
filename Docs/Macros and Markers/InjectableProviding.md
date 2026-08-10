@@ -187,7 +187,7 @@ extension Zerk<Mailing> {
 }
 
 extension Zerk<Mailing>.Interjection {
-    var `mailer`: Void {}
+    nonisolated var `mailer`: Void {}
 }
 ```
 

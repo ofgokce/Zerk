@@ -15,7 +15,7 @@ import XcodeProjectPlugin
 ///
 /// Attach it to every target that *declares* injectables. It feeds the
 /// generator every `.swift` file in the target and gets back one
-/// `ZerkInjections.swift`, so resolution sees the whole module at once — the
+/// `Zerk.generated.swift`, so resolution sees the whole module at once — the
 /// reason code generation lives here rather than in the attached macros.
 ///
 /// Both plugin flavors are implemented: SwiftPM (`BuildToolPlugin`) and Xcode
@@ -78,9 +78,7 @@ struct ZerkPlugin: BuildToolPlugin {
             return []
         }
 
-        let outputFile = workDirectory
-            .appending(path: "ZerkGenerated")
-            .appending(path: "ZerkInjections.swift")
+        let outputFile = workDirectory.appending(path: "Zerk.generated.swift")
 
         var arguments = [outputFile.path]
         if let settingsFile {
@@ -109,11 +107,12 @@ extension ZerkPlugin: XcodeBuildToolPlugin {
             .filter { $0.url.pathExtension == "swift" }
             .map(\.url)
 
-        // Xcode targets expose no directory of their own, so the settings file
-        // is looked up next to the project and alongside the input files.
-        var searchDirectories: [URL] = [
-            context.xcodeProject.directoryURL
-        ]
+        // Xcode targets expose no directory of their own, so the nearest thing
+        // to "the target's directory" is where its sources sit. Those come
+        // first and the project root last, so the most specific file wins —
+        // the same precedence the SwiftPM path gives `[target, package]`, and
+        // the one the documentation states.
+        var searchDirectories: [URL] = []
         var seen = Set<String>()
         for file in inputFiles {
             let directory = file.deletingLastPathComponent()
@@ -121,6 +120,7 @@ extension ZerkPlugin: XcodeBuildToolPlugin {
                 searchDirectories.append(directory)
             }
         }
+        searchDirectories.append(context.xcodeProject.directoryURL)
 
         return try buildCommands(
             tool: context.tool(named: "ZerkCodegen"),

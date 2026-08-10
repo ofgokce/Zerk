@@ -403,4 +403,113 @@ struct GeneratedCodeCompileTests {
         #expect(result.didCompile, Comment(rawValue: result.compilerOutput + "\n\n" + result.generated))
         #expect(result.generated.contains("nonisolated func run()"))
     }
+
+    // MARK: - File-scope thunks
+
+    @Test("a global declaration's thunk is pinned nonisolated")
+    func declarationThunkIsPinned() throws {
+        // Under an ambient `MainActor` default an unannotated global function
+        // *is* `@MainActor`, so omitting `nonisolated` silently flips the thunk
+        // into the ambient domain and the nonisolated member calling it stops
+        // compiling. Only this configuration catches it.
+        var settings = ZerkSettings.default
+        settings.defaultActorIsolation = .globalActor("MainActor")
+
+        let source = """
+        nonisolated final class Session { nonisolated init() {} }
+
+        @Injectable
+        nonisolated var session: Session { Session() }
+        """
+
+        let output = CompileFixture.generate(source: source, settings: settings)
+
+        #expect(output.contains("nonisolated private func _$zerk_provider_session()"))
+        #expect(!output.contains("\nprivate func _$zerk_provider_session()"))
+
+        let compiled = try CompileFixture.run(
+            source: source,
+            options: .swift6(defaultIsolation: "MainActor")
+        )
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)")
+    }
+
+    @Test("a referenced value's thunks are pinned nonisolated")
+    func referenceThunksArePinned() throws {
+        var settings = ZerkSettings.default
+        settings.defaultActorIsolation = .globalActor("MainActor")
+
+        let source = """
+        @InjectableValue(.referenced)
+        nonisolated(unsafe) var baseURL: String = "x"
+        """
+
+        let output = CompileFixture.generate(source: source, settings: settings)
+
+        #expect(output.contains("nonisolated private func _$zerk_ref_baseURL()"))
+        #expect(output.contains("nonisolated private func _$zerk_set_baseURL(_ newValue: String)"))
+    }
+
+    // MARK: - The global-actor heuristic
+
+    @Test("declaring a global actor is not applying one")
+    func globalActorAttributeIsNotAGlobalActor() {
+        // `@globalActor` ends in "Actor", so the heuristic read the canonical
+        // SE-0316 spelling as "isolated to a global actor named globalActor"
+        // and then refused it for being an actor — a build error on a
+        // declaration carrying no Zerk attribute at all.
+        let result = CompileFixture.generateWithResolution(source: """
+        @globalActor
+        actor DataStore { static let shared = DataStore() }
+        """)
+
+        #expect(result.diagnostics.isEmpty)
+    }
+
+    @Test("a custom global actor ending in Actor is still detected")
+    func customGlobalActorStillDetected() {
+        let output = CompileFixture.generate(source: """
+        protocol Storing {}
+
+        @globalActor
+        actor StorageActor { static let shared = StorageActor() }
+
+        @StorageActor
+        @Injectable<Storing>
+        final class Store: Storing { init() {} }
+        """)
+
+        #expect(output.contains("@StorageActor static var store: Storing {"))
+    }
+
+    @Test("@Isolated still corrects an actor the heuristic cannot see")
+    func isolatedStillCorrectsTheHeuristic() {
+        // `DataStore` does not end in "Actor", which is the gap `@Isolated`
+        // exists to close — unchanged by the uppercase requirement.
+        let output = CompileFixture.generate(source: """
+        protocol Caching {}
+
+        @Isolated<DataStore>
+        @DataStore
+        @Injectable<Caching>
+        final class Cache: Caching { init() {} }
+        """)
+
+        #expect(output.contains("@DataStore static var cache: Caching {"))
+    }
+
+    @Test("an actor annotated with a real global actor is still refused")
+    func actorWithGlobalActorStillRefused() {
+        // The uppercase requirement must not weaken the genuine refusal: an
+        // actor's construction is nonisolated, so it cannot be isolated.
+        let result = CompileFixture.generateWithResolution(source: """
+        @MainActor
+        actor Thing { init() {} }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("is an actor, so its construction is nonisolated")
+        })
+    }
 }

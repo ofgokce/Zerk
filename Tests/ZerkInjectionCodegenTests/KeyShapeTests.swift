@@ -12,11 +12,11 @@ import SharedToolkit
 /// Coverage of shape-based key matching: how a generic registration is filed,
 /// and how a dependency for one specialization finds it.
 ///
-/// Nothing generic reaches the emitter yet — `GenericGate` still refuses — so
-/// the family lookups here are driven directly rather than through the pipeline.
-/// What the pipeline proves is the other half, and it is the half that could
-/// break something: with no generic registrations, `KeyIndex` is exactly the
-/// dictionary it replaced, and the whole suite stays green.
+/// The family lookups here are driven directly rather than through the pipeline,
+/// so a failure names the matching rule rather than whatever was being generated
+/// at the time. The end-to-end half lives in `GenericEmissionTests`, and the
+/// degenerate half is worth keeping in mind: with no generic registrations,
+/// `KeyIndex` is exactly the dictionary it replaced.
 @Suite("Key shapes")
 struct KeyShapeTests {
 

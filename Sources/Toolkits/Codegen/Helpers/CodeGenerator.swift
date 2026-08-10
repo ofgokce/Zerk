@@ -96,7 +96,6 @@ public struct CodeGenerator {
         }
 
         let output = GeneratorOutputBuilder(
-            types: types,
             values: values,
             resolutions: resolution.resolutions,
             primaryResolutions: KeyIndex(imports.primaries),

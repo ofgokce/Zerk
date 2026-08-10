@@ -29,8 +29,8 @@ Which generates two named members and two interjection points:
 
 ```swift
 extension Zerk<Loading>.Interjection {
-    var `cached`: Void {}
-    var `live`: Void {}
+    nonisolated var `cached`: Void {}
+    nonisolated var `live`: Void {}
 }
 ```
 

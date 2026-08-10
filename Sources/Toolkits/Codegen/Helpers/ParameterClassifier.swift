@@ -23,9 +23,17 @@ struct ParameterClassifier {
     /// registered the two are the same lookup.
     let primaryResolutions: KeyIndex<ProviderResolution>
 
+    /// Values grouped by `"key|name"`, which is what matching them takes.
+    ///
+    /// Grouped rather than a plain dictionary because the *count* is load-
+    /// bearing: two values sharing a key and a name match neither, since a
+    /// parameter demands a unique one.
+    private let valuesByIdentity: [String: [InjectableValueRecord]]
+
     init(values: [InjectableValueRecord], primaryResolutions: KeyIndex<ProviderResolution>) {
         self.values = values
         self.primaryResolutions = primaryResolutions
+        self.valuesByIdentity = Dictionary(grouping: values, by: \.matchIdentity)
     }
 
     /// `visiting` holds the injectable keys currently on the resolution stack.
@@ -63,11 +71,16 @@ struct ParameterClassifier {
 
             if isExplicit,
                injectableValue(matching: parameter) == nil,
-               primaryResolutions[parameter] == nil,
-               !visiting.contains(parameter.typeKey) {
+               primaryResolutions[parameter] == nil {
                 // Marked, but nothing in the module can satisfy it. Reported
-                // against the parameter; a cycle is excluded because it is
-                // reported on its own terms.
+                // against the parameter.
+                //
+                // A cycle needs no exclusion here: being *in* one means the key
+                // resolves, so `primaryResolutions[parameter]` is non-nil and
+                // this never runs. The guard that used to say so tested
+                // `parameter.typeKey` against a set of registration keys, which
+                // is the namespace confusion that cost a SIGSEGV further down —
+                // dead here, but the wrong shape to leave lying around.
                 unresolvedAutoInjected.append(parameter)
             }
 
@@ -101,9 +114,15 @@ struct ParameterClassifier {
                 continue
             }
 
+            // Resolve first, then test the *dependency's* key against
+            // `visiting`. Testing the parameter's would compare a concrete
+            // spelling (`Cache<String>`) against a set of registration keys,
+            // which for a generic registration is a shape (`Cache<#0>`) — they
+            // can never match, while `KeyIndex` resolves one to the other quite
+            // happily. That combination recursed until the stack ran out.
             guard
-                !visiting.contains(parameter.typeKey),
-                let dependency = primaryResolutions[parameter]
+                let dependency = primaryResolutions[parameter],
+                !visiting.contains(dependency.injectableKey)
             else {
                 classified.append(ClassifiedParameter(parameter: parameter, binding: .external))
                 continue
@@ -186,9 +205,7 @@ struct ParameterClassifier {
         guard !parameter.isBareGenericParameter else {
             return nil
         }
-        let matches = values.filter { value in
-            value.typeKey == parameter.typeKey && value.name == parameter.name
-        }
+        let matches = valuesByIdentity["\(parameter.typeKey)|\(parameter.name)"] ?? []
         return matches.count == 1 ? matches[0] : nil
     }
 }

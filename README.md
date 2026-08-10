@@ -108,7 +108,7 @@ extension Zerk<ApiServicing> {
 
 // Also generated: one interjection point per member, named after its signature.
 extension Zerk<ApiServicing>.Interjection {
-    var `apiService`: Void {}
+    nonisolated var `apiService`: Void {}
 }
 ```
 
@@ -138,7 +138,7 @@ Interjections belong to the scope in force — `.zerk` opens one per test, so su
 
 **Almost none of the code generation happens in the macros.** `@Injectable`, `@InjectableProviding`, `@Singleton` and `@Isolated` expand to *nothing*: they exist so the attribute is legal Swift for the plugin to read, and so the errors decidable from a single declaration are reported right at that declaration. `@Injected` is the one macro that generates code.
 
-Everything else is the plugin, for one reason: an attached macro can only see the declaration it is attached to, while resolving a dependency graph requires the whole module. `ZerkPlugin` runs `ZerkCodegen` over every `.swift` file in the target — collect, resolve, generate — into a single `ZerkGenerated/ZerkInjections.swift`.
+Everything else is the plugin, for one reason: an attached macro can only see the declaration it is attached to, while resolving a dependency graph requires the whole module. `ZerkPlugin` runs `ZerkCodegen` over every `.swift` file in the target — collect, resolve, generate — into a single `Zerk.generated.swift`.
 
 One consequence runs through the whole design: **the plugin reads syntax, never resolved types.** It cannot see through an unmarked `typealias`, cannot follow a conformance into another module, and cannot read your build settings. That is why type keys are canonicalized only as far as syntax allows, why `@Isolated<A>` exists, and why `ZerkSettings.json` exists.
 

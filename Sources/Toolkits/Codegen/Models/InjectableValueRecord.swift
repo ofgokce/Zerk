@@ -81,7 +81,7 @@ struct InjectableValueRecord {
     /// Whether this record came from another module, and so emits nothing here.
     var isImported: Bool { importedExpression != nil }
 
-    /// Identity in the parametric lookup: values are matched by key *and* name.
+    /// How a value is matched and deduped: by key *and* name together.
     var matchIdentity: String { "\(typeKey)|\(name)" }
 
     /// How a resolution reads this value, wherever it lives.

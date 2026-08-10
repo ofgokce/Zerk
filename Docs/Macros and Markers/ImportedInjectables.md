@@ -96,7 +96,7 @@ extension Zerk<Repo> {
 }
 
 extension Zerk<Repo>.Interjection {
-    var `repo`: Void {}
+    nonisolated var `repo`: Void {}
 }
 ```
 

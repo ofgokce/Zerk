@@ -42,6 +42,13 @@ let package = Package(
         .target(
             name: "Zerk",
             dependencies: ["ZerkMacros"],
+            // The only target whose code reaches a consumer's app binary, so it
+            // is the only one that carries a privacy manifest. `.copy` rather
+            // than `.process`: the manifest has to arrive as a readable plist
+            // under its exact name for Xcode's privacy report to find it.
+            resources: [
+                .copy("PrivacyInfo.xcprivacy")
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6)
             ]

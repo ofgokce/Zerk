@@ -313,7 +313,11 @@ private extension InjectableMacro {
         // one of them must be `primary` is a module-wide question — it only
         // binds the type that actually wins the key — so `ProviderResolver`
         // asks it and this macro stays silent.
-        for (key, providers) in providerInfo.typedProviders {
+        // Sorted: dictionary order is unspecified and varies between
+        // processes, so several bad keys on one declaration would be reported
+        // in a different order on each compilation.
+        for key in providerInfo.typedProviders.keys.sorted() {
+            let providers = providerInfo.typedProviders[key]!
             if injectableKeys[key] == nil {
                 if let provider = providers.first {
                     context.zerkError(

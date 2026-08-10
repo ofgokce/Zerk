@@ -203,7 +203,6 @@ struct ProviderResolverTests {
         #expect(result.resolutions[0].isolation == .globalActor("MainActor"))
 
         let output = buildOutput(
-            types: collector.types,
             values: collector.values,
             resolutions: result.resolutions
         )
@@ -419,7 +418,7 @@ struct GeneratorOutputBuilderTests {
             location: makeLocation()
         )
 
-        let result = buildOutput(types: [], values: [value], resolutions: [])
+        let result = buildOutput(values: [value], resolutions: [])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("extension Zerk<String> {"))
@@ -445,7 +444,7 @@ struct GeneratorOutputBuilderTests {
             location: makeLocation()
         )
 
-        let result = buildOutput(types: [], values: [value], resolutions: [resolution])
+        let result = buildOutput(values: [value], resolutions: [resolution])
 
         #expect(result.diagnostics.isEmpty)
         // Storage is typed as the concrete type, not the key: one instance has
@@ -468,7 +467,7 @@ struct GeneratorOutputBuilderTests {
             isSingleton: true
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [resolution])
+        let result = buildOutput(values: [], resolutions: [resolution])
 
         #expect(result.diagnostics.count == 1)
         #expect(result.diagnostics[0].message.contains("@Singleton providers cannot be async or throwing"))
@@ -508,7 +507,7 @@ struct GeneratorOutputBuilderTests {
             isSingleton: true
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [store, cache])
+        let result = buildOutput(values: [], resolutions: [store, cache])
 
         #expect(result.diagnostics.count == 1)
         #expect(result.diagnostics[0].message.contains("crosses an isolation boundary"))
@@ -533,7 +532,7 @@ struct GeneratorOutputBuilderTests {
             isSingleton: true
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [store, cache])
+        let result = buildOutput(values: [], resolutions: [store, cache])
 
         #expect(result.diagnostics.isEmpty)
         // Global-actor isolation already protects the storage, so it carries the
@@ -560,7 +559,7 @@ struct GeneratorOutputBuilderTests {
             )
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [logger, reporter])
+        let result = buildOutput(values: [], resolutions: [logger, reporter])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("private func _$zerk_sendable_conformance_check<T: Sendable>(_: T.Type) {}"))
@@ -591,7 +590,7 @@ struct GeneratorOutputBuilderTests {
             )
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [manager, repository])
+        let result = buildOutput(values: [], resolutions: [manager, repository])
 
         #expect(result.diagnostics.isEmpty)
         // The dependency cannot be a default argument — `await` is not allowed
@@ -619,7 +618,7 @@ struct GeneratorOutputBuilderTests {
             provider: .explicit(makeStaticProvider(name: "live"))
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [first, second])
+        let result = buildOutput(values: [], resolutions: [first, second])
 
         #expect(result.diagnostics.contains { $0.message.contains("collides") })
     }
@@ -641,7 +640,7 @@ struct GeneratorOutputBuilderTests {
             ))
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [a, b])
+        let result = buildOutput(values: [], resolutions: [a, b])
 
         #expect(result.diagnostics.contains { $0.message.contains("Circular dependency detected") })
     }
@@ -656,7 +655,6 @@ struct GeneratorOutputBuilderTests {
         )
 
         let result = buildOutput(
-            types: [],
             values: [],
             resolutions: [service],
             moduleAccessLevels: ["Service": false]
@@ -683,7 +681,6 @@ struct GeneratorOutputBuilderTests {
         )
 
         let result = buildOutput(
-            types: [],
             values: [],
             resolutions: [repository],
             injectedUses: [use]
@@ -704,7 +701,7 @@ struct GeneratorOutputBuilderTests {
             provider: .explicit(tokenProvider)
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [resolution])
+        let result = buildOutput(values: [], resolutions: [resolution])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("macro Injected(seed: Int)"))
@@ -740,7 +737,7 @@ struct GeneratorOutputBuilderTests {
             )
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [apiService, logger, live])
+        let result = buildOutput(values: [], resolutions: [apiService, logger, live])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("static func live(apiService: ApiServicing = Zerk<ApiServicing>.inject(), logger: Logger = Zerk<Logger>.inject()) -> UserService"))
@@ -777,7 +774,6 @@ struct GeneratorOutputBuilderTests {
         )
 
         let result = buildOutput(
-            types: [],
             values: [baseUrl],
             resolutions: [apiService, userRepository]
         )
@@ -827,7 +823,7 @@ struct GeneratorOutputBuilderTests {
 
         #expect(electionDiagnostics([live, mock]).isEmpty)
 
-        let result = buildOutput(types: [], values: [], resolutions: [live, mock])
+        let result = buildOutput(values: [], resolutions: [live, mock])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("static var live: Loading"))
@@ -857,7 +853,7 @@ struct GeneratorOutputBuilderTests {
 
         #expect(electionDiagnostics([live, empty, failing]).isEmpty)
 
-        let result = buildOutput(types: [], values: [], resolutions: [live, empty, failing])
+        let result = buildOutput(values: [], resolutions: [live, empty, failing])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("static var empty: Loading"))
@@ -922,7 +918,7 @@ struct GeneratorOutputBuilderTests {
 
         #expect(electionDiagnostics([live, cached]).isEmpty)
 
-        let result = buildOutput(types: [], values: [], resolutions: [live, cached])
+        let result = buildOutput(values: [], resolutions: [live, cached])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("static var live: Loading"))
@@ -944,7 +940,7 @@ struct GeneratorOutputBuilderTests {
             isExported: true
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [sharedService])
+        let result = buildOutput(values: [], resolutions: [sharedService])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("public static var live: Service"))
@@ -960,7 +956,7 @@ struct GeneratorOutputBuilderTests {
             isTypePrimary: true
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [service])
+        let result = buildOutput(values: [], resolutions: [service])
 
         #expect(!result.output.contains("public static"))
     }
@@ -976,7 +972,6 @@ struct GeneratorOutputBuilderTests {
         )
 
         let result = buildOutput(
-            types: [],
             values: [],
             resolutions: [sharedService],
             moduleAccessLevels: ["Service": false]
@@ -1006,7 +1001,7 @@ struct GeneratorOutputBuilderTests {
             )
         )
 
-        let result = buildOutput(types: [], values: [], resolutions: [apiManager, userRepository])
+        let result = buildOutput(values: [], resolutions: [apiManager, userRepository])
 
         #expect(result.diagnostics.isEmpty)
         #expect(result.output.contains("static func userRepository(manager: ApiManager = Zerk<ApiManager>.inject()) async throws -> UserRepository"))
@@ -1024,7 +1019,6 @@ struct ParameterInjectionTests {
         collector.walk(Parser.parse(source: source))
         let resolution = ProviderResolver(types: collector.types).resolve()
         let output = buildOutput(
-            types: collector.types,
             values: collector.values,
             resolutions: resolution.resolutions,
             moduleAccessLevels: collector.moduleAccessLevels,
@@ -1302,14 +1296,12 @@ private func makeResolution(typeName: String,
 /// Tests construct resolutions directly rather than parsing source, but which
 /// provider backs `inject()` is `ProviderResolver`'s decision — restating those
 /// rules here would let the two drift apart silently.
-private func buildOutput(types: [TypeRecord] = [],
-                         values: [InjectableValueRecord] = [],
+private func buildOutput(values: [InjectableValueRecord] = [],
                          resolutions: [ProviderResolution],
                          moduleAccessLevels: [String: Bool] = [:],
                          injectedUses: [InjectedUseRecord] = [],
                          markedMembers: [MarkedMemberRecord] = []) -> GeneratorOutput {
     GeneratorOutputBuilder(
-        types: types,
         values: values,
         resolutions: resolutions,
         primaryResolutions: KeyIndex(ProviderResolver.electPrimaries(among: resolutions).primaries),

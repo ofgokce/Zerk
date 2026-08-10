@@ -25,10 +25,10 @@ extension Zerk<UserService> {
 }
 
 extension Zerk<UserService>.Interjection {
-    var `live`: Void {}
+    nonisolated var `live`: Void {}
 }
 extension Zerk<SeededToken>.Interjection {
-    var `seeded`: Void {}
+    nonisolated var `seeded`: Void {}
 }
 ```
 
@@ -140,7 +140,7 @@ the point by that:
 protocol `_$ZerkInjectable_Cache` {}
 extension Cache: `_$ZerkInjectable_Cache` {}
 extension Zerk.Interjection where Injectable: `_$ZerkInjectable_Cache` {
-    var `cache`: Void {}
+    nonisolated var `cache`: Void {}
 }
 ```
 

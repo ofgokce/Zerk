@@ -418,6 +418,7 @@ final class SourceCollector: SyntaxVisitor {
     override func visit(_ node: FunctionDeclSyntax) -> SyntaxVisitorContinueKind {
         collectInjectableFunction(node)
         refuseValueFunction(node)
+        collectMarkedGlobalFunction(node)
 
         guard node.attributes.hasAttribute(named: "ImportedInjectable"),
               let returnType = node.signature.returnClause?.type else {
@@ -1236,48 +1237,44 @@ final class SourceCollector: SyntaxVisitor {
     /// that turns out async, throwing, or cross-domain has to be reported
     /// against the property rather than left to fail in generated code.
     private func collectInjectedUse(_ node: VariableDeclSyntax) {
-        for macroName in ["Injected"] {
-            let attributes = node.attributes.attributes(named: macroName)
-            guard !attributes.isEmpty else {
-                continue
-            }
-            guard let binding = node.bindings.first,
-                  let annotation = binding.typeAnnotation else {
-                continue
-            }
+        let attributes = node.attributes.attributes(named: "Injected")
+        guard !attributes.isEmpty,
+              let binding = node.bindings.first,
+              let annotation = binding.typeAnnotation else {
+            return
+        }
 
-            // `@Injected var service: Service?` injects a `Service` — the
-            // optionality belongs to the property, not to the key. `?`, `!` and
-            // `Optional<…>` are one canonical spelling by the time we get here,
-            // so a single unwrap covers all three.
-            var typeKey = annotation.type.normalizedTypeKey
-            var injectedType = annotation.type
-            if let unwrapped = annotation.type.unwrappedOptional {
-                typeKey = unwrapped.normalizedTypeKey
-                injectedType = unwrapped
-            }
+        // `@Injected var service: Service?` injects a `Service` — the
+        // optionality belongs to the property, not to the key. `?`, `!` and
+        // `Optional<…>` are one canonical spelling by the time we get here,
+        // so a single unwrap covers all three.
+        var typeKey = annotation.type.normalizedTypeKey
+        var injectedType = annotation.type
+        if let unwrapped = annotation.type.unwrappedOptional {
+            typeKey = unwrapped.normalizedTypeKey
+            injectedType = unwrapped
+        }
 
-            for attribute in attributes {
-                var namesMemberDirectly = false
-                if case .argumentList(let arguments)? = attribute.arguments,
-                   arguments.count == 1,
-                   arguments.first?.label == nil,
-                   arguments.first?.expression.is(KeyPathExprSyntax.self) == true {
-                    namesMemberDirectly = true
-                }
-                injectedUses.append(InjectedUseRecord(
-                    // `@Injected<Foo>` states the key; otherwise it is the
-                    // property's own type.
-                    typeKey: attribute.genericArgumentKeys.first ?? typeKey,
-                    // Read from whichever type supplied the key, so the shape
-                    // and the key can never describe different types.
-                    typeKeyShape: attribute.genericArgumentTypes.first?.typeKeyShape
-                        ?? injectedType.typeKeyShape,
-                    macroName: "@\(macroName)",
-                    namesMemberDirectly: namesMemberDirectly,
-                    location: location(for: Syntax(node))
-                ))
+        for attribute in attributes {
+            var namesMemberDirectly = false
+            if case .argumentList(let arguments)? = attribute.arguments,
+               arguments.count == 1,
+               arguments.first?.label == nil,
+               arguments.first?.expression.is(KeyPathExprSyntax.self) == true {
+                namesMemberDirectly = true
             }
+            injectedUses.append(InjectedUseRecord(
+                // `@Injected<Foo>` states the key; otherwise it is the
+                // property's own type.
+                typeKey: attribute.genericArgumentKeys.first ?? typeKey,
+                // Read from whichever type supplied the key, so the shape
+                // and the key can never describe different types.
+                typeKeyShape: attribute.genericArgumentTypes.first?.typeKeyShape
+                    ?? injectedType.typeKeyShape,
+                macroName: "@Injected",
+                namesMemberDirectly: namesMemberDirectly,
+                location: location(for: Syntax(node))
+            ))
         }
     }
 
@@ -1674,13 +1671,79 @@ final class SourceCollector: SyntaxVisitor {
     /// `@injected` is rejected on a parameter that already has a default, on a
     /// variadic, and on `inout`: the generated overload drops the parameter and
     /// supplies the value itself, which none of those forms can express.
+    /// A **top-level** `func` carrying `@injected` parameters.
+    ///
+    /// Type members are collected by walking a type's member block; a global has
+    /// no type to walk, so it is picked up here. Its overload is a file-scope
+    /// function rather than an extension member — see
+    /// ``MarkedMemberRecord/MemberKind/globalFunction(name:returnType:)``.
+    ///
+    /// "Top level" is read from the tree rather than from `typeStack`, because
+    /// the stack is also empty inside a global `var`'s accessor — and a function
+    /// declared there is local, so nothing outside the file could call the
+    /// overload.
+    private func collectMarkedGlobalFunction(_ node: FunctionDeclSyntax) {
+        guard typeStack.isEmpty, Self.isTopLevel(node) else {
+            return
+        }
+        let location = self.location(for: Syntax(node))
+        let stated = statedIsolation(modifiers: node.modifiers, attributes: node.attributes)
+        validateStatedIsolation(
+            stated,
+            modifiers: node.modifiers,
+            attributes: node.attributes,
+            location: location
+        )
+        collectMarkedMember(
+            parameters: node.signature.parameterClause.parameters,
+            kind: .globalFunction(
+                name: node.name.text,
+                returnType: node.signature.returnClause?.type.trimmedDescription
+            ),
+            effects: ProviderEffects(from: node.signature.effectSpecifiers?.trimmedDescription),
+            memberIsGeneric: node.genericParameterClause != nil,
+            modifiers: node.modifiers,
+            typeName: nil,
+            typeKind: nil,
+            typeIsGeneric: false,
+            // Nothing encloses it, so only its own modifiers constrain access.
+            typeAccess: .public,
+            isolation: .explicit(stated.resolved(default: ambientIsolation)),
+            location: location
+        )
+    }
+
+    /// Whether a declaration sits directly in the file rather than inside any
+    /// body.
+    ///
+    /// Walked rather than counted: the chain to a top-level declaration is
+    /// `CodeBlockItem` -> `CodeBlockItemList` -> `SourceFile`, and counting
+    /// levels breaks the moment anything nests differently. Passing through a
+    /// body of any kind means the declaration is local, so nothing outside the
+    /// file could call an overload of it.
+    private static func isTopLevel(_ node: some DeclSyntaxProtocol) -> Bool {
+        var current = node.parent
+        while let ancestor = current {
+            if ancestor.is(SourceFileSyntax.self) {
+                return true
+            }
+            if ancestor.is(CodeBlockSyntax.self)
+                || ancestor.is(AccessorDeclSyntax.self)
+                || ancestor.is(ClosureExprSyntax.self) {
+                return false
+            }
+            current = ancestor.parent
+        }
+        return false
+    }
+
     private func collectMarkedMember(parameters: FunctionParameterListSyntax,
                                      kind: MarkedMemberRecord.MemberKind,
                                      effects: ProviderEffects,
                                      memberIsGeneric: Bool,
                                      modifiers: DeclModifierListSyntax?,
-                                     typeName: String,
-                                     typeKind: MarkedTypeKind,
+                                     typeName: String?,
+                                     typeKind: MarkedTypeKind?,
                                      typeIsGeneric: Bool,
                                      typeAccess: AccessRank,
                                      isolation: MarkedMemberIsolation,
@@ -1785,7 +1848,4 @@ final class SourceCollector: SyntaxVisitor {
             column: source.column
         )
     }
-
-    /// The source inside a computed property's braces, with the braces removed.
-    ///
 }

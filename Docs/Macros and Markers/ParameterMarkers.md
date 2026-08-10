@@ -81,6 +81,30 @@ final class C {
 // }
 ```
 
+### Global functions
+
+A top-level `func` is marked the same way, and gets a file-scope overload rather than one in
+an extension:
+
+```swift
+@Injectable
+final class Logger { init() {} }
+
+func audit(@injected logger: Logger, label: String) {}
+```
+
+```swift
+nonisolated func audit(label: String) {
+    audit(logger: Zerk<Logger>.inject(), label: label)
+}
+```
+
+Everything below applies to it unchanged — access level, generics, bubbling, isolation, and
+the rule that two overloads may not collide.
+
+A **local** function is not a global: one declared inside a body or an accessor is skipped,
+because nothing outside the file could call an overload of it.
+
 ### Constraints
 
 - The marked parameter's type must be resolvable in the module — `@Injectable`, with

@@ -72,6 +72,32 @@ The package vends three products: the `Zerk` library (the macros and the `Zerk<K
 
 The plugin generates the injectors **and** each key's interjection points into the module that declares the injectables. A test target that does `@testable import App` names those points with a key path; the lookups already compiled into `App` consult the scope in force at runtime. Attach the plugin to a test target only if that target itself declares injectables (as this package's own `ZerkTests` does, because its fixtures live in the test target). In an Xcode project, add `ZerkPlugin` under the declaring target's Build Phases → Run Build Tool Plug-ins.
 
+## Privacy manifest
+
+The `Zerk` library ships a `PrivacyInfo.xcprivacy`, so Xcode's privacy report for your app
+accounts for it without you writing anything. It declares nothing, because there is nothing
+to declare:
+
+| key | value |
+|---|---|
+| `NSPrivacyTracking` | `false` |
+| `NSPrivacyTrackingDomains` | empty |
+| `NSPrivacyCollectedDataTypes` | empty |
+| `NSPrivacyAccessedAPITypes` | empty |
+
+Zerk collects nothing, contacts nothing, and uses no [required-reason
+API](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api)
+— no user defaults, file timestamps, disk space, boot time, or active keyboards. The
+`ProcessInfo` it does touch is `environment`, to detect a SwiftUI preview, which is not on
+that list.
+
+`Zerk` is the only target that carries one, because it is the only target whose code reaches
+your app. `ZerkPlugin`, `ZerkCodegen` and the macro plugin all run on the build machine and
+are never linked into the binary; `ZerkTesting` is for test targets, which are not submitted.
+
+One consequence worth knowing: declaring a resource makes SwiftPM emit a `Zerk_Zerk.bundle`
+alongside the library. That is expected, and it is where the manifest lives.
+
 ## Build settings the plugin cannot see
 
 The plugin reads your source syntax, not your build settings. Anything about how the compiler is configured — the language mode above, `SWIFT_DEFAULT_ACTOR_ISOLATION`, the value injection policy — is restated in a `ZerkSettings.json` placed next to your target's sources, or at the package root. The full schema is in [Settings](../Plugin/Settings.md).

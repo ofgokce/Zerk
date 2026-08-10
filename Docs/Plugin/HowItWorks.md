@@ -30,7 +30,7 @@ Attach the plugin to every target that *declares* injectables. Both flavours are
 
 ## One file out
 
-The output is a single `ZerkGenerated/ZerkInjections.swift` in the build directory, declared as the command's only output so the build system reruns codegen exactly when a source file or `ZerkSettings.json` changes.
+The output is a single `Zerk.generated.swift` in the build directory, declared as the command's only output so the build system reruns codegen exactly when a source file or `ZerkSettings.json` changes.
 
 For this input:
 
@@ -78,11 +78,11 @@ extension Zerk<ApiServicing> {
 }
 
 extension Zerk<ApiServicing>.Interjection {
-    var `apiService`: Void {}
+    nonisolated var `apiService`: Void {}
 }
 
 extension Zerk<TimeInterval>.Interjection {
-    var `timeout`: Void {}
+    nonisolated var `timeout`: Void {}
 }
 ```
 
