@@ -15,6 +15,13 @@
 /// Only `typeKey` is rewritten. A parameter's `typeName` is the spelling the
 /// developer wrote at that site and stays as written, exactly as it does for
 /// canonicalization.
+///
+/// This runs unconditionally. It used to skip when there were no aliases, which
+/// stopped being a valid shortcut once `KeyAliases` began folding module
+/// qualifiers: `Swift` is known in every module, so any key *might* need
+/// rewriting and the early-out would silently miss it. The pass is cheap —
+/// `unqualified` returns immediately for a key with no dot, which is nearly all
+/// of them.
 struct AliasRewriter {
 
     let aliases: KeyAliases
@@ -25,7 +32,6 @@ struct AliasRewriter {
     /// `TypeRecord` next. Pinned by
     /// `ZerkAliasTests."the rewriting pass carries every TypeRecord field it does not rewrite"`.
     func rewrite(types: [TypeRecord]) -> [TypeRecord] {
-        guard !aliases.isEmpty else { return types }
         return types.map { type in
             var rewritten = type
             rewritten.injectableKeys = rewrite(keyed: type.injectableKeys)
@@ -39,7 +45,6 @@ struct AliasRewriter {
     }
 
     func rewrite(values: [InjectableValueRecord]) -> [InjectableValueRecord] {
-        guard !aliases.isEmpty else { return values }
         return values.map { value in
             let representative = aliases.representative(for: value.typeKey)
             var rewritten = value
@@ -62,7 +67,6 @@ struct AliasRewriter {
     /// `keyDisplayName` as written: it names a member in *another* module, whose
     /// spelling this module's alias groups have no say over.
     func rewrite(importedValues: [ImportedInjectableValueRecord]) -> [ImportedInjectableValueRecord] {
-        guard !aliases.isEmpty else { return importedValues }
         return importedValues.map { value in
             var rewritten = value
             rewritten.typeKey = aliases.representative(for: value.typeKey)
@@ -71,7 +75,6 @@ struct AliasRewriter {
     }
 
     func rewrite(injectedUses: [InjectedUseRecord]) -> [InjectedUseRecord] {
-        guard !aliases.isEmpty else { return injectedUses }
         return injectedUses.map { use in
             var rewritten = use
             rewritten.typeKey = aliases.representative(for: use.typeKey)
@@ -80,7 +83,6 @@ struct AliasRewriter {
     }
 
     func rewrite(markedMembers: [MarkedMemberRecord]) -> [MarkedMemberRecord] {
-        guard !aliases.isEmpty else { return markedMembers }
         return markedMembers.map { member in
             var rewritten = member
             rewritten.parameters = member.parameters.map { marked in
@@ -100,7 +102,6 @@ struct AliasRewriter {
     /// same type, so if one of them legally takes `any`, the representative does
     /// too.
     func rewrite(keyDisplayNames: [String: String]) -> [String: String] {
-        guard !aliases.isEmpty else { return keyDisplayNames }
 
         var rewritten: [String: String] = [:]
         var needsAny = Set<String>()

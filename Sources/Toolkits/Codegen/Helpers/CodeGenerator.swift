@@ -72,7 +72,8 @@ public struct CodeGenerator {
 
         // Alias groups merge keys before anything compares them, so resolution
         // and generation are alias-aware without knowing aliases exist.
-        let aliases = KeyAliases(declarations: collector.aliasDeclarations)
+        let aliases = KeyAliases(declarations: collector.aliasDeclarations,
+                                  knownModules: collector.importedModules)
         let rewriter = AliasRewriter(aliases: aliases)
         let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
         let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))

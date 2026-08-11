@@ -293,10 +293,14 @@ struct ZerkAliasTests {
         #expect(aliases.aliases(of: "Storing").sorted() == ["Caching", "Persisting"])
     }
 
-    @Test("an empty alias set changes nothing")
+    @Test("an empty alias set changes nothing but the implicit qualifiers")
     func emptyAliasSetIsIdentity() {
-        #expect(KeyAliases.empty.isEmpty)
         #expect(KeyAliases.empty.representative(for: "Storing") == "Storing")
+        #expect(KeyAliases.empty.representative(for: "Outer.Inner") == "Outer.Inner")
+        // `Swift` is implicit, so even with no declarations and no imports this
+        // is not quite the identity — which is why `AliasRewriter` no longer
+        // short-circuits on an empty set.
+        #expect(KeyAliases.empty.representative(for: "Swift.String") == "String")
     }
 
     // MARK: - The rewriting pass carries every field

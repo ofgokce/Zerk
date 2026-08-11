@@ -10,7 +10,13 @@ The codegen parses source; it does not type-check.
 
 Spellings Swift treats as one type *are* unified into one key, because that much is decidable from syntax: `[T]`/`Array<T>`, `[K: V]`/`Dictionary<K, V>`, `T?`/`T!`/`Optional<T>`, `()`/`Void`, `(T)`/`T`, `A & B`/`B & A`, and `P`/`any P`. Canonicalization nests, so `[String]?` and `Optional<Array<String>>` are the same key.
 
-What it cannot unify needs real type resolution, and stays distinct: module qualification (`ModuleA.Service` vs `Service`), and any `typealias` you have not marked with `@ZerkAlias` — the plugin cannot see through an alias on its own, which is exactly why that macro exists. A provider parameter like `seed: Int` is likewise indistinguishable from an injectable dependency except by whether a matching injectable exists.
+**Module qualification is unified too, for the modules you name.** `Core.Service` and `Service` are one key whenever [`#ZerkImport(module: "Core")`](../Macros%20and%20Markers/ImportedInjectables.md) is present — which it has to be anyway for the generated file to compile against that module. Two things make that the right boundary: inside a file importing `Core` the spellings are interchangeable by definition, and the short one Zerk emits still resolves, because the generated file imports the same module.
+
+**`Swift` is the one module you never declare.** `Swift.String` and `String` are one key with no `#ZerkImport` at all, because the language implicitly imports `Swift` into every file — the generated one included — so the short spelling always resolves. Nothing else gets that: `Foundation.Date` still needs `#ZerkImport(module: "Foundation")`, which the generated file needs anyway.
+
+A prefix from a module you have *not* imported is left alone. Syntax cannot tell `Outer.Inner` (a nested type) from `Core.Inner` (a module-qualified one), so the imported-module list is the only evidence Zerk has — and stripping without it would both mis-key the dependency and emit a name the generated file could not resolve. Only the leading component goes: `Core.Outer.Inner` keeps its nesting.
+
+What still needs real type resolution, and stays distinct: any `typealias` you have not marked with `@ZerkAlias` — the plugin cannot see through an alias on its own, which is exactly why that macro exists. A provider parameter like `seed: Int` is likewise indistinguishable from an injectable dependency except by whether a matching injectable exists.
 
 `any` is a special case. Zerk cannot tell a protocol from a superclass or a struct, and `any` is only legal on an existential — so keys *match* with `any` stripped, but the generated file emits the spelling you wrote. If one declaration says `P` and another `any P`, they are one key and `any P` is what gets emitted.
 
