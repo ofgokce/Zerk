@@ -338,6 +338,54 @@ struct GenericEmissionTests {
         #expect(compiled.didCompile, "\(compiled.compilerOutput)")
     }
 
+    @Test("public: reaches a parameterized key")
+    func parameterizedKeyIsExportable() {
+        // `parameterized: true` files the key under a *shape*
+        // (`Boxable<#0, #1>`), and `public:` used to be applied to a key
+        // recomputed from the attribute — the written `Boxable`. The flag then
+        // landed on a key nothing had registered, and the export vanished with
+        // no diagnostic.
+        let result = CompileFixture.generateWithResolution(source: """
+        public protocol Boxable<X, Y> { associatedtype X; associatedtype Y }
+
+        @Injectable<any Boxable>(parameterized: true, public: true)
+        public struct Box<X, Y>: Boxable {
+            @InjectableProviding
+            public init(_ x: X, _ y: Y) {}
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty)
+        #expect(result.output.output.contains("public static func box<X, Y>"))
+        #expect(result.output.output.contains("public static func inject<X, Y>"))
+    }
+
+    @Test("primary: reaches a parameterized key, so a conflict can be settled")
+    func parameterizedKeyCanBePrimary() {
+        // Same cause as the export, but this one failed loudly and absurdly:
+        // "none is primary" against a declaration saying `primary: true`.
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol Boxable<X, Y> { associatedtype X; associatedtype Y }
+
+        @Injectable<any Boxable>(parameterized: true, primary: true)
+        struct BoxA<X, Y>: Boxable {
+            @InjectableProviding
+            init(_ x: X, _ y: Y) {}
+        }
+
+        @Injectable<any Boxable>(parameterized: true)
+        struct BoxB<X, Y>: Boxable {
+            @InjectableProviding
+            init(_ x: X, _ y: Y) {}
+        }
+        """)
+
+        #expect(result.diagnostics.filter { $0.severity == .error }.isEmpty)
+        // The marked one wins, rather than the conflict being unresolvable.
+        #expect(result.output.output.contains("boxA(x, y)"))
+        #expect(!result.output.output.contains("boxB(x, y)\n    }\n\n}"))
+    }
+
     @Test("a parameterized existential key gates its extension on availability")
     func parameterizedKeyIsAvailabilityGated() {
         // Parameterized existentials are iOS 16 / macOS 13. The plugin cannot

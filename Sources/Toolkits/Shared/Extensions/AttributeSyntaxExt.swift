@@ -22,9 +22,23 @@ public extension AttributeSyntax {
 
     /// The types written inside `@Attribute<A, B>` — how every Zerk attribute
     /// carries the key it applies to. Empty when unparameterized.
+    ///
+    /// Reads a module-qualified attribute too, for the same reason ``name``
+    /// does: `@Zerk.Injectable<Service>` is `@Injectable<Service>`. Handling one
+    /// spelling here and both there is worse than handling neither — the
+    /// attribute is recognised, its key is silently dropped, and the type
+    /// registers under itself with no diagnostic to say so.
     var genericArgumentTypes: [TypeSyntax] {
-        guard let identifier = attributeName.as(IdentifierTypeSyntax.self),
-              let clause = identifier.genericArgumentClause else {
+        let clause: GenericArgumentClauseSyntax?
+        if let identifier = attributeName.as(IdentifierTypeSyntax.self) {
+            clause = identifier.genericArgumentClause
+        } else if let member = attributeName.as(MemberTypeSyntax.self) {
+            clause = member.genericArgumentClause
+        } else {
+            clause = nil
+        }
+
+        guard let clause else {
             return []
         }
 

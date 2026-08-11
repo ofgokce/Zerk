@@ -580,7 +580,26 @@ final class SourceCollector: SyntaxVisitor {
 
         var injectableKeys: [String: AttributeLocation] = [:]
         var parameterizedKeys: [String: AttributeLocation] = [:]
+        // `public:` and `primary:` both ride on the attribute that names the
+        // key, so `@Injectable<A>(public: true) @Injectable<B>` exports A and
+        // leaves B internal.
+        var exportedKeys: [String: AttributeLocation] = [:]
+        var primaryKeys: [String: AttributeLocation] = [:]
+
         for attribute in injectableAttributes {
+            // Resolved once per attribute, and every flag below reads *this*.
+            // These used to be three loops that each recomputed the key from
+            // `genericArgumentKeys`, which silently disagreed with the
+            // `parameterized:` branch: that files under a shape
+            // (`Boxable<#0, #1>`) while a recomputation yields the written
+            // `Boxable`. The flags then landed on a key nothing was registered
+            // under, so a parameterized existential could not be exported and
+            // could not win a conflict — the latter reported as "none is
+            // primary" on a declaration that said `primary: true`.
+            let keys: [String]
+            let displayKeys: [String]
+            var isParameterized = false
+
             // `parameterized: true` rewrites the written key: the type's own
             // parameters become the protocol's primary associated types, so
             // `@Injectable<any P>` on `Box<X, Y>` keys on `any P<X, Y>`. That is
@@ -591,53 +610,37 @@ final class SourceCollector: SyntaxVisitor {
                                     genericParameters: genericParameters,
                                     at: location) {
             case .key(let key, let display):
-                injectableKeys[key] = location
-                parameterizedKeys[key] = location
-                recordKeyDisplayName(display, for: key)
-                continue
+                keys = [key]
+                displayKeys = [display]
+                isParameterized = true
             case .invalid:
                 // Already reported. Falling through to the plain key path would
                 // report a second, unrelated error about the same attribute.
                 continue
             case .notRequested:
-                break
+                let genericKeys = attribute.genericArgumentKeys
+                keys = genericKeys.isEmpty ? [ownKey] : genericKeys
+                // Paired with `keys` by index: the same types, canonicalized
+                // with `any` kept. An unparameterized @Injectable keys on the
+                // type itself, which is a bare identifier unless the type is
+                // generic.
+                displayKeys = genericKeys.isEmpty
+                    ? [ownDisplayKey]
+                    : attribute.genericArgumentDisplayKeys
             }
-
-            let genericKeys = attribute.genericArgumentKeys
-            let keys = genericKeys.isEmpty ? [ownKey] : genericKeys
-            // Paired with `keys` by index: the same types, canonicalized with
-            // `any` kept. An unparameterized @Injectable keys on the type
-            // itself, which is a bare identifier unless the type is generic.
-            let displayKeys = genericKeys.isEmpty
-                ? [ownDisplayKey]
-                : attribute.genericArgumentDisplayKeys
 
             for (offset, key) in keys.enumerated() {
                 injectableKeys[key] = location
                 recordKeyDisplayName(displayKeys[offset], for: key)
-            }
-        }
-
-        // `public:` rides on the attribute that names the key, exactly as
-        // `primary:` does, so `@Injectable<A>(public: true) @Injectable<B>`
-        // exports A and leaves B internal.
-        var exportedKeys: [String: AttributeLocation] = [:]
-        for attribute in injectableAttributes where attribute.publicArgument.isTrue {
-            let genericKeys = attribute.genericArgumentKeys
-            let keys = genericKeys.isEmpty ? [ownKey] : genericKeys
-            for key in keys {
-                exportedKeys[key] = location
-            }
-        }
-
-        // `@Injectable<A>(primary: true) @Injectable<B>` claims A only: primacy
-        // rides on the attribute that names the key, not on the declaration.
-        var primaryKeys: [String: AttributeLocation] = [:]
-        for attribute in injectableAttributes where attribute.primaryArgument.isTrue {
-            let genericKeys = attribute.genericArgumentKeys
-            let keys = genericKeys.isEmpty ? [ownKey] : genericKeys
-            for key in keys {
-                primaryKeys[key] = location
+                if isParameterized {
+                    parameterizedKeys[key] = location
+                }
+                if attribute.publicArgument.isTrue {
+                    exportedKeys[key] = location
+                }
+                if attribute.primaryArgument.isTrue {
+                    primaryKeys[key] = location
+                }
             }
         }
 
