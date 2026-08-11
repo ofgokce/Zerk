@@ -511,6 +511,9 @@ final class SourceCollector: SyntaxVisitor {
 
         let isSingleton = node.attributes.hasAttribute(named: "Singleton")
         let location = self.location(for: Syntax(node))
+        let typeScope = injectionScope(in: node.attributes,
+                                       isSingleton: isSingleton,
+                                       at: location)
         // The type's own parameters are not on `typeStack` yet — `enter` pushes
         // the frame only after this returns — so they are unioned in by hand.
         let scope = genericScope.union(genericParameters)
@@ -539,12 +542,24 @@ final class SourceCollector: SyntaxVisitor {
             }
         }
 
-        if isSingleton && (node.is(StructDeclSyntax.self) || node.is(EnumDeclSyntax.self)) {
-            diagnostics.append(CodegenDiagnostic(
-                severity: .error,
-                message: "@Singleton can only be applied to reference types (class or actor).",
-                location: location
-            ))
+        if node.is(StructDeclSyntax.self) || node.is(EnumDeclSyntax.self) {
+            // A shared value type hands each reader its own copy, so "one
+            // instance" is not something the annotation can deliver — and the
+            // silence would be the worst part, since the graph would look right
+            // and mutations would go nowhere.
+            if isSingleton {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "@Singleton can only be applied to reference types (class or actor).",
+                    location: location
+                ))
+            } else if typeScope != nil {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "@Scoped can only be applied to reference types (class or actor). A value type is copied on every read, so keeping one for a scope would keep nothing.",
+                    location: location
+                ))
+            }
         }
 
         // A generic type is recorded in full — parameters, providers, and which
@@ -818,11 +833,51 @@ final class SourceCollector: SyntaxVisitor {
                 typedProviders: typedProviders,
                 initializers: initializers,
                 isSingleton: isSingleton,
+                scope: typeScope,
                 isolation: typeIsolation,
                 genericParameters: genericParameters,
                 parameterizedKeys: parameterizedKeys
             )
         )
+    }
+
+    /// The scope named by `@Scoped(.session)`, or `nil` when the type carries no
+    /// usable one.
+    ///
+    /// Reports, rather than guesses, in the two cases where the attribute says
+    /// something Zerk cannot act on: paired with `@Singleton`, and written with
+    /// an argument that is not a leading-dot member access.
+    private func injectionScope(in attributes: AttributeListSyntax,
+                                isSingleton: Bool,
+                                at location: AttributeLocation) -> InjectionScopeRecord? {
+        guard let attribute = attributes.attributes(named: "Scoped").first else {
+            return nil
+        }
+
+        if isSingleton {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Singleton and @Scoped both say how long one instance is kept, and they disagree — a singleton lives for the process, a scoped instance until its scope is reset. Keep the one you meant.",
+                location: location
+            ))
+            return nil
+        }
+
+        guard let argument = attribute.labeledArguments.first(where: { $0.label == nil }),
+              let member = argument.expression.as(MemberAccessExprSyntax.self),
+              member.base == nil else {
+            // See ``InjectionScopeRecord``: the leading-dot form is what makes
+            // the scope both echoable into the generated storage and comparable
+            // against another attribute's.
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Scoped needs its scope written in leading-dot form — @Scoped(.session). Zerk reads this from source and never evaluates it, so it needs a name it can both compare and write back out.",
+                location: location
+            ))
+            return nil
+        }
+
+        return InjectionScopeRecord(identity: member.declName.baseName.text)
     }
 
     /// What `parameterized:` asked for, if anything.
@@ -1230,14 +1285,16 @@ final class SourceCollector: SyntaxVisitor {
         )
     }
 
-    /// Records `@Injected` properties so the generator can check the chain
-    /// behind each one.
+    /// Records `@Injected` and `@InjectedDynamically` properties so the generator can
+    /// check the chain behind each one.
     ///
-    /// `@Injected` expands to a synchronous, non-throwing accessor, so a chain
-    /// that turns out async, throwing, or cross-domain has to be reported
-    /// against the property rather than left to fail in generated code.
+    /// Both expand to a synchronous, non-throwing accessor, so a chain that turns
+    /// out async, throwing, or cross-domain has to be reported against the
+    /// property rather than left to fail in generated code. The two differ only
+    /// in *when* they resolve, which the check does not care about.
     private func collectInjectedUse(_ node: VariableDeclSyntax) {
         let attributes = node.attributes.attributes(named: "Injected")
+            + node.attributes.attributes(named: "InjectedDynamically")
         guard !attributes.isEmpty,
               let binding = node.bindings.first,
               let annotation = binding.typeAnnotation else {
@@ -1271,7 +1328,9 @@ final class SourceCollector: SyntaxVisitor {
                 // and the key can never describe different types.
                 typeKeyShape: attribute.genericArgumentTypes.first?.typeKeyShape
                     ?? injectedType.typeKeyShape,
-                macroName: "@Injected",
+                // Named so the diagnostic quotes the attribute the developer
+                // actually wrote.
+                macroName: "@\(attribute.name)",
                 namesMemberDirectly: namesMemberDirectly,
                 location: location(for: Syntax(node))
             ))
@@ -1475,22 +1534,33 @@ final class SourceCollector: SyntaxVisitor {
         )
 
         // The produced type is a *name*, so the "reference types only" check a
-        // type declaration gets cannot be made here — Zerk reads syntax and
-        // cannot tell a class from a struct it never sees. The developer's word
-        // is taken, exactly as `@Isolated`'s is; storing a value type shares a
-        // copy per read rather than an instance, which is inert rather than
-        // unsound.
+        // type declaration gets cannot be made here — for `@Singleton` or for
+        // `@Scoped`. Zerk reads syntax and cannot tell a class from a struct it
+        // never sees. The developer's word is taken, exactly as `@Isolated`'s
+        // is; keeping a value type shares a copy per read rather than an
+        // instance, which is inert rather than unsound.
         var isSingleton = allAttributes.hasAttribute(named: "Singleton")
-        if isSingleton, !genericParameters.isEmpty {
+        var scope = injectionScope(in: allAttributes, isSingleton: isSingleton, at: location)
+        if !genericParameters.isEmpty {
             // Same reason a generic type cannot be one: static stored
             // properties are illegal in a generic context, so there is nowhere
             // to keep an instance per specialization.
-            diagnostics.append(CodegenDiagnostic(
-                severity: .error,
-                message: GenericRefusal.singleton(type: baseName),
-                location: location
-            ))
-            isSingleton = false
+            if isSingleton {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: GenericRefusal.singleton(type: baseName),
+                    location: location
+                ))
+                isSingleton = false
+            }
+            if scope != nil {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: GenericRefusal.scoped(type: baseName),
+                    location: location
+                ))
+                scope = nil
+            }
         }
 
         types.append(
@@ -1503,6 +1573,7 @@ final class SourceCollector: SyntaxVisitor {
                 typedProviders: [:],
                 initializers: [],
                 isSingleton: isSingleton,
+                scope: scope,
                 isolation: provider.isolation,
                 genericParameters: genericParameters
             )

@@ -83,6 +83,12 @@ public enum GenericRefusal {
         "@Singleton cannot be applied to the generic type '\(name)'. A singleton is stored in a static stored property, which Swift does not allow in a generic type — there is nowhere to keep one instance per specialization."
     }
 
+    /// Same reason as ``singleton(type:)``: the storage is one static stored
+    /// property, and a generic type would need one per specialization.
+    public static func scoped(type name: String) -> String {
+        "@Scoped cannot be applied to the generic type '\(name)'. A scoped instance is kept in a static stored property, which Swift does not allow in a generic type — there is nowhere to keep one instance per specialization."
+    }
+
     /// `'E'`, `'E' and 'F'`, `'A', 'B' and 'C'` — the parameters named the way a
     /// sentence names them.
     static func list(_ names: [String]) -> String {

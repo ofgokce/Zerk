@@ -79,24 +79,37 @@ struct GeneratorOutputBuilder {
         }
     }
 
-    /// One `@Singleton`'s shared instance, as it appears in `_$zerk_singletons`.
+    /// One kept instance — a `@Singleton`'s or a `@Scoped`'s — as it appears in
+    /// the generated storage namespace.
     ///
-    /// There is exactly one of these per singleton *type*, which is the whole
-    /// point: storing it per key would give a type injectable under two keys two
-    /// instances, and "singleton" would only hold within a key.
-    struct SingletonStorage {
+    /// There is exactly one of these per *type*, which is the whole point:
+    /// storing it per key would give a type injectable under two keys two
+    /// instances, and "one instance" would only hold within a key.
+    struct SharedStorage {
         let memberName: String
         let typeName: String
+        /// The expression that builds the instance. It lands in the storage
+        /// initializer for a singleton and in the *member* for a scoped type —
+        /// see ``scopedStorageLines(_:)`` for why the two differ.
         let construction: String
         let isolation: ProviderIsolation
+        /// `nil` for a singleton; the scope it is kept for otherwise.
+        let scope: InjectionScopeRecord?
     }
 
-    /// The name of the generated namespace holding every shared instance.
+    /// The name of the generated namespace holding every process-lifetime
+    /// instance.
     ///
     /// File-private, and prefixed to stay out of the way of anything a developer
     /// might declare — the module's own code reaches these through `Zerk<Key>`,
     /// never directly.
     static let singletonStorageEnumName = "_$zerk_singletons"
+
+    /// The same, for the boxes `@Scoped` instances are kept in. A separate
+    /// namespace rather than a shared one because the two hold different things:
+    /// a singleton's member *is* the instance, a scoped one is a
+    /// ``ZerkScopedBox`` that may or may not be holding one right now.
+    static let scopedStorageEnumName = "_$zerk_scoped"
 
     /// Rebuilt on each access rather than stored — it is a pure function of
     /// `values` and `primaryResolutions`, both of which are immutable here.
@@ -131,7 +144,7 @@ struct GeneratorOutputBuilder {
 
         // Built up front: the storage is per type while the members reading it
         // are per key, so it cannot be assembled from inside the per-key loop.
-        let singletonStorage = singletonStorage(diagnostics: &diagnostics)
+        let sharedStorage = sharedStorage(diagnostics: &diagnostics)
 
         // @Injected expands to a synchronous, non-throwing accessor; a chain
         // containing an async or throwing provider — or one that crosses an
@@ -270,7 +283,7 @@ struct GeneratorOutputBuilder {
         }
 
         // Ahead of the extensions, which read from it.
-        output += singletonStorageLines(singletonStorage)
+        output += sharedStorageLines(sharedStorage)
 
         let grouped = Dictionary(grouping: resolutions, by: \.injectableKey)
         for injectableKey in grouped.keys.sorted() {
@@ -378,9 +391,9 @@ struct GeneratorOutputBuilder {
                     ))
                 }
 
-                sendabilityChecks += classification.crossDomainSingletonDependencies.map {
+                sendabilityChecks += classification.crossDomainSharedDependencies.map {
                     SendabilityCheck(
-                        singletonTypeName: $0,
+                        shared: $0,
                         consumerTypeName: provider.typeName,
                         consumerIsolation: provider.isolation
                     )
@@ -391,7 +404,7 @@ struct GeneratorOutputBuilder {
                     injectableKey: injectableKey,
                     classification: classification,
                     hasUniqueMemberName: memberNameCounts[memberName(for: provider)] == 1,
-                    singletonStorage: singletonStorage,
+                    sharedStorage: sharedStorage,
                     pointNames: pointNames,
                     points: &points,
                     diagnostics: &diagnostics
@@ -450,7 +463,7 @@ struct GeneratorOutputBuilder {
                              injectableKey: String,
                              classification: ProviderClassification,
                              hasUniqueMemberName: Bool,
-                             singletonStorage: [String: SingletonStorage],
+                             sharedStorage: [String: SharedStorage],
                              pointNames: [String: String],
                              points: inout [InterjectionPoint],
                              diagnostics: inout [CodegenDiagnostic]) -> [String]? {
@@ -463,17 +476,17 @@ struct GeneratorOutputBuilder {
         let keyText = displayName(for: injectableKey)
         let access = exportedAccessPrefix(for: provider, injectableKey: injectableKey)
 
-        if provider.isSingleton {
-            // No entry means the shared instance had no legal form and the
-            // reason was already reported against the type; emitting a member
-            // that reads storage which does not exist would bury that behind a
-            // compile error in generated code.
-            guard let storage = singletonStorage[provider.typeName] else {
+        if provider.isShared {
+            // No entry means the instance had no legal form and the reason was
+            // already reported against the type; emitting a member that reads
+            // storage which does not exist would bury that behind a compile
+            // error in generated code.
+            guard let storage = sharedStorage[provider.typeName] else {
                 return nil
             }
             let point = pointNames[pointIdentity(for: provider)] ?? memberName
             points.append(InterjectionPoint(scope: .key(injectableKey), name: point))
-            return singletonLines(
+            return sharedInstanceLines(
                 for: provider,
                 injectableKey: injectableKey,
                 access: access,
@@ -645,38 +658,43 @@ struct GeneratorOutputBuilder {
         ]
     }
 
-    // MARK: - Singletons
+    // MARK: - Kept instances
 
-    /// Builds the shared instance for every `@Singleton` in the module, keyed by
-    /// the type that owns it.
+    /// Builds the entry for every `@Singleton` and `@Scoped` in the module,
+    /// keyed by the type that owns it.
     ///
     /// One entry per *type*, not per key. `Zerk<A>` and `Zerk<B>` are distinct
-    /// generic specializations with distinct static storage, so a singleton
-    /// stored on them directly would exist once per key — "singleton" would only
-    /// hold within a key, which is not what the annotation says.
+    /// generic specializations with distinct static storage, so an instance
+    /// stored on them directly would exist once per key — "one instance" would
+    /// only hold within a key, which is not what either annotation says.
+    ///
+    /// The two lifetimes share this pass because everything it decides is about
+    /// *sharing* rather than duration: which type owns the storage, what the
+    /// storage is called, and whether the instance can be built at all. Where
+    /// they part company is emission — see ``sharedStorageLines(_:)``.
     ///
     /// Runs ahead of the per-key emission because the validation is per type
     /// too: checking inside the member loop would report the same unbuildable
-    /// singleton once for every key it claims.
-    private func singletonStorage(diagnostics: inout [CodegenDiagnostic]) -> [String: SingletonStorage] {
-        var storage: [String: SingletonStorage] = [:]
+    /// instance once for every key it claims.
+    private func sharedStorage(diagnostics: inout [CodegenDiagnostic]) -> [String: SharedStorage] {
+        var storage: [String: SharedStorage] = [:]
         var attempted = Set<String>()
         var claimedNames: [String: String] = [:]
         let classifier = self.classifier
 
         // Sorted so the enum's members, and any diagnostic, land in the same
         // order on every build.
-        let singletons = resolutions
-            .filter(\.isSingleton)
+        let shared = resolutions
+            .filter(\.isShared)
             .sorted { ($0.typeName, $0.injectableKey) < ($1.typeName, $1.injectableKey) }
 
-        for resolution in singletons {
+        for resolution in shared {
             // The resolver has already proved every key of this type resolves to
             // the same provider, so the first one seen speaks for all of them.
             guard attempted.insert(resolution.typeName).inserted else {
                 continue
             }
-            guard let entry = singletonStorageEntry(
+            guard let entry = sharedStorageEntry(
                 for: resolution,
                 classification: classifier.classify(resolution),
                 diagnostics: &diagnostics
@@ -684,10 +702,17 @@ struct GeneratorOutputBuilder {
                 continue
             }
 
+            // Checked across both namespaces rather than within each. A type is
+            // only ever in one of them, so a collision means two type names that
+            // lower-camel-case alike — a problem wherever they landed, and one
+            // whose fix does not depend on which enum it was.
             if let owner = claimedNames[entry.memberName] {
+                let enumName = entry.scope == nil
+                    ? Self.singletonStorageEnumName
+                    : Self.scopedStorageEnumName
                 diagnostics.append(CodegenDiagnostic(
                     severity: .error,
-                    message: "@Singleton '\(resolution.typeName)' and '\(owner)' both store as '\(entry.memberName)' in \(Self.singletonStorageEnumName). Rename one of the types.",
+                    message: "\(resolution.sharingAttributeName) '\(resolution.typeName)' and '\(owner)' both store as '\(entry.memberName)' in \(enumName). Rename one of the types.",
                     location: resolution.provider.location
                 ))
                 continue
@@ -700,18 +725,26 @@ struct GeneratorOutputBuilder {
         return storage
     }
 
-    /// Validates one `@Singleton` and describes the storage to emit for it.
+    /// Validates one kept instance and describes the storage to emit for it.
     ///
-    /// Storage is initialized synchronously, which is why a singleton whose
-    /// dependencies need `await` — including across an isolation hop — is
-    /// reported as unbuildable rather than silently made async.
-    private func singletonStorageEntry(for provider: ProviderResolution,
-                                       classification: ProviderClassification,
-                                       diagnostics: inout [CodegenDiagnostic]) -> SingletonStorage? {
+    /// The three rules are the same for both lifetimes, and for one underlying
+    /// reason: the instance is built exactly once, from a synchronous
+    /// expression, with no help from the caller. The *reason it must be
+    /// synchronous* differs, so each says its own — a singleton's storage is a
+    /// `static let`, while a scoped instance is built under the box's lock.
+    private func sharedStorageEntry(for provider: ProviderResolution,
+                                    classification: ProviderClassification,
+                                    diagnostics: inout [CodegenDiagnostic]) -> SharedStorage? {
+        let attribute = provider.sharingAttributeName
+        // Why "once, synchronously" is not negotiable for this lifetime.
+        let synchronyReason = provider.isSingleton
+            ? "a singleton's storage is initialized synchronously"
+            : "a scoped instance is built while its box holds a lock, so that exactly one is built however many callers race — and a lock cannot be held across an 'await'"
+
         if !classification.isFullyResolvable {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "@Singleton injectables cannot accept external arguments.",
+                message: "\(attribute) injectables cannot accept external arguments. The instance is built once and handed to every caller, so there is no answer to which caller's arguments it was built with.",
                 location: provider.provider.location
             ))
             return nil
@@ -720,17 +753,15 @@ struct GeneratorOutputBuilder {
         if provider.provider.effects.isAsync || provider.provider.effects.isThrowing {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "@Singleton providers cannot be async or throwing.",
+                message: "\(attribute) providers cannot be async or throwing: \(synchronyReason).",
                 location: provider.provider.location
             ))
             return nil
         }
 
-        // A `static let` initializer cannot `await`, and @Singleton is
-        // synchronous by definition, so a dependency that has to be resolved in
-        // the body has no legal generated form. This fires only when two
-        // distinct domains collide: nonisolated dependencies reach an isolated
-        // singleton for free.
+        // A dependency that has to be resolved in the body has no legal
+        // generated form here. This fires only when two distinct domains
+        // collide: nonisolated dependencies reach an isolated instance for free.
         if classification.requiresSplit {
             let crossings = classification.bodyResolved.map(\.parameter.typeName).joined(separator: ", ")
             let reason = classification.hasIsolationCrossing
@@ -738,11 +769,13 @@ struct GeneratorOutputBuilder {
                 : "resolving '\(crossings)' is async or throwing"
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "@Singleton '\(provider.typeName)' cannot be built: \(reason), but a singleton's storage is initialized synchronously. Make the dependency share '\(provider.typeName)'s isolation, or drop @Singleton and resolve it through inject().",
+                message: "\(attribute) '\(provider.typeName)' cannot be built: \(reason), but \(synchronyReason). Make the dependency share '\(provider.typeName)'s isolation, or drop \(attribute) and resolve it through inject().",
                 location: provider.provider.location
             ))
             return nil
         }
+
+        diagnostics += stalenessDiagnostics(for: provider, classification: classification)
 
         let defaults = classification.defaultExpressions
 
@@ -753,24 +786,93 @@ struct GeneratorOutputBuilder {
             ? builderConstruction(for: provider)
             : "\(builderConstruction(for: provider))(\(builderArguments(provider.provider.parameters, useParameterNames: false, defaults: defaults)))"
 
-        return SingletonStorage(
+        return SharedStorage(
             memberName: provider.typeName.memberNameForType,
-            typeName: provider.singletonStorageTypeName,
+            typeName: provider.sharedStorageTypeName,
             construction: construction,
-            isolation: provider.isolation
+            isolation: provider.isolation,
+            scope: provider.scope
         )
     }
 
-    /// Emits the namespace holding every shared instance, or nothing when the
-    /// module declares no singletons.
-    private func singletonStorageLines(_ storage: [String: SingletonStorage]) -> [String] {
-        guard !storage.isEmpty else {
+    /// Reports a kept instance that would outlive a scoped dependency and go on
+    /// holding it after that scope is reset.
+    ///
+    /// The hazard is one-directional and worth stating plainly: `Zerk.reset(_:)`
+    /// clears the *box*, not the references already handed out. Anything longer-
+    /// lived that captured the old instance keeps using it, silently, while
+    /// everything resolved afterwards sees the new one. Two of those get a
+    /// diagnostic, and they get different ones because Zerk knows different
+    /// amounts about them.
+    ///
+    /// - **A singleton holding a scoped instance is an error.** A singleton is
+    ///   built once and never dropped, so it outlives *every* scope by
+    ///   construction. There is no configuration in which this is what someone
+    ///   meant.
+    /// - **A scope holding a different scope's instance is a warning.** Zerk
+    ///   knows the two scopes are not the same one; it has no idea which is
+    ///   reset first, or whether either ever is. `.request` inside `.session` is
+    ///   a bug; `.session` inside `.application` is fine. Only the developer
+    ///   knows which they wrote, so this reports without failing the build.
+    ///
+    /// A transient dependent needs neither: it is rebuilt on every resolution
+    /// and so can never be the one holding something stale.
+    private func stalenessDiagnostics(for provider: ProviderResolution,
+                                      classification: ProviderClassification)
+    -> [CodegenDiagnostic] {
+        let scoped = classification.scopedDependencies
+        guard !scoped.isEmpty else {
+            return []
+        }
+
+        func describe(_ dependencies: [SharedDependency]) -> String {
+            dependencies
+                .map { "@Scoped(.\($0.scope ?? "")) '\($0.typeName)'" }
+                .joined(separator: ", ")
+        }
+
+        if provider.isSingleton {
+            return [CodegenDiagnostic(
+                severity: .error,
+                message: "@Singleton '\(provider.typeName)' depends on \(describe(scoped)). A singleton is built once and never dropped, so after that scope is reset it would still be holding the instance from before. Give '\(provider.typeName)' the same @Scoped lifetime, or resolve the dependency per use with @InjectedDynamically.",
+                location: provider.provider.location
+            )]
+        }
+
+        guard let ownScope = provider.scope?.identity else {
+            return []
+        }
+        let foreign = scoped.filter { $0.scope != ownScope }
+        guard !foreign.isEmpty else {
+            // Same scope: both are dropped by the same reset and both are
+            // rebuilt on the next resolution, so nothing goes stale.
+            return []
+        }
+
+        return [CodegenDiagnostic(
+            severity: .warning,
+            message: "@Scoped(.\(ownScope)) '\(provider.typeName)' depends on \(describe(foreign)). Resetting that scope alone would leave '\(provider.typeName)' holding the old instance. Zerk can see the scopes differ but not which outlives which, so this is a warning: put them in one scope, or resolve the dependency per use with @InjectedDynamically.",
+            location: provider.provider.location
+        )]
+    }
+
+    /// Emits both storage namespaces, or nothing for the ones the module has no
+    /// entries for.
+    private func sharedStorageLines(_ storage: [String: SharedStorage]) -> [String] {
+        let entries = storage.values.sorted { $0.memberName < $1.memberName }
+        return singletonStorageLines(entries.filter { $0.scope == nil })
+            + scopedStorageLines(entries.filter { $0.scope != nil })
+    }
+
+    /// The namespace holding every process-lifetime instance.
+    private func singletonStorageLines(_ entries: [SharedStorage]) -> [String] {
+        guard !entries.isEmpty else {
             return []
         }
 
         var lines = ["private enum \(Self.singletonStorageEnumName) {"]
 
-        for entry in storage.values.sorted(by: { $0.memberName < $1.memberName }) {
+        for entry in entries {
             switch entry.isolation {
             case .nonisolated:
                 // `static let` initialization is thread-safe in the Swift
@@ -791,26 +893,79 @@ struct GeneratorOutputBuilder {
         return lines
     }
 
-    /// Emits one key's view onto a shared instance: a getter reading the single
-    /// entry in `_$zerk_singletons`.
+    /// The namespace holding one ``ZerkScopedBox`` per `@Scoped` type.
     ///
-    /// The interjection guard lives here rather than in the storage initializer,
-    /// which it cannot: the guard is per key — `InterjectingA` and
-    /// `InterjectingB` are different protocols — while the storage is per type.
-    /// Consulting it on each read is the better semantics anyway: a test double
-    /// installed after the first resolution now takes effect, and interjecting a
-    /// singleton never builds the real instance at all.
-    private func singletonLines(for provider: ProviderResolution,
-                                injectableKey: String,
-                                access: String,
-                                memberName: String,
-                                point: String,
-                                storage: SingletonStorage) -> [String] {
+    /// The **construction is deliberately not here** — it goes on the member
+    /// instead, so it runs in that member's isolation domain. A `@MainActor`
+    /// type's box would otherwise have to carry a `@MainActor` closure, and
+    /// could then only be read from the main actor, including by
+    /// `Zerk.reset(_:)`, which must not be.
+    ///
+    /// What *is* here, and differs from the singleton namespace above, is the
+    /// isolation annotation. `ZerkScopedBox` is `Sendable`, so no
+    /// `nonisolated(unsafe)` is wanted — the compiler warns that it is
+    /// unnecessary — but the slot still has to be pinned, because
+    /// `SWIFT_DEFAULT_ACTOR_ISOLATION` would otherwise make an unannotated one
+    /// `@MainActor` and put it out of reach of a nonisolated member. Pinned to
+    /// the *member's* isolation, since that is the only thing that reads it.
+    ///
+    /// The scope is echoed exactly as it was written at the attribute, so the
+    /// value the box compares against is the developer's own. See
+    /// ``InjectionScopeRecord``.
+    private func scopedStorageLines(_ entries: [SharedStorage]) -> [String] {
+        guard !entries.isEmpty else {
+            return []
+        }
+
+        var lines = [
+            // The one combination this cannot pin its way out of: a nonisolated
+            // slot reading a scope that the ambient default made isolated. The
+            // fix is a word, and it is cheaper to say it here than to let the
+            // compiler report it against a line nobody wrote.
+            "// A scope named from a nonisolated slot must itself be nonisolated. Under",
+            "// SWIFT_DEFAULT_ACTOR_ISOLATION, write `nonisolated static let session = …`.",
+            "private enum \(Self.scopedStorageEnumName) {"
+        ]
+
+        for entry in entries {
+            let scope = entry.scope?.expression ?? ""
+            lines.append("    \(entry.isolation.declarationPrefix)static let \(entry.memberName) = ZerkScopedBox<\(entry.typeName)>(scope: \(scope))")
+        }
+
+        lines.append("}")
+        lines.append("")
+        return lines
+    }
+
+    /// Emits one key's view onto a kept instance.
+    ///
+    /// The interjection guard lives here rather than in the storage, which it
+    /// cannot: the guard is per key — `InterjectingA` and `InterjectingB` are
+    /// different protocols — while the storage is per type. Consulting it on each
+    /// read is the better semantics anyway: a test double installed after the
+    /// first resolution now takes effect, and interjecting a kept instance never
+    /// builds the real one at all.
+    ///
+    /// A singleton reads its storage; a scoped type asks its box, handing over
+    /// the construction to run if the box is empty. That closure is the reason a
+    /// scoped member is emitted here rather than sharing the singleton's line:
+    /// it is the *member* that knows how to build, and the *box* that knows
+    /// whether to.
+    private func sharedInstanceLines(for provider: ProviderResolution,
+                                     injectableKey: String,
+                                     access: String,
+                                     memberName: String,
+                                     point: String,
+                                     storage: SharedStorage) -> [String] {
         var lines = [
             "    \(provider.isolation.declarationPrefix)\(access)static var \(memberName): \(displayName(for: injectableKey)) {"
         ]
         lines += interjectionGuardLines(point: "`\(point)`")
-        lines.append("        return \(Self.singletonStorageEnumName).\(storage.memberName)")
+        if storage.scope == nil {
+            lines.append("        return \(Self.singletonStorageEnumName).\(storage.memberName)")
+        } else {
+            lines.append("        return \(Self.scopedStorageEnumName).\(storage.memberName).value { \(storage.construction) }")
+        }
         lines.append("    }")
         return lines
     }
@@ -845,9 +1000,9 @@ struct GeneratorOutputBuilder {
                            parameters: [ParameterRecord],
                            classification: ProviderClassification) -> Bool {
         parameters.isEmpty
-            && !provider.isSingleton
+            && !provider.isShared
             && provider.isolation.isGlobalActor
-            && classification.singletonDependencies.isEmpty
+            && classification.sharedDependencies.isEmpty
     }
 
     /// Two values claiming the same key **and name**.
@@ -1014,8 +1169,10 @@ struct GeneratorOutputBuilder {
         let memberName = memberName(for: provider)
         let isolation = provider.isolation
         let generics = genericClauses(for: provider, injectableKey: injectableKey)
+        // A kept instance's member is always a `var` reading its storage,
+        // whatever shape its provider had — so it is read, never called.
         let memberIsCallable =
-            !provider.isSingleton &&
+            !provider.isShared &&
             (provider.memberIsGeneric ||
              !provider.provider.parameters.isEmpty ||
              provider.provider.effects.isAsync ||
@@ -1068,9 +1225,24 @@ struct GeneratorOutputBuilder {
         return lines
     }
 
-    /// Re-declares the `@Injected` macro inside the generated file, one
-    /// overload per distinct `inject()` signature, so a property can forward
-    /// arguments through the attribute.
+    /// Re-declares the `@Injected` and `@InjectedDynamically` macros inside the
+    /// generated file, one overload per distinct `inject()` signature, so a
+    /// property can forward arguments through the attribute.
+    ///
+    /// Every form has to appear here, including the ones that carry no forwarded
+    /// arguments and could in principle be left to `Zerk`'s own declarations.
+    /// Swift's name lookup stops at the first scope that declares the name at
+    /// all, so one module-local declaration shadows *all* of that name's
+    /// overloads: a form omitted here does not fall through to `Zerk`'s, it
+    /// stops existing in every target the plugin runs in.
+    ///
+    /// That applies across the two names independently — `Injected` shadows only
+    /// `Injected` — but both are declared here anyway, since a module that
+    /// declares injectables will have uses of each.
+    ///
+    /// The roles must not cross: every `Injected` overload is a peer and every
+    /// `InjectedDynamically` one an accessor. Mixing roles under a single name
+    /// crashes SILGen — see `Sources/Zerk/Macros/InjectedMacro.swift`.
     private func generatedInjectedMacroDeclarations(for signatures: [String]) -> [String] {
         var lines = [
             [
@@ -1087,6 +1259,18 @@ struct GeneratorOutputBuilder {
             [
                 "@attached(peer, names: prefixed(_$zerk_injection_))",
                 "macro Injected<T>(_ keyPath: KeyPath<Zerk<T>.Type, T>) = #externalMacro(module: \"ZerkMacros\", type: \"InjectedMacro\")"
+            ],
+            [
+                "@attached(accessor)",
+                "macro InjectedDynamically() = #externalMacro(module: \"ZerkMacros\", type: \"InjectedDynamicallyMacro\")"
+            ],
+            [
+                "@attached(accessor)",
+                "macro InjectedDynamically<T>() = #externalMacro(module: \"ZerkMacros\", type: \"InjectedDynamicallyMacro\")"
+            ],
+            [
+                "@attached(accessor)",
+                "macro InjectedDynamically<T>(_ keyPath: KeyPath<Zerk<T>.Type, T>) = #externalMacro(module: \"ZerkMacros\", type: \"InjectedDynamicallyMacro\")"
             ]
         ]
 
@@ -1095,6 +1279,12 @@ struct GeneratorOutputBuilder {
                 [
                     "@attached(peer, names: prefixed(_$zerk_injection_))",
                     "macro Injected\(signature) = #externalMacro(module: \"ZerkMacros\", type: \"InjectedMacro\")"
+                ]
+            )
+            lines.append(
+                [
+                    "@attached(accessor)",
+                    "macro InjectedDynamically\(signature) = #externalMacro(module: \"ZerkMacros\", type: \"InjectedDynamicallyMacro\")"
                 ]
             )
         }
@@ -1818,17 +2008,26 @@ struct GeneratorOutputBuilder {
     /// isolation only decorates the generated comment. Including it would emit
     /// near-duplicate checks for a single logical crossing.
     private struct SendabilityCheck: Hashable {
-        let singletonTypeName: String
+        let shared: SharedDependency
         let consumerTypeName: String
         let consumerIsolation: ProviderIsolation
 
+        var sharedTypeName: String { shared.typeName }
+
+        /// How the generated comment names what crossed: the attribute, not the
+        /// scope. `@Scoped(.session)` and `@Scoped(.checkout)` need the same
+        /// conformance for the same reason, and the scope is not part of it.
+        var attributeName: String {
+            shared.scope == nil ? "@Singleton" : "@Scoped"
+        }
+
         static func == (lhs: SendabilityCheck, rhs: SendabilityCheck) -> Bool {
-            lhs.singletonTypeName == rhs.singletonTypeName
+            lhs.sharedTypeName == rhs.sharedTypeName
                 && lhs.consumerTypeName == rhs.consumerTypeName
         }
 
         func hash(into hasher: inout Hasher) {
-            hasher.combine(singletonTypeName)
+            hasher.combine(sharedTypeName)
             hasher.combine(consumerTypeName)
         }
     }
@@ -1840,7 +2039,7 @@ struct GeneratorOutputBuilder {
     /// carrying an explanation rather than deep inside a factory body.
     private func sendabilityCheckLines(_ checks: [SendabilityCheck]) -> [String] {
         let unique = Array(Set(checks)).sorted {
-            ($0.singletonTypeName, $0.consumerTypeName) < ($1.singletonTypeName, $1.consumerTypeName)
+            ($0.sharedTypeName, $0.consumerTypeName) < ($1.sharedTypeName, $1.consumerTypeName)
         }
         guard !unique.isEmpty else {
             return []
@@ -1853,10 +2052,10 @@ struct GeneratorOutputBuilder {
 
         for check in unique {
             let domain = check.consumerIsolation.actorName.map { "'\($0)'-isolated " } ?? ""
-            lines.append("private func _$zerk_sendable_conformance_check_\(sanitizedIdentifier(check.singletonTypeName))_in_\(sanitizedIdentifier(check.consumerTypeName))() {")
-            lines.append("    // '@Singleton \(check.singletonTypeName)' is injected into \(domain)'\(check.consumerTypeName)'.")
-            lines.append("    // Singletons that cross isolation domains must be Sendable.")
-            lines.append("    _$zerk_sendable_conformance_check(\(check.singletonTypeName).self)")
+            lines.append("private func _$zerk_sendable_conformance_check_\(sanitizedIdentifier(check.sharedTypeName))_in_\(sanitizedIdentifier(check.consumerTypeName))() {")
+            lines.append("    // '\(check.attributeName) \(check.sharedTypeName)' is injected into \(domain)'\(check.consumerTypeName)'.")
+            lines.append("    // A shared instance that crosses isolation domains must be Sendable.")
+            lines.append("    _$zerk_sendable_conformance_check(\(check.sharedTypeName).self)")
             lines.append("}")
             lines.append("")
         }

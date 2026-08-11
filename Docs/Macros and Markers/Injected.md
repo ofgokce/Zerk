@@ -2,7 +2,8 @@
 
 `@Injected` resolves eagerly when the enclosing value is initialized. This page covers its
 four variants, the rules that govern the key it resolves, the key-path form and the members
-it can reach, and the chains it cannot resolve at all.
+it can reach, the chains it cannot resolve at all, and
+[`@InjectedDynamically`](#injecteddynamically) — the same thing resolved per access instead of once.
 
 `@Injected` (uppercase) is the property macro. `@injected` (lowercase) is a *parameter*
 marker and a different thing entirely — see [Parameter markers](ParameterMarkers.md). The
@@ -141,25 +142,100 @@ struct StatedKeyOptionalConsumer {
 Both `Foo?`/`Foo!` and `Optional<Foo>` are unwrapped for the lookup. The property keeps its
 declared type; only the key is unwrapped.
 
+## `@InjectedDynamically`
+
+`@Injected` resolves **once**, when the enclosing value is initialized, and keeps what it
+resolved. `@InjectedDynamically` resolves on **every access**:
+
+```swift
+struct Feed {
+    @Injected         var stored: SessionCache   // resolved at init, then kept
+    @InjectedDynamically var live: SessionCache     // re-resolved on every read
+}
+```
+
+For almost everything, `@Injected` is what you want: one lookup, no per-access cost, and a
+reference that cannot change underneath the holder. `@InjectedDynamically` exists for the case
+where it *should* change — a [`@Scoped`](Scoped.md) dependency held by something that
+outlives the scope. `Zerk.reset(.session)` drops Zerk's reference but cannot reach one
+already handed out, so a stored property goes on returning the pre-reset instance while a
+dynamic one picks up the replacement.
+
+Every `@Injected` form has a counterpart, spelled the same way:
+
+```swift
+@InjectedDynamically var service: ApiServicing
+@InjectedDynamically(seed: 100) var token: SeededToken
+@InjectedDynamically(\.cached) var loader: Loading
+@InjectedDynamically<LiveService> var s: Serving
+```
+
+The property becomes **computed**, which is the whole mechanism and also the whole list of
+differences:
+
+- it must be a `var` — a `let` cannot be computed;
+- it cannot carry `willSet`/`didSet` — there is no storage left to observe;
+- it is read-only, and it does not participate in the memberwise initializer, so there is no
+  "pass a value in to override it" the way there is for `@Injected`;
+- resolution happens per read, so a chain that is expensive is expensive every time.
+
+Everything else is identical. The same async/throwing chain check applies — a getter cannot
+`await` any more than an initializer can — and it reports against whichever attribute you
+wrote.
+
+### Why it is a separate attribute
+
+It would read better as an argument on `@Injected`. That does not work, and the reason is
+worth recording, because the failure is nowhere near the mistake.
+
+The two variants need different macro **roles**: `@attached(peer)` for the stored one, whose
+peer initializes the property, and `@attached(accessor)` for the dynamic one, which replaces
+the property's storage with a getter. **Overloads of a single macro name must agree on their
+role set.** Giving `Injected` one accessor overload crashes SILGen on Swift 6.3.3 — while
+expanding the *peer* variant, on ordinary `@Injected` properties that have nothing to do with
+the new one. The argument's shape makes no difference: a labelled `Bool` and a positional
+enum both do it.
+
+Declaring *every* overload with both roles does stop the crash. It then forces the stored
+variant to produce a non-observing accessor — an observing one is rejected outright — which
+makes `@Injected` a computed property backed by its peer. That was built and measured, and
+it costs behaviour documented on this page:
+
+- with an `init` accessor, `final class C { @Injected var x: T }` stops compiling —
+  *"class 'C' has no initializers"*;
+- without one, the memberwise initializer can no longer override what was injected, since
+  the only stored property left is private;
+- either way, `@Injected let` and `willSet`/`didSet` are gone.
+
+None of that is worth a spelling, so dynamic resolution took its own attribute name, and
+every `@Injected` overload stays a peer.
+
 ## Where the declarations come from
 
-The Zerk module declares three macros — `Injected()`, `Injected<T>()`, and
-`Injected<T>(_ keyPath:)`. The generated file re-declares all three inside the module it
-generates into, and adds one overload per distinct `inject()` signature so arguments can be
-forwarded through the attribute:
+The Zerk module declares three `Injected` macros — `Injected()`, `Injected<T>()`, and
+`Injected<T>(_ keyPath:)` — and three matching `InjectedDynamically` ones. The generated file
+re-declares all six inside the module it generates into, and adds one overload per distinct
+`inject()` signature so arguments can be forwarded through the attribute:
 
 ```swift
 @attached(peer, names: prefixed(_$zerk_injection_))
 macro Injected(seed: Int) = #externalMacro(module: "ZerkMacros", type: "InjectedMacro")
+
+@attached(accessor)
+macro InjectedDynamically(seed: Int) = #externalMacro(module: "ZerkMacros", type: "InjectedDynamicallyMacro")
 ```
 
-The generated declarations shadow the library's wherever the plugin runs — which is every
-target that declares injectables. The library's are what a target *without* the plugin uses,
-and they are not redundant: a module that declares no injectables of its own can still write
-`@Injected var service: ApiServicing` against an exported key from another module, or name a
-member of a `Zerk<Key>` extension it declares itself. The argument-forwarding overloads
-cannot be generic over the key — their labels differ per provider — so those exist only in
-the generated file.
+Every form has to be re-declared, including the ones that forward no arguments. Swift's name
+lookup stops at the first scope that declares the name at all, so one module-local
+declaration shadows *all* of that name's overloads — a form the generated file omitted would
+not fall back to the library's, it would stop existing in every target the plugin runs in.
+The two names shadow independently, so each carries its full set.
+
+The library's declarations are what a target *without* the plugin uses, and they are not
+redundant: a module that declares no injectables of its own can still write `@Injected var
+service: ApiServicing` against an exported key from another module, or name a member of a
+`Zerk<Key>` extension it declares itself. The argument-forwarding overloads cannot be generic
+over the key — their labels differ per provider — so those exist only in the generated file.
 
 ## What it cannot resolve
 
@@ -196,8 +272,11 @@ The macro reports these at the declaration, before the plugin ever runs:
 - a missing type annotation
 - more than one generic argument
 
+`@InjectedDynamically` rejects the same list, and two more: any accessor at all — including
+`willSet`/`didSet`, since the property it generates is computed — and a `let` binding.
+
 ---
 
 [← Table of contents](../TableOfContents.md)
 
-**See also:** [Parameter markers](ParameterMarkers.md) · [`@Injectable`](Injectable.md) · [`@InjectableProviding`](InjectableProviding.md) · [Injected examples](../Getting%20Started/InjectedExamples.md) · [Concurrency](../Features/Concurrency.md) · [Generated code](../Plugin/GeneratedCode.md) · [Interjection](../Testing/Interjection.md)
+**See also:** [Parameter markers](ParameterMarkers.md) · [`@Injectable`](Injectable.md) · [`@InjectableProviding`](InjectableProviding.md) · [`@Scoped`](Scoped.md) · [Injected examples](../Getting%20Started/InjectedExamples.md) · [Concurrency](../Features/Concurrency.md) · [Generated code](../Plugin/GeneratedCode.md) · [Interjection](../Testing/Interjection.md)

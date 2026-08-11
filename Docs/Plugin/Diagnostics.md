@@ -33,6 +33,24 @@ Most of these are raised twice — once by the macro, against the declaration, s
 
 A singleton that crosses an isolation boundary is checked for `Sendable` — see [The one diagnostic that is not Zerk's](#the-one-diagnostic-that-is-not-zerks).
 
+## Scopes
+
+Every constraint in the table above applies to [`@Scoped`](../Macros%20and%20Markers/Scoped.md) too, worded for it — a kept instance is a kept instance, however long it is kept. The reason for the "no `async`/`throws`" rule differs and the message says so: a scoped instance is built while its box holds a lock, and a lock cannot be held across an `await`.
+
+These are `@Scoped`'s own:
+
+| What triggers it | The fix |
+|---|---|
+| `@Scoped` together with `@Singleton` | They disagree about how long the instance is kept — keep the one you meant |
+| `@Scoped(…)` with an argument that is not leading-dot form | Write `@Scoped(.session)`. Zerk reads source and never evaluates it, so it needs a name it can both compare and write back out |
+| `@Scoped` on a generic type | Permanent, same reason as `@Singleton`: the box is a static stored property, so there is nowhere to keep one per specialization |
+| A `@Singleton` depends on a `@Scoped` instance | **Error.** The singleton outlives every scope, so it would hold the pre-reset instance forever. Give it the same scope, or resolve the dependency per use with `@InjectedDynamically` |
+| A `@Scoped(.a)` depends on a `@Scoped(.b)` instance | **Warning.** Zerk can see the scopes differ but not which outlives which. Put them in one scope, or use `@InjectedDynamically` |
+
+Both staleness checks reach through transient dependencies. A transient dependent is never reported — it is rebuilt on every resolution, so it cannot be the thing holding something stale.
+
+One failure Zerk cannot report lands in generated code instead: under `SWIFT_DEFAULT_ACTOR_ISOLATION`, a scope declared as a plain `static let` is isolated to that actor, and a nonisolated scoped type's box cannot read it. The generated storage carries a comment naming the fix — declare the scope `nonisolated`.
+
 ## Values
 
 | What triggers it | The fix |
@@ -90,7 +108,7 @@ A singleton that crosses an isolation boundary is checked for `Sendable` — see
 | A generic parameter the provider declares that nothing in its signature mentions | Take it as a parameter, or drop it from the declaration |
 | A generic `@InjectableProviding` factory | Not emittable — the generated member cannot be spelled |
 | A generic `@InjectableValue` function | The key is the return type, and Zerk reads syntax so it cannot substitute a type parameter |
-| `@Singleton` on a generic type | Permanent: a singleton lives in a static stored property, which Swift does not allow in a generic type |
+| `@Singleton` or `@Scoped` on a generic type | Permanent: both live in a static stored property, which Swift does not allow in a generic type |
 | `@Injectable(parameterized: true)` on a type with no generic parameters | Drop the argument |
 | `@Injectable(parameterized: true)` with a key that is not written as an existential | Write `any P` — a parameterized protocol type is only spelled with `any`, and Zerk never adds it |
 | `parameterized: true` where the type's parameter count and the protocol's primary associated types disagree | They must match, or the key cannot be spelled |
@@ -135,16 +153,16 @@ The Swift 5 diagnostic names the three settings it read out of `ZerkSettings.jso
 
 ## The one diagnostic that is not Zerk's
 
-One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` `@Singleton` injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
+One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` kept instance — a `@Singleton` or a `@Scoped` — injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.
 
-The check is emitted unconditionally wherever a singleton crosses a boundary — it costs nothing when the type already conforms. For a `@MainActor @Singleton final class Logger` resolved by a nonisolated `Reporter`, the generated file carries:
+The check is emitted unconditionally wherever a kept instance crosses a boundary — it costs nothing when the type already conforms. For a `@MainActor @Singleton final class Logger` resolved by a nonisolated `Reporter`, the generated file carries:
 
 ```swift
 private func _$zerk_sendable_conformance_check<T: Sendable>(_: T.Type) {}
 
 private func _$zerk_sendable_conformance_check_Logger_in_Reporter() {
     // '@Singleton Logger' is injected into 'Reporter'.
-    // Singletons that cross isolation domains must be Sendable.
+    // A shared instance that crosses isolation domains must be Sendable.
     _$zerk_sendable_conformance_check(Logger.self)
 }
 ```

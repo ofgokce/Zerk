@@ -32,8 +32,9 @@ Every attribute and freestanding macro Zerk vends, except the testing ones.
 | [`@InjectableProviding`](Macros%20and%20Markers/InjectableProviding.md) | Marking how a key is built. Provider inference, `primary:`, and naming the generated member |
 | [`@InjectableValue`](Macros%20and%20Markers/InjectableValue.md) | Values, `@InjectableValues` sweeps, `@NonInjectable`, copied vs referenced, and effectful values |
 | [`@Singleton`](Macros%20and%20Markers/Singleton.md) | One instance per type, the generated storage, and why it lives where it does |
+| [`@Scoped`](Macros%20and%20Markers/Scoped.md) | One instance per named scope, `Zerk.reset(_:)`, and the staleness checks |
 | [`@Isolated`](Macros%20and%20Markers/Isolated.md) | Telling Zerk about isolation it cannot see |
-| [`@Injected`](Macros%20and%20Markers/Injected.md) | The property macro — every variant, and the one macro that generates code |
+| [`@Injected`](Macros%20and%20Markers/Injected.md) | The property macro — every variant, `@InjectedDynamically`, and the one macro that generates code |
 | [Parameter markers](Macros%20and%20Markers/ParameterMarkers.md) | The four lowercase wrappers: `@injected`, `@autoinjected`, `@noninjected`, `@injectable` |
 | [Imported injectables](Macros%20and%20Markers/ImportedInjectables.md) | `@ImportedInjectable`, `@ImportedInjectableValue`, `#ZerkImport` — reaching another module's graph |
 | [Key aliases](Macros%20and%20Markers/ZerkAlias.md) | `@ZerkAlias` and `#ZerkAlias<A, B>()` — telling Zerk two names are one key |
@@ -88,6 +89,11 @@ How code generation works, and what it produces.
 | into an initializer or method parameter | [Parameter markers](Macros%20and%20Markers/ParameterMarkers.md) |
 | by hand, or when the chain is `async`/`throws` | [`@Injected`](Macros%20and%20Markers/Injected.md) and [Concurrency](Features/Concurrency.md) |
 | lazily | [`@Injected`](Macros%20and%20Markers/Injected.md) |
+| afresh on every access | [`@InjectedDynamically`](Macros%20and%20Markers/Injected.md#injecteddynamically) |
+
+**"How long does an instance live?"** — one resolution by default;
+[`@Scoped`](Macros%20and%20Markers/Scoped.md) until its scope is reset;
+[`@Singleton`](Macros%20and%20Markers/Singleton.md) for the process.
 
 **"The build failed"** — [Diagnostics](Plugin/Diagnostics.md), then
 [Limitations](Plugin/Limitations.md).

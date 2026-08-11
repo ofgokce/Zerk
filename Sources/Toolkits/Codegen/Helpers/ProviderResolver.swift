@@ -62,16 +62,16 @@ struct ProviderResolver {
                     continue
                 }
 
-                // A singleton is one shared instance by definition, so a
-                // second way to build it is a contradiction: both members
-                // would read the *same* storage, so asking for one factory
-                // would hand back what the other built. Half the rule — the
-                // other half, that every key names the same provider, needs
-                // all the keys resolved and lives in `validatedSingleton`.
-                if type.isSingleton, providers.count > 1 {
+                // A kept instance is one instance by definition, so a second way
+                // to build it is a contradiction: both members would read the
+                // *same* storage, so asking for one factory would hand back what
+                // the other built. Half the rule — the other half, that every key
+                // names the same provider, needs all the keys resolved and lives
+                // in `validatedShared`.
+                if type.isShared, providers.count > 1 {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
-                        message: "@Singleton '\(type.name)' declares multiple providers for '\(key)'. A singleton is stored once and read through every key it claims, so it has exactly one provider in total — not one per key. Keep whichever builds the shared instance.",
+                        message: "\(type.sharingAttributeName) '\(type.name)' declares multiple providers for '\(key)'. The instance is stored once and read through every key it claims, so it has exactly one provider in total — not one per key. Keep whichever builds it.",
                         location: providers[1].location
                     ))
                     continue
@@ -82,8 +82,8 @@ struct ProviderResolver {
                 }
             }
 
-            if type.isSingleton {
-                typeResolutions = validatedSingleton(type, resolutions: typeResolutions, into: &diagnostics)
+            if type.isShared {
+                typeResolutions = validatedShared(type, resolutions: typeResolutions, into: &diagnostics)
             }
 
             resolutions += typeResolutions
@@ -196,36 +196,37 @@ private extension ProviderResolver {
             .sorted { $0.location < $1.location }
     }
 
-    /// Enforces the two rules that only make sense once a `@Singleton`'s keys
-    /// are all resolved, and drops the type's resolutions when either is broken
-    /// — the generator has no shared instance to emit in that case.
+    /// Enforces the two rules that only make sense once a shared type's keys are
+    /// all resolved, and drops the type's resolutions when either is broken —
+    /// the generator has no instance to emit in that case.
     ///
-    /// Both follow from the same fact: a singleton is *one* instance, stored
-    /// once and read through every key it claims.
+    /// Both follow from the same fact, and it is the fact `@Singleton` and
+    /// `@Scoped` have in common: the instance is built *once*, stored once, and
+    /// read through every key the type claims. How long it is kept for does not
+    /// enter into either rule, which is why one function serves both.
     ///
     /// 1. **One provider across all keys.** Per-key uniqueness is checked as
     ///    each key resolves, above; this catches the other shape, where every
     ///    key names one provider but not the *same* one. Together the two mean
-    ///    a singleton has exactly one provider — one instance cannot be built
-    ///    two ways.
-    /// 2. **A multi-key singleton's provider returns the concrete type.** The
-    ///    shared storage is typed as the provider's return type, so a factory
-    ///    declaring one of the keys produces storage the *other* keys cannot be
-    ///    served from. An initializer is exempt: it always yields the type
-    ///    itself.
-    func validatedSingleton(_ type: TypeRecord,
-                            resolutions: [ProviderResolution],
-                            into diagnostics: inout [CodegenDiagnostic]) -> [ProviderResolution] {
+    ///    exactly one provider — one instance cannot be built two ways.
+    /// 2. **A multi-key type's provider returns the concrete type.** The storage
+    ///    is typed as the provider's return type, so a factory declaring one of
+    ///    the keys produces storage the *other* keys cannot be served from. An
+    ///    initializer is exempt: it always yields the type itself.
+    func validatedShared(_ type: TypeRecord,
+                         resolutions: [ProviderResolution],
+                         into diagnostics: inout [CodegenDiagnostic]) -> [ProviderResolution] {
         guard let first = resolutions.first else {
             return resolutions
         }
+        let attribute = type.sharingAttributeName
 
         // Same declaration, not same record: a factory bound to two keys yields
         // one record per attribute, and those share a location.
         if let mismatch = resolutions.first(where: { $0.provider.location != first.provider.location }) {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "@Singleton '\(type.name)' resolves to different providers for '\(first.injectableKey)' (\(Self.providerDescription(first.provider))) and '\(mismatch.injectableKey)' (\(Self.providerDescription(mismatch.provider))). A singleton has one instance, so it must have one provider across all its keys.",
+                message: "\(attribute) '\(type.name)' resolves to different providers for '\(first.injectableKey)' (\(Self.providerDescription(first.provider))) and '\(mismatch.injectableKey)' (\(Self.providerDescription(mismatch.provider))). There is one instance, so it must have one provider across all its keys.",
                 location: mismatch.provider.location
             ))
             return []
@@ -237,7 +238,7 @@ private extension ProviderResolver {
            returnTypeName != type.name {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "@Singleton '\(type.name)' is injectable under \(keyCount) keys, so its provider must return '\(type.name)' rather than '\(returnTypeName)'. One instance is shared by every key, and storage typed '\(returnTypeName)' cannot serve the others.",
+                message: "\(attribute) '\(type.name)' is injectable under \(keyCount) keys, so its provider must return '\(type.name)' rather than '\(returnTypeName)'. One instance serves every key, and storage typed '\(returnTypeName)' cannot serve the others.",
                 location: first.provider.location
             ))
             return []
@@ -293,6 +294,7 @@ private extension ProviderResolver {
             isTypePrimary: type.primaryKeys[key] != nil,
             isExported: type.exportedKeys[key] != nil,
             isSingleton: type.isSingleton,
+            scope: type.scope,
             genericParameters: type.genericParameters,
             isParameterizedExistential: type.parameterizedKeys[key] != nil
         )

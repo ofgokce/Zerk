@@ -29,6 +29,11 @@ struct TypeRecord {
     var typedProviders: [String: [InjectingProvider]]
     var initializers: [InitializerRecord]
     let isSingleton: Bool
+    /// The scope from `@Scoped(.session)`, or `nil` for the transient default.
+    ///
+    /// Mutually exclusive with ``isSingleton`` — both are refused together by
+    /// `SourceCollector`, since one instance cannot have two lifetimes.
+    var scope: InjectionScopeRecord? = nil
     var isolation: ProviderIsolation = .nonisolated
     /// The type's own generic parameters, in declaration order — `["K", "V"]`
     /// for `Store<K, V>`, empty for everything else.
@@ -42,4 +47,20 @@ struct TypeRecord {
     /// the ones spelled `any P<X, Y>` and gated on the availability of
     /// parameterized existentials.
     var parameterizedKeys: [String: AttributeLocation] = [:]
+
+    /// Whether one instance of this type is kept and handed out repeatedly,
+    /// however long it is kept for.
+    ///
+    /// `@Singleton` and `@Scoped` differ only in when the instance is dropped,
+    /// and every rule that follows from *sharing* holds for both: one storage
+    /// per type rather than per key, one provider across every key, no caller
+    /// arguments, and no generic specialization to store per.
+    var isShared: Bool {
+        isSingleton || scope != nil
+    }
+
+    /// Which of the two a diagnostic should name.
+    var sharingAttributeName: String {
+        isSingleton ? "@Singleton" : "@Scoped"
+    }
 }

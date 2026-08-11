@@ -275,6 +275,19 @@ selector form (`` \.`loader(store:)` ``) for overloads, and the full form
 Because the point is a real declaration, a renamed provider makes the interjection a
 *compile error* rather than something that silently stops applying.
 
+### Injection scope
+
+A named lifetime, written `InjectionScope("session")`. An injectable marked
+`@Scoped(.session)` is built once and handed back until `Zerk.reset(.session)` drops it, at
+which point the next resolution builds a fresh one. The name is the identity, whoever
+declared the value — which is what lets an app reset a scope a feature module declared. It
+is the middle of Zerk's three lifetimes: one instance per resolution by default,
+`@Scoped` until a reset, `@Singleton` for the process. See
+[`@Scoped`](../Macros%20and%20Markers/Scoped.md).
+
+Unrelated to **interjection scope** below, despite the shared word. That one is about test
+isolation; this one is about how long an instance is kept. They never interact.
+
 ### Interjection scope
 
 The set of interjections in force for the current task. `ZerkInterjector` is a class held

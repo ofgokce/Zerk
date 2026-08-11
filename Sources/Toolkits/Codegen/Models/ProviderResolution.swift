@@ -25,6 +25,19 @@ struct ProviderResolution {
     /// `@Injectable(public: true)` — this key's generated members are `public`.
     let isExported: Bool
     let isSingleton: Bool
+    /// `@Scoped(.session)` — this instance is kept until that scope is reset.
+    var scope: InjectionScopeRecord? = nil
+
+    /// Whether this resolution reads a kept instance rather than building one.
+    /// See ``TypeRecord/isShared``.
+    var isShared: Bool {
+        isSingleton || scope != nil
+    }
+
+    /// Which attribute a diagnostic about the sharing should name.
+    var sharingAttributeName: String {
+        isSingleton ? "@Singleton" : "@Scoped"
+    }
     /// The registering type's generic parameters, empty for a concrete key.
     ///
     /// These are the *member's* parameters once emitted — `static func cache<E>()
@@ -85,14 +98,14 @@ struct ProviderResolution {
 
     var isolation: ProviderIsolation { provider.isolation }
 
-    /// The type a `@Singleton`'s shared storage is declared as.
+    /// The type a `@Singleton`'s or `@Scoped`'s shared storage is declared as.
     ///
     /// The provider's declared return type, falling back to the concrete type
     /// for an initializer. Deliberately *not* the injectable key: one instance
     /// serves every key the type claims, so the storage has to be typed as
     /// something assignable to all of them, and the construction expression is
     /// only known to produce this.
-    var singletonStorageTypeName: String {
+    var sharedStorageTypeName: String {
         provider.returnTypeName ?? typeName
     }
 }

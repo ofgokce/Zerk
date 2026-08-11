@@ -7,10 +7,11 @@ import SharedToolkit
 
 /// Drops the generic registrations Zerk still cannot emit, and says why.
 ///
-/// Only one thing is refused here now: **`@Singleton`**. Its storage is a static
-/// stored property, which Swift does not allow in a generic type, so there is
-/// nowhere to keep one instance per specialization. That is permanent, and it is
-/// decidable from the type alone — which is why it lives at this stage.
+/// Two things are refused here: **`@Singleton`** and **`@Scoped`**, for one
+/// reason. Both keep their instance in a static stored property, which Swift
+/// does not allow in a generic type, so there is nowhere to put one instance per
+/// specialization. That is permanent, and it is decidable from the type alone —
+/// which is why it lives at this stage.
 ///
 /// The other generic refusal is not: whether a provider can bind the type's
 /// parameters depends on *that provider's* signature, so it is settled per
@@ -43,6 +44,15 @@ enum GenericGate {
                 diagnostics.append(CodegenDiagnostic(
                     severity: .error,
                     message: GenericRefusal.singleton(type: type.name),
+                    location: location
+                ))
+                continue
+            }
+
+            if type.scope != nil {
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: GenericRefusal.scoped(type: type.name),
                     location: location
                 ))
                 continue

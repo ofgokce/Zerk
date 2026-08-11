@@ -48,8 +48,8 @@ struct ParameterClassifier {
         let nextVisiting = visiting.union([resolution.injectableKey])
 
         var classified: [ClassifiedParameter] = []
-        var crossDomainSingletons: [String] = []
-        var singletons: [String] = []
+        var crossDomainShared: [SharedDependency] = []
+        var shared: [SharedDependency] = []
         var unresolvedAutoInjected: [ParameterRecord] = []
         var hasCrossing = false
         var isolatedDefault = false
@@ -144,13 +144,15 @@ struct ParameterClassifier {
 
             hasCrossing = hasCrossing || hops || dependencyClassification.hasIsolationCrossing
             isolatedDefault = isolatedDefault || dependencyClassification.usesIsolatedDefaultArgument
-            singletons += dependencyClassification.singletonDependencies
-            crossDomainSingletons += dependencyClassification.crossDomainSingletonDependencies
+            shared += dependencyClassification.sharedDependencies
+            crossDomainShared += dependencyClassification.crossDomainSharedDependencies
 
-            if dependency.isSingleton {
-                singletons.append(dependency.typeName)
+            if dependency.isShared {
+                let entry = SharedDependency(typeName: dependency.typeName,
+                                             scope: dependency.scope?.identity)
+                shared.append(entry)
                 if hops {
-                    crossDomainSingletons.append(dependency.typeName)
+                    crossDomainShared.append(entry)
                 }
             }
 
@@ -176,19 +178,19 @@ struct ParameterClassifier {
 
         return ProviderClassification(
             parameters: classified,
-            crossDomainSingletonDependencies: uniqued(crossDomainSingletons),
+            crossDomainSharedDependencies: uniqued(crossDomainShared),
             hasIsolationCrossing: hasCrossing,
             usesIsolatedDefaultArgument: isolatedDefault,
-            singletonDependencies: uniqued(singletons),
+            sharedDependencies: uniqued(shared),
             unresolvedAutoInjected: unresolvedAutoInjected
         )
     }
 
-    /// Order-preserving deduplication; the same singleton can be reached
+    /// Order-preserving deduplication; the same kept instance can be reached
     /// through several paths.
-    private func uniqued(_ names: [String]) -> [String] {
-        var seen = Set<String>()
-        return names.filter { seen.insert($0).inserted }
+    private func uniqued<Element: Hashable>(_ elements: [Element]) -> [Element] {
+        var seen = Set<Element>()
+        return elements.filter { seen.insert($0).inserted }
     }
 
     /// Total effects of building this provider with everything auto-resolved.

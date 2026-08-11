@@ -69,3 +69,77 @@ public macro Injected<T>(_ keyPath: KeyPath<Zerk<T>.Type, T>) = #externalMacro(
     module: "ZerkMacros",
     type: "InjectedMacro"
 )
+
+// MARK: - Dynamic resolution
+//
+// A separate attribute, and not by preference — this was twice specified as an
+// argument on `@Injected`, and the compiler will not have it either way.
+//
+// The two variants have to generate structurally different things — a stored
+// property initialized once, versus a computed property that resolves per access
+// — so they need different macro *roles*: `@attached(peer)` above,
+// `@attached(accessor)` here. **Overloads of one macro name must agree on their
+// role set.** Adding a single accessor overload to `Injected` crashes SILGen on
+// Swift 6.3.3 while lowering the *peer* expansion, on ordinary `@Injected`
+// properties that have nothing to do with the new one. The argument's shape does
+// not matter: a labelled `Bool` and a positional enum both do it.
+//
+// Making every overload declare both roles does stop the crash. It then forces
+// the stored variant to produce a non-observing accessor — an observing one is
+// rejected outright — which means `@Injected` becomes a computed property backed
+// by its peer. That was built and measured, and it costs behaviour that is
+// documented and load-bearing:
+//
+//   - with an `init` accessor: `final class C { @Injected var x: T }` stops
+//     compiling — "class 'C' has no initializers";
+//   - without one: the memberwise initializer can no longer override what was
+//     injected, since the only stored property left is private;
+//   - either way `@Injected let` and `willSet`/`didSet` are gone.
+//
+// No spelling is worth those. Keep every `Injected` overload a peer, and keep
+// dynamic resolution under its own name.
+
+/// Resolves a property from the graph on **every access**, rather than once when
+/// its enclosing value is initialized.
+///
+/// `@Injected` stores what it resolved, which is right for almost everything:
+/// one lookup, no per-access cost, and a reference that cannot change underneath
+/// the holder. This is for the case where it *should* change — a `@Scoped`
+/// dependency held by something that outlives the scope:
+///
+/// ```swift
+/// @Injected            var stored: SessionCache   // resolved once, then kept
+/// @InjectedDynamically var live: SessionCache     // re-resolved on every read
+///
+/// Zerk.reset(.session)
+/// // `stored` still hands back the pre-reset instance; `live` sees the new one.
+/// ```
+///
+/// The property becomes computed, so it must be a `var`, must have no
+/// initializer, and cannot carry `willSet`/`didSet` — there is no storage left
+/// for an observer to observe. It is also read-only: there is nowhere to put a
+/// written value that the next read would not discard.
+///
+/// Every `@Injected` form has a counterpart here, spelled the same way: a key in
+/// angle brackets, a key path, or arguments forwarded into `inject()`.
+@attached(accessor)
+public macro InjectedDynamically() = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectedDynamicallyMacro"
+)
+
+/// ``InjectedDynamically()`` resolving from a key other than the property's own
+/// declared type.
+@attached(accessor)
+public macro InjectedDynamically<T>() = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectedDynamicallyMacro"
+)
+
+/// ``InjectedDynamically()`` resolving from one named `Zerk<Key>` member rather
+/// than the key's primary.
+@attached(accessor)
+public macro InjectedDynamically<T>(_ keyPath: KeyPath<Zerk<T>.Type, T>) = #externalMacro(
+    module: "ZerkMacros",
+    type: "InjectedDynamicallyMacro"
+)

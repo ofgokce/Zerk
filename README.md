@@ -18,7 +18,7 @@ Generic types are registered like any other: `@Injectable struct Cache<E>` makes
 | | |
 |---|---|
 | **[Getting started](Docs/TableOfContents.md#getting-started)** | [Installation](Docs/Getting%20Started/Installation.md) · [Quick start](Docs/Getting%20Started/QuickStart.md) · [Terminology](Docs/Getting%20Started/Terminology.md) · [Declaring examples](Docs/Getting%20Started/InjectableExamples.md) · [Consuming examples](Docs/Getting%20Started/InjectedExamples.md) · [Migration from 1.x](Docs/Getting%20Started/Migration.md) |
-| **[Macros and markers](Docs/TableOfContents.md#macros-and-markers)** | [`@Injectable`](Docs/Macros%20and%20Markers/Injectable.md) · [`@InjectableProviding`](Docs/Macros%20and%20Markers/InjectableProviding.md) · [`@InjectableValue`](Docs/Macros%20and%20Markers/InjectableValue.md) · [`@Singleton`](Docs/Macros%20and%20Markers/Singleton.md) · [`@Isolated`](Docs/Macros%20and%20Markers/Isolated.md) · [`@Injected`](Docs/Macros%20and%20Markers/Injected.md) · [Parameter markers](Docs/Macros%20and%20Markers/ParameterMarkers.md) · [Imported injectables](Docs/Macros%20and%20Markers/ImportedInjectables.md) · [Key aliases](Docs/Macros%20and%20Markers/ZerkAlias.md) |
+| **[Macros and markers](Docs/TableOfContents.md#macros-and-markers)** | [`@Injectable`](Docs/Macros%20and%20Markers/Injectable.md) · [`@InjectableProviding`](Docs/Macros%20and%20Markers/InjectableProviding.md) · [`@InjectableValue`](Docs/Macros%20and%20Markers/InjectableValue.md) · [`@Singleton`](Docs/Macros%20and%20Markers/Singleton.md) · [`@Scoped`](Docs/Macros%20and%20Markers/Scoped.md) · [`@Isolated`](Docs/Macros%20and%20Markers/Isolated.md) · [`@Injected`](Docs/Macros%20and%20Markers/Injected.md) · [Parameter markers](Docs/Macros%20and%20Markers/ParameterMarkers.md) · [Imported injectables](Docs/Macros%20and%20Markers/ImportedInjectables.md) · [Key aliases](Docs/Macros%20and%20Markers/ZerkAlias.md) |
 | **[Features](Docs/TableOfContents.md#features)** | [Foreign types](Docs/Features/ForeignTypes.md) · [Generics](Docs/Features/Generics.md) · [Concurrency](Docs/Features/Concurrency.md) |
 | **[The plugin](Docs/TableOfContents.md#the-plugin)** | [How it works](Docs/Plugin/HowItWorks.md) · [Generated code](Docs/Plugin/GeneratedCode.md) · [Settings](Docs/Plugin/Settings.md) · [Diagnostics](Docs/Plugin/Diagnostics.md) · [Limitations](Docs/Plugin/Limitations.md) |
 | **[Testing](Docs/TableOfContents.md#testing)** | [Interjection](Docs/Testing/Interjection.md) · [Scopes](Docs/Testing/Scopes.md) · [Examples](Docs/Testing/Examples.md) |
@@ -114,6 +114,22 @@ extension Zerk<ApiServicing>.Interjection {
 
 `@Injected var apiService` expands to a stored property whose default value is `Zerk<ApiServicing>.inject()`. The namespace itself is an empty `public enum Zerk<Injectable> {}`; everything lives in the generated extensions.
 
+## Lifetimes
+
+Three, and the default is the first:
+
+```swift
+@Injectable              final class Request { }   // a new one per resolution
+@Scoped(.session)        final class Cache { }     // one until Zerk.reset(.session)
+@Singleton               final class Clock { }     // one for the process
+```
+
+A scope is an ordinary value (`InjectionScope("session")`) declared wherever you like, so a feature module can mark `@Scoped(.session)` and the app module can call `Zerk.reset(.session)` on logout without either one knowing about the other's storage.
+
+A reset drops Zerk's reference; it cannot reach one already handed out. `@InjectedDynamically` is the property form that re-resolves on every access and so follows the reset, where plain `@Injected` keeps what it resolved at init. Zerk reports the mistake that follows from this — a `@Singleton` holding a `@Scoped` instance is a build error, since it would go on using the pre-reset one forever.
+
+See [`@Scoped`](Docs/Macros%20and%20Markers/Scoped.md).
+
 ## Testing
 
 Every generated member opens with a lookup against the interjections in force, so a test can stand a double in for one member or for a whole key — without a plugin on the test target, and without touching production code:
@@ -136,7 +152,7 @@ Interjections belong to the scope in force — `.zerk` opens one per test, so su
 
 ## How it works
 
-**Almost none of the code generation happens in the macros.** `@Injectable`, `@InjectableProviding`, `@Singleton` and `@Isolated` expand to *nothing*: they exist so the attribute is legal Swift for the plugin to read, and so the errors decidable from a single declaration are reported right at that declaration. `@Injected` is the one macro that generates code.
+**Almost none of the code generation happens in the macros.** `@Injectable`, `@InjectableProviding`, `@Singleton`, `@Scoped` and `@Isolated` expand to *nothing*: they exist so the attribute is legal Swift for the plugin to read, and so the errors decidable from a single declaration are reported right at that declaration. `@Injected` and `@InjectedDynamically` are the only two that generate code.
 
 Everything else is the plugin, for one reason: an attached macro can only see the declaration it is attached to, while resolving a dependency graph requires the whole module. `ZerkPlugin` runs `ZerkCodegen` over every `.swift` file in the target — collect, resolve, generate — into a single `Zerk.generated.swift`.
 

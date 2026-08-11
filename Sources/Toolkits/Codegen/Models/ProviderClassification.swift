@@ -27,6 +27,20 @@ struct ClassifiedParameter: Equatable {
     let binding: ParameterBinding
 }
 
+/// A `@Singleton` or `@Scoped` instance reached through a provider's
+/// dependencies.
+///
+/// Carries the scope as well as the name because the two questions asked of it
+/// need both: *is this shared at all* decides `Sendable`, and *how long is it
+/// kept* decides whether depending on it can leave something holding a stale
+/// reference.
+struct SharedDependency: Hashable {
+    let typeName: String
+    /// The scope's identity, or `nil` for a `@Singleton` — which is to say, for
+    /// something that is never dropped and so can never go stale.
+    let scope: String?
+}
+
 /// The E/S/A partition of one provider's parameters, plus the facts about the
 /// resolution that only become knowable once every parameter is classified.
 struct ProviderClassification {
@@ -43,10 +57,10 @@ struct ProviderClassification {
         }
     }
 
-    /// Names of `@Singleton` types this provider depends on across an isolation
-    /// boundary. A singleton is shared by definition, so its region is not
-    /// disconnected and the compiler will require it to be `Sendable`.
-    let crossDomainSingletonDependencies: [String]
+    /// Kept instances this provider depends on across an isolation boundary. A
+    /// kept instance is shared by definition, so its region is not disconnected
+    /// and the compiler will require it to be `Sendable`.
+    let crossDomainSharedDependencies: [SharedDependency]
 
     /// Whether any dependency had to be reached across an isolation boundary.
     let hasIsolationCrossing: Bool
@@ -61,11 +75,22 @@ struct ProviderClassification {
     /// isolation rather than the member's.
     let usesIsolatedDefaultArgument: Bool
 
-    /// Every `@Singleton` reachable through this provider's dependencies,
-    /// transitively. A shared instance anywhere in the graph means the
-    /// constructed value's region is not disconnected, so its result cannot be
-    /// returned as `sending`.
-    let singletonDependencies: [String]
+    /// Every `@Singleton` and `@Scoped` reachable through this provider's
+    /// dependencies, transitively. A kept instance anywhere in the graph means
+    /// the constructed value's region is not disconnected, so its result cannot
+    /// be returned as `sending`.
+    ///
+    /// Transitive rather than one level deep because that is what the staleness
+    /// check needs: a singleton that reaches a scoped instance *through* two
+    /// transient hops holds it just as firmly as one that names it outright.
+    let sharedDependencies: [SharedDependency]
+
+    /// The scoped subset of ``sharedDependencies``, which is the half a
+    /// lifetime check has anything to say about — a singleton dependency
+    /// outlives everything and so can never go stale.
+    var scopedDependencies: [SharedDependency] {
+        sharedDependencies.filter { $0.scope != nil }
+    }
 
     /// Parameters marked `@autoinjected` that nothing in the module can satisfy.
     ///

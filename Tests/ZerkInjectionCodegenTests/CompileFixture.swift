@@ -292,6 +292,24 @@ enum CompileFixture {
         nonisolated static func _$interjected() -> Injectable? { nil }
     }
 
+    // The scoping surface, mirroring Sources/Zerk/Scoping. `nonisolated` on
+    // every member for the same reason as above: the real Zerk module is built
+    // without an ambient default, so a fixture compiled under
+    // `-default-isolation MainActor` must not turn these isolated when no real
+    // module ever would. `value` builds unconditionally — this fixture proves
+    // the emitted code *compiles*, and the caching behaviour is covered against
+    // the real module in ZerkTests.
+    public struct InjectionScope: Hashable, Sendable {
+        nonisolated public let name: String
+        nonisolated public init(_ name: String) { self.name = name }
+    }
+
+    public final class ZerkScopedBox<Value>: @unchecked Sendable {
+        nonisolated public let scope: InjectionScope
+        nonisolated public init(scope: InjectionScope) { self.scope = scope }
+        nonisolated public func value(_ build: () -> Value) -> Value { build() }
+    }
+
     @propertyWrapper
     public struct injected<Value> {
         public var wrappedValue: Value
@@ -318,10 +336,11 @@ enum CompileFixture {
     """
 
     // Prefix matches, so "@Injectable" also covers "@InjectableValue",
-    // "@InjectableValues" and "@InjectableProviding".
+    // "@InjectableValues" and "@InjectableProviding" — and "@Injected" covers
+    // "@InjectedDynamically".
     private static let zerkAttributePrefixes = [
         "@Injectable", "@NonInjectable", "@Singleton", "@ImportedInjectable",
-        "@Isolated", "@Injected"
+        "@Isolated", "@Injected", "@Scoped"
     ]
 
     private static func stripZerkMacros(from source: String) -> String {
@@ -349,7 +368,11 @@ enum CompileFixture {
                 index += 1
                 continue
             }
-            if trimmed.hasPrefix("@attached(peer") {
+            // Both roles: the stored `@Injected` variants are peer macros, the
+            // `InjectedDynamically` ones are accessor macros. Missing the second kind would
+            // leave a bare `macro InjectedDynamically() = #externalMacro(…)`
+            // in the file, which needs the plugin this harness does not load.
+            if trimmed.hasPrefix("@attached(peer") || trimmed.hasPrefix("@attached(accessor") {
                 // Skip the attribute and the `macro Injected...` line after it.
                 index += 2
                 continue

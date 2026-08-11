@@ -3,6 +3,9 @@
 `@Singleton` gives an injectable a single shared instance. This page covers what the marker
 means, the storage Zerk generates for it, and the constraints that storage imposes.
 
+For an instance that is shared but *not* forever — kept until a named scope is reset — see
+[`@Scoped`](Scoped.md). It obeys every constraint on this page, for the same reasons.
+
 ## What it does
 
 **`@Singleton`** — one shared instance per *type*, created lazily and thread-safely on first

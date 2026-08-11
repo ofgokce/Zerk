@@ -169,7 +169,48 @@ final class Consumer {
 }
 ```
 
-## 9. `@injected` (lowercase) — parameter injection
+## 9. `@InjectedDynamically` — resolving on every access
+
+`@Injected` resolves once, when the enclosing value is initialized. `@InjectedDynamically`
+resolves on every read, which matters only when the thing being resolved can *change* — that
+is, when it is [`@Scoped`](../Macros%20and%20Markers/Scoped.md) and its scope gets reset.
+
+```swift
+extension InjectionScope {
+    nonisolated static let session = InjectionScope("session")
+}
+
+@Scoped(.session)
+@Injectable<Caching>
+final class SessionCache: Caching { … }
+```
+
+```swift
+@MainActor
+final class AppCoordinator {          // outlives any one session
+    @Injected            var atLaunch: Caching   // the first session's cache, forever
+    @InjectedDynamically var current: Caching    // whatever session is current now
+}
+
+Zerk.reset(.session)
+// atLaunch: the pre-reset instance.  current: the new one.
+```
+
+It takes every form `@Injected` does:
+
+```swift
+@InjectedDynamically var loader: Loading                // the key's primary
+@InjectedDynamically(\.cached) var cached: Loading      // a named member
+@InjectedDynamically<LiveLoader> var live: Loading      // a stated key
+@InjectedDynamically(seed: 100) var token: SeededToken  // forwarded arguments
+```
+
+The property becomes computed, so it must be a `var`, cannot carry `willSet`/`didSet`, and
+does not participate in the memberwise initializer — there is no "pass a value in to
+override it" as in example 7. Prefer plain `@Injected` unless you actually outlive the scope;
+a transient injectable never does, since it is rebuilt on every resolution.
+
+## 10. `@injected` (lowercase) — parameter injection
 
 Marks an initializer or method parameter; the plugin generates an overload with every
 marked parameter omitted and filled via `inject()`. A class gets a `convenience init`:
@@ -212,7 +253,7 @@ Notice `AuditTrail`'s overload took a `value: Value` nobody wrote. `Foo`'s own p
 needs it, so it **bubbled up** onto the generated overload. Own parameters keep their
 relative order and bubbled ones are appended after them.
 
-## 10. `@injectable` — feeding a bubbled requirement from your own parameter
+## 11. `@injectable` — feeding a bubbled requirement from your own parameter
 
 When the member already declares a parameter that would satisfy a bubbled one, `@injectable`
 says so, and the single parameter serves both:
@@ -235,7 +276,7 @@ One `value` parameter, used twice. Without the marker the same name would be dec
 — once as `Bar`'s own, once bubbled for `Foo` — which is a build error rather than a silent
 merge, so sharing is always something you wrote down. Matched by name *and* type.
 
-## 11. `@autoinjected` — switching a provider to explicit mode
+## 12. `@autoinjected` — switching a provider to explicit mode
 
 By default a provider's parameters are auto-resolved wherever Zerk can. Marking any
 parameter switches that provider to explicit mode: marked parameters are resolved, unmarked
@@ -256,7 +297,7 @@ nonisolated static func checkout(payments: PaymentServicing = Zerk<PaymentServic
 
 `orderID` stays the caller's even if a `String` value exists in the graph.
 
-## 12. `@noninjected` — keeping one parameter out of resolution
+## 13. `@noninjected` — keeping one parameter out of resolution
 
 The inverse, for a provider that is mostly happy inferring:
 
@@ -277,7 +318,7 @@ nonisolated static func retryHolder(retries: Int) -> RetryHolder {
 
 No default, despite `Zerk<Int>.retries` existing.
 
-## 13. Manual resolution, and effectful chains
+## 14. Manual resolution, and effectful chains
 
 `Zerk<Key>.inject()` works anywhere. When a provider is `async` or `throws`, the effects
 propagate through every dependent, and the member splits in two:

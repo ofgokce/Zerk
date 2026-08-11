@@ -59,7 +59,8 @@ syntax and cannot tell which module a name came from, so it cannot infer that
 
 ## The re-declared `macro Injected` overloads
 
-Every generated file re-declares `@Injected` into the module it generates into:
+Every generated file re-declares `@Injected` and `@InjectedDynamically` into the
+module it generates into:
 
 ```swift
 @attached(peer, names: prefixed(_$zerk_injection_))
@@ -70,10 +71,21 @@ macro Injected<T>() = #externalMacro(module: "ZerkMacros", type: "InjectedMacro"
 
 @attached(peer, names: prefixed(_$zerk_injection_))
 macro Injected<T>(_ keyPath: KeyPath<Zerk<T>.Type, T>) = #externalMacro(module: "ZerkMacros", type: "InjectedMacro")
+
+@attached(accessor)
+macro InjectedDynamically() = #externalMacro(module: "ZerkMacros", type: "InjectedDynamicallyMacro")
+
+@attached(accessor)
+macro InjectedDynamically<T>() = #externalMacro(module: "ZerkMacros", type: "InjectedDynamicallyMacro")
+
+@attached(accessor)
+macro InjectedDynamically<T>(_ keyPath: KeyPath<Zerk<T>.Type, T>) = #externalMacro(module: "ZerkMacros", type: "InjectedDynamicallyMacro")
 ```
 
-These three mirror the library's own declarations, and being module-local they
-shadow them wherever the plugin runs. That is the point: a macro attribute can
+These mirror the library's own declarations, and being module-local they shadow
+them wherever the plugin runs. The roles never cross: every `Injected` overload
+is a peer, every `InjectedDynamically` one an accessor. Mixing them under a single
+name crashes SILGen, which is the whole reason there are two names. That is the point: a macro attribute can
 only carry arguments some declaration accepts, and the library cannot declare
 every argument list a module's `inject()` methods might take. So the plugin adds
 **one overload per distinct `inject()` signature** in the module. Given
@@ -105,9 +117,18 @@ exactly the ones it names — `@Injectable<Boxable> struct Box<X, Y>` with
 macro Injected<X, Y>(x: X, y: Y) = #externalMacro(module: "ZerkMacros", type: "InjectedMacro")
 ```
 
-Because these are module-local, the three base forms have to be restated too —
-without them, a module that gained an argument-forwarding overload would lose
-plain `@Injected` and `@Injected(\.member)` to shadowing.
+Each forwarding signature gets a `InjectedDynamically` twin alongside it, so both
+attributes take the same arguments:
+
+```swift
+@attached(accessor)
+macro InjectedDynamically(title: String) = #externalMacro(module: "ZerkMacros", type: "InjectedDynamicallyMacro")
+```
+
+Because these are module-local, every base form has to be restated too — Swift's
+name lookup stops at the first scope declaring the name, so a module that gained
+one argument-forwarding overload would otherwise lose plain `@Injected` and
+`@Injected(\.member)` to shadowing.
 
 ## A plain key
 
@@ -265,10 +286,65 @@ private func _$zerk_sendable_conformance_check<T: Sendable>(_: T.Type) {}
 
 private func _$zerk_sendable_conformance_check_Clock_in_Screen() {
     // '@Singleton Clock' is injected into 'Screen'.
-    // Singletons that cross isolation domains must be Sendable.
+    // A shared instance that crosses isolation domains must be Sendable.
     _$zerk_sendable_conformance_check(Clock.self)
 }
 ```
+
+## A scoped instance
+
+```swift
+protocol Caching {}
+
+extension InjectionScope {
+    nonisolated static let session = InjectionScope("session")
+}
+
+@Scoped(.session)
+@Injectable<Caching>
+final class SessionCache: Caching {
+    init() {}
+}
+```
+
+```swift
+// A scope named from a nonisolated slot must itself be nonisolated. Under
+// SWIFT_DEFAULT_ACTOR_ISOLATION, write `nonisolated static let session = …`.
+private enum _$zerk_scoped {
+    nonisolated static let sessionCache = ZerkScopedBox<SessionCache>(scope: .session)
+}
+
+extension Zerk<Caching> {
+    nonisolated static var sessionCache: Caching {
+        if let interjected = _$interjected(for: \.`sessionCache`) {
+            return interjected
+        }
+        return _$zerk_scoped.sessionCache.value { SessionCache() }
+    }
+
+    nonisolated static func inject() -> Caching {
+        sessionCache
+    }
+
+}
+```
+
+The same shape as a singleton — one entry per **type**, read through a per-key
+getter, with the interjection guard ahead of it — and for the same reasons. Two
+things differ.
+
+**The construction closure is at the member**, not in the storage. The box holds
+no way to build its value, which is what keeps it `nonisolated` even for a
+`@MainActor` type (the closure runs in the member's domain, not the box's) and
+what keeps `Zerk.reset(_:)` synchronous and callable from anywhere.
+
+**The slot is pinned to the member's isolation** rather than marked
+`nonisolated(unsafe)`. `ZerkScopedBox` is already `Sendable`, so the escape hatch
+is unnecessary and the compiler says so — but an unannotated slot would inherit
+`SWIFT_DEFAULT_ACTOR_ISOLATION` and go out of reach of a nonisolated member.
+
+A scoped instance crossing an isolation domain gets the same `Sendable` check a
+singleton does, with `@Scoped` named in the comment.
 
 ## A parametric provider
 
@@ -658,7 +734,8 @@ sorted:
 2. The `macro Injected` declarations.
 3. `extension Zerk<Key>` for each injectable value, by value name.
 4. File-scope thunks — value references and global `@Injectable` declarations.
-5. `private enum _$zerk_singletons`, if the module declares any.
+5. `private enum _$zerk_singletons`, then `private enum _$zerk_scoped`, if the
+   module declares any of either.
 6. `extension Zerk<Key>` per key, keys sorted; within a key, members by name,
    then `inject()`.
 7. `extension <Type>` per type with `@injected` members, types sorted.
