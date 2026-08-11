@@ -1569,7 +1569,7 @@ struct GeneratorOutputBuilder {
     /// The generated factory's name: whatever the provider stated, or — for an
     /// initializer, which states nothing by default — its type, lowercased.
     private func memberName(for resolution: ProviderResolution) -> String {
-        resolution.provider.memberNameHint ?? resolution.typeName.memberNameForType
+        resolution.memberName
     }
 
     /// Whether more than one provider for this key generates a member of this

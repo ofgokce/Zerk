@@ -24,11 +24,27 @@ public struct CodeGenerator {
     let inputPaths: [String]
     let outputPath: String
     var settingsPath: String? = nil
+    /// Where to write the ``ZerkGraph`` artifact, or `nil` to write none.
+    ///
+    /// Opt-in rather than derived from `outputPath`, so invoking the tool by
+    /// hand keeps its old contract of writing exactly one file. The build plugin
+    /// always asks for it, since it can declare the extra output and let the
+    /// build system track it.
+    var graphPath: String? = nil
+    /// The module name recorded in the graph. Only meaningful alongside
+    /// ``graphPath``.
+    var moduleName: String? = nil
 
-    public init(inputPaths: [String], outputPath: String, settingsPath: String? = nil) {
+    public init(inputPaths: [String],
+                outputPath: String,
+                settingsPath: String? = nil,
+                graphPath: String? = nil,
+                moduleName: String? = nil) {
         self.inputPaths = inputPaths
         self.outputPath = outputPath
         self.settingsPath = settingsPath
+        self.graphPath = graphPath
+        self.moduleName = moduleName
     }
 
     public func run() throws {
@@ -139,6 +155,26 @@ public struct CodeGenerator {
             withIntermediateDirectories: true
         )
         try output.output.write(to: url, atomically: true, encoding: String.Encoding.utf8)
+
+        // After the Swift, and only once it is written: the graph describes what
+        // was emitted, so a run that produced no code should leave no graph
+        // claiming otherwise.
+        if let graphPath {
+            var graph = GraphBuilder(
+                values: values,
+                resolutions: resolution.resolutions,
+                primaryResolutions: KeyIndex(imports.primaries),
+                keyDisplayNames: keyDisplayNames
+            ).build()
+            graph.module = moduleName
+
+            let graphURL = URL(fileURLWithPath: graphPath)
+            try FileManager.default.createDirectory(
+                at: graphURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try graph.encoded().write(to: graphURL, options: .atomic)
+        }
     }
     
     /// The plugin resolves the settings file and passes its path explicitly.

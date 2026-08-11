@@ -153,6 +153,42 @@ enum CompileFixture {
         ).build()
     }
 
+    /// The graph artifact for a fixture, built through the same pipeline the
+    /// plugin runs so the two cannot describe different things.
+    static func graph(source: String, settings: ZerkSettings = .default) -> ZerkGraph {
+        let collector = SourceCollector(settings: settings)
+        collector.walk(Parser.parse(source: source))
+
+        let aliases = KeyAliases(declarations: collector.aliasDeclarations)
+        let rewriter = AliasRewriter(aliases: aliases)
+        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
+        let resolution = ProviderResolver(
+            types: gate.types,
+            aliases: aliases,
+            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
+        ).resolve()
+        let imports = ImportedInjectableMerger(
+            records: collector.importedInjectables.map {
+                var record = $0
+                record.typeKey = aliases.representative(for: $0.typeKey)
+                return record
+            }
+        ).merged(
+            into: resolution.primaryResolutions,
+            localKeys: Set(resolution.resolutions.map(\.injectableKey))
+        )
+        let importedValues = ImportedValueMerger(
+            records: rewriter.rewrite(importedValues: collector.importedValues)
+        ).merged(into: rewriter.rewrite(values: collector.values))
+
+        return GraphBuilder(
+            values: importedValues.values,
+            resolutions: resolution.resolutions,
+            primaryResolutions: KeyIndex(imports.primaries),
+            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
+        ).build()
+    }
+
     /// Codegen plus the diagnostics that only `ProviderResolver` can produce.
     ///
     /// `generateOutput` reports what the *builder* found; provider ambiguity is

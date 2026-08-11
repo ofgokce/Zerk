@@ -59,6 +59,7 @@ How code generation works, and what it produces.
 | [Generated code](Plugin/GeneratedCode.md) | An annotated tour of what the plugin emits, construct by construct |
 | [Settings](Plugin/Settings.md) | `ZerkSettings.json` — every key, its meaning, and its default |
 | [Diagnostics](Plugin/Diagnostics.md) | Every build error and warning Zerk reports, grouped, with its fix |
+| [Graph artifact](Plugin/GraphArtifact.md) | `Zerk.graph.json` and `swift package zerk-graph` — the resolved graph as data, across module boundaries |
 | [Limitations](Plugin/Limitations.md) | What syntax-level resolution can and cannot do |
 
 ## Testing

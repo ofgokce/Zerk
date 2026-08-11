@@ -98,6 +98,15 @@ struct ProviderResolution {
 
     var isolation: ProviderIsolation { provider.isolation }
 
+    /// What the member generated for this resolution is called.
+    ///
+    /// Lives here rather than on the emitter because two things need it and
+    /// they must never disagree: the generated Swift, and the graph artifact
+    /// that claims to describe it.
+    var memberName: String {
+        provider.memberNameHint ?? typeName.memberNameForType
+    }
+
     /// The type a `@Singleton`'s or `@Scoped`'s shared storage is declared as.
     ///
     /// The provider's declared return type, falling back to the concrete type

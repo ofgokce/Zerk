@@ -40,6 +40,7 @@ struct ZerkPlugin: BuildToolPlugin {
         return try buildCommands(
             tool: context.tool(named: "ZerkCodegen"),
             workDirectory: context.pluginWorkDirectoryURL,
+            moduleName: target.name,
             inputFiles: inputFiles,
             settingsFile: Self.settingsFile(
                 searchingIn: [
@@ -66,12 +67,24 @@ struct ZerkPlugin: BuildToolPlugin {
     /// Builds the single codegen command shared by the SwiftPM and Xcode
     /// entry points.
     ///
-    /// The generated file is declared as the command's only output, so the
-    /// build system reruns codegen exactly when a source file or the settings
-    /// file changes. A target with no Swift sources gets no command at all,
-    /// rather than a command that would write an empty file.
+    /// The generated Swift is the command's only *declared* output, so the build
+    /// system reruns codegen exactly when a source file or the settings file
+    /// changes. A target with no Swift sources gets no command at all, rather
+    /// than a command that would write an empty file.
+    ///
+    /// `Zerk.graph.json` is written beside it but deliberately **not declared**.
+    /// SwiftPM routes a declared output it cannot compile into the target's
+    /// *resource bundle* — measured, not assumed: declaring it put
+    /// `Zerk.graph.json` inside `Zerk_<Target>.bundle`, which would ship the
+    /// file in every app using Zerk, absolute developer paths and all, and
+    /// conjure a `Bundle.module` for targets that had no resources before.
+    ///
+    /// Leaving it undeclared costs nothing in staleness: the same invocation
+    /// writes both files, and the `.swift` output already forces that invocation
+    /// to rerun whenever any input changes.
     private func buildCommands(tool: PluginContext.Tool,
                                workDirectory: URL,
+                               moduleName: String,
                                inputFiles: [URL],
                                settingsFile: URL?) throws -> [Command] {
         guard !inputFiles.isEmpty else {
@@ -79,11 +92,13 @@ struct ZerkPlugin: BuildToolPlugin {
         }
 
         let outputFile = workDirectory.appending(path: "Zerk.generated.swift")
+        let graphFile = workDirectory.appending(path: "Zerk.graph.json")
 
         var arguments = [outputFile.path]
         if let settingsFile {
             arguments += ["--settings", settingsFile.path]
         }
+        arguments += ["--graph", graphFile.path, "--module", moduleName]
         arguments += inputFiles.map(\.path)
 
         return [
@@ -125,6 +140,7 @@ extension ZerkPlugin: XcodeBuildToolPlugin {
         return try buildCommands(
             tool: context.tool(named: "ZerkCodegen"),
             workDirectory: context.pluginWorkDirectoryURL,
+            moduleName: target.displayName,
             inputFiles: inputFiles,
             settingsFile: ZerkPlugin.settingsFile(searchingIn: searchDirectories)
         )

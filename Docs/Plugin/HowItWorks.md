@@ -34,6 +34,8 @@ Attach the plugin to every target that *declares* injectables. Both flavours are
 
 The output is a single `Zerk.generated.swift` in the build directory, declared as the command's only output so the build system reruns codegen exactly when a source file or `ZerkSettings.json` changes.
 
+A second file, [`Zerk.graph.json`](GraphArtifact.md), is written beside it — the resolved graph as data. It is deliberately *not* declared as an output, because SwiftPM routes an undeclarable-as-source output into the target's resource bundle, which would ship it inside every app. It is a development artifact, not a build product.
+
 For this input:
 
 ```swift

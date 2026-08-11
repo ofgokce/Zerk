@@ -29,6 +29,11 @@ be regenerated, never to be changed.
 Emission is deterministic: keys, members, imports and interjection points are all
 sorted, so the file is byte-identical between builds of unchanged sources.
 
+Alongside it the plugin writes [`Zerk.graph.json`](GraphArtifact.md) — the same
+resolution, as data rather than as Swift. Use it when the question is about the
+*graph* (which provider won a key, what depends on what, what is kept alive)
+rather than about the code.
+
 ## The header
 
 ```swift
