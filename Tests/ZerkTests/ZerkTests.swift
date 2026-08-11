@@ -1,17 +1,14 @@
 import Testing
 import Zerk
 
-/// Serialized for the *counter* fixtures, not for interjection: several cases
-/// assert on shared `static var` construction counts (`Logger.createdCount`,
-/// `LiveUserService.factoryCount`) that race when tests run concurrently.
-/// Interjection itself is now per-scope and parallel-safe — see
-/// `InterjectionStoreTests`, whose suites do run concurrently.
-@Suite("Zerk Macro Integration", .serialized)
+/// Runs in parallel. Construction counts used to force `.serialized` here, and
+/// even that was not enough — it orders a suite's own tests and nothing more,
+/// while the counters were process-wide. They are per test now; see
+/// ``ConstructionLog``.
+@Suite("Zerk Macro Integration", .counting)
 struct ZerkTests {
     @Test("unique typed injection resolves dependencies")
     func protocolInjectionFlow() throws {
-        resetFixtureState()
-
         let model = FeedViewModel()
         let first = try #require(model.userService as? LiveUserService)
         let second = try #require(model.userService as? LiveUserService)
@@ -20,42 +17,36 @@ struct ZerkTests {
         #expect(second.requestPath() == "https://api.example.com/users")
         #expect(first.loggerSerial == 1)
         #expect(second.loggerSerial == 1)
-        #expect(LiveUserService.factoryCount == 1)
-        #expect(Logger.createdCount == 1)
+        #expect(ConstructionLog.count(LiveUserService.name) == 1)
+        #expect(ConstructionLog.count(Logger.name) == 1)
     }
 
     @Test("@Injected resolves parameterized values eagerly")
     func eagerParameterizedInjectionFlow() {
-        resetFixtureState()
-
         let consumer = EagerTokenConsumer()
         let first = consumer.seededToken.value
         let second = consumer.seededToken.value
 
         #expect(first == 101)
         #expect(second == 101)
-        #expect(SeededToken.factoryCount == 1)
+        #expect(ConstructionLog.count(SeededToken.name) == 1)
     }
 
     @Test("lazy var with Zerk.inject() resolves parameterized values on first access")
     func lazyParameterizedInjectionFlow() {
-        resetFixtureState()
-
         let consumer = LazyTokenConsumer()
 
-        #expect(SeededToken.factoryCount == 0)
+        #expect(ConstructionLog.count(SeededToken.name) == 0)
         let first = consumer.seededToken.value
         let second = consumer.seededToken.value
 
         #expect(first == 101)
         #expect(second == 101)
-        #expect(SeededToken.factoryCount == 1)
+        #expect(ConstructionLog.count(SeededToken.name) == 1)
     }
 
     @Test("singleton injectable is shared across consumers")
     func singletonIsShared() {
-        resetFixtureState()
-
         let firstOwner = SessionOwner()
         let secondOwner = SessionOwner()
 
@@ -64,8 +55,6 @@ struct ZerkTests {
 
     @Test("a dependency spelled Array<String> resolves an [String] value")
     func canonicalizedKeysResolve() {
-        resetFixtureState()
-
         // No argument to pass: `Array<String>` matched the `[String]` value, so
         // inject() resolves the whole graph itself.
         let tagger = Zerk<any Tagging>.inject()
@@ -75,8 +64,6 @@ struct ZerkTests {
 
     @Test("@Injected<Key> resolves the stated key into a differently typed property")
     func statedKeyResolvesIntoACompatibleProperty() {
-        resetFixtureState()
-
         // The key is the concrete type; the property is the protocol it
         // satisfies. Before, this was rejected as a type mismatch.
         #expect(StatedKeyConsumer().reporter.label == "console")
@@ -85,8 +72,6 @@ struct ZerkTests {
 
     @Test("@Injected with a key path resolves the named member, not the primary")
     func keyPathInjectionPicksTheNamedMember() {
-        resetFixtureState()
-
         // `live` is primary, so a plain @Injected would give "live".
         #expect(LoaderConsumer().loader.source == "live")
         #expect(KeyPathLoaderConsumer().loader.source == "cached")
@@ -94,8 +79,6 @@ struct ZerkTests {
 
     @Test("@injectable feeds one parameter to both the member and its dependency")
     func injectableSharesAParameter() {
-        resetFixtureState()
-
         // One `seed`: it reaches SeededToken's provider and the member itself.
         let consumer = SeedSharingConsumer(seed: 100)
 
@@ -105,8 +88,6 @@ struct ZerkTests {
 
     @Test("@noninjected keeps a resolvable parameter caller-supplied")
     func nonInjectedOptsOut() {
-        resetFixtureState()
-
         // `RetryPolicy.retryLimit` is injectable and matches by name and type,
         // so without the marker this would take no arguments at all.
         let holder = Zerk<RetryHolder>.inject(retryLimit: 9)
@@ -116,8 +97,6 @@ struct ZerkTests {
 
     @Test("@autoinjected resolves marked parameters and leaves the rest alone")
     func autoInjectedSelectsWhatIsResolved() {
-        resetFixtureState()
-
         // `baseURL` is required despite being resolvable — the signature itself
         // is the assertion, since inject() would take no arguments otherwise.
         let consumer = Zerk<ExplicitConsumer>.inject(baseURL: "supplied-by-caller")
@@ -128,8 +107,6 @@ struct ZerkTests {
 
     @Test("a @ZerkAlias key resolves from the underlying key's provider")
     func aliasedKeyResolves() {
-        resetFixtureState()
-
         // `Archiving` is a typealias of `Tagging`; nothing is registered under
         // it, so this only resolves because the keys were merged.
         let consumer = Zerk<ArchiveConsumer>.inject()
@@ -139,8 +116,6 @@ struct ZerkTests {
 
     @Test("a singleton injectable under two keys is one instance")
     func singletonIsSharedAcrossKeys() {
-        resetFixtureState()
-
         let reader = Zerk<Reading>.inject()
         let writer = Zerk<Writing>.inject()
 
@@ -148,33 +123,28 @@ struct ZerkTests {
         #expect(reader.id == writer.id)
 
         // Resolving again through either key must not build a second instance.
-        // Compared against a captured count rather than a literal, so the
-        // assertion holds wherever this lands in the run order.
-        let built = Store.buildCount
+        // Identity is the whole of that claim — a second instance would fail
+        // these outright — and unlike a build count it does not depend on
+        // whether some earlier test already touched the storage.
         #expect(Zerk<Reading>.inject() === reader)
         #expect(Zerk<Writing>.inject() === reader)
-        #expect(Store.buildCount == built)
     }
 
     @Test("@injected parameter generates a wired overload")
     func injectedParameterGeneratesWiredOverload() {
-        resetFixtureState()
-
         let trail = AuditTrail(label: "audit")
 
         #expect(trail.label == "audit")
         #expect(trail.logger.serial == 1)
-        #expect(Logger.createdCount == 1)
+        #expect(ConstructionLog.count(Logger.name) == 1)
 
         let manual = AuditTrail(logger: trail.logger, label: "manual")
         #expect(manual.logger.serial == 1)
-        #expect(Logger.createdCount == 1)
+        #expect(ConstructionLog.count(Logger.name) == 1)
     }
 
     @Test("every provider for a key becomes a member, and the primary backs inject")
     func multipleProvidersPerKey() {
-        resetFixtureState()
-
         // The primary provider on the primary type.
         #expect(LoaderConsumer().loader.source == "live")
         #expect(Zerk<Loading>.inject().source == "live")
@@ -191,8 +161,6 @@ struct ZerkTests {
 
     @Test("the non-generic primary overloads resolve through the real macros")
     func nonGenericPrimaryOverloads() {
-        resetFixtureState()
-
         // Two marked initializers: same member name, told apart by parameters.
         #expect(Zerk<Reporter>.inject().mode == "default")
         #expect(Zerk<Reporter>.reporter(mode: "verbose").mode == "verbose")
@@ -205,8 +173,6 @@ struct ZerkTests {
 
     @Test("typeNamed: and name: move the member a provider generates")
     func providerNamingOverloads() {
-        resetFixtureState()
-
         // `typeNamed:` takes the *return* type — neither `live`, the factory's
         // own name, nor `mailerProvider`, the type it is declared inside.
         #expect(Zerk<Mailing>.mailer.route == "live")
@@ -220,7 +186,6 @@ struct ZerkTests {
 
     @Test("interjection overrides injection with mock type")
     func interjectionOverridesInjection() async throws {
-        resetFixtureState()
         await withInterjections(interjectUserService) {
             let model = FeedViewModel()
             let service = model.userService
@@ -233,30 +198,23 @@ struct ZerkTests {
 
     @Test("interjection overrides parameterized injection with inlined value")
     func interjectionOverridesParameterizedInjection() async {
-        resetFixtureState()
         await withInterjections(interjectSeededToken) {
             let consumer = EagerTokenConsumer()
             let value = consumer.seededToken.value
 
             #expect(value == 999)
-            #expect(SeededToken.factoryCount == 0)
+            #expect(ConstructionLog.count(SeededToken.name) == 0)
         }
     }
 
 }
 
-private func resetFixtureState() {
-    Logger.createdCount = 0
-    LiveUserService.factoryCount = 0
-    SeededToken.factoryCount = 0
-}
-
 // MARK: - Generic injectables
 
-/// Serialized for the same reason as the suite above: two cases assert on
-/// `CodecCounter.builds`, a shared record of which specializations were
-/// constructed, and it races when they run concurrently.
-@Suite("Generic injection", .serialized)
+/// Runs in parallel. These assert on the values in hand — the specialization a
+/// resolution produced — rather than on `CodecCounter`, which every suite
+/// resolving a `Repository` appends to.
+@Suite("Generic injection")
 struct GenericInjectionTests {
 
     @Test("a generic key resolves per specialization")

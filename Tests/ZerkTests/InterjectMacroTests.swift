@@ -13,7 +13,7 @@ import ZerkTesting
 // `.zerk` gives each test its own scope, which is how these are meant to be
 // written — no `withInterjections` in sight. The primitive it rests on is
 // covered separately in InterjectionStoreTests.
-@Suite("#Interject", .zerk)
+@Suite("#Interject", .zerk, .counting)
 struct InterjectMacroTests {
 
     @Test("a blanket interjection covers every member of its key")
@@ -47,7 +47,8 @@ struct InterjectMacroTests {
         // the value's type.
         #Interject(\.seeded, with: SeededToken(value: 999))
         #expect(Zerk<SeededToken>.seeded(seed: 1).value == 999)
-        #expect(SeededToken.factoryCount == 0)
+        // The interjection short-circuits the real factory entirely.
+        #expect(ConstructionLog.count(SeededToken.name) == 0)
     }
 
     @Test("an explicit key resolves a name shared by several keys")

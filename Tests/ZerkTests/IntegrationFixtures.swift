@@ -112,29 +112,23 @@ protocol Writing: AnyObject {
 @Singleton
 @Injectable<Reading, Writing>
 final class Store: Reading, Writing {
-    // Test-only counter; the ZerkTests suite is .serialized. Deliberately not
-    // reset between tests — the instance outlives any single test, so a count
-    // that could be zeroed underneath it would prove nothing.
-    nonisolated(unsafe) static var buildCount = 0
-    let id: Int
-
-    @InjectableProviding
-    init() {
-        Self.buildCount += 1
-        self.id = Self.buildCount
-    }
+    /// Distinguishes instances without counting them. A singleton's storage may
+    /// have been initialized before any given test ran, so *how many* were built
+    /// is not a question a test can ask — but identity answers the real one.
+    var id: Int { ObjectIdentifier(self).hashValue }
 }
 
 @Injectable
 struct Logger {
-    // Test-only counter; the ZerkTests suite is .serialized.
-    nonisolated(unsafe) static var createdCount = 0
+    /// Per-test, so two tests resolving a `Logger` at once still each see their
+    /// own first one as `1`. See ``ConstructionLog``.
+    static let name = "Logger"
     let serial: Int
 
     @InjectableProviding
     init() {
-        Self.createdCount += 1
-        self.serial = Self.createdCount
+        ConstructionLog.record(Self.name)
+        self.serial = ConstructionLog.count(Self.name)
     }
 }
 
@@ -145,15 +139,14 @@ protocol UserService {
 
 @Injectable<UserService>
 final class LiveUserService: UserService {
-    // Test-only counter; the ZerkTests suite is .serialized.
-    nonisolated(unsafe) static var factoryCount = 0
+    static let name = "LiveUserService"
 
     let apiService: ApiServicing
     let loggerSerial: Int
 
     @InjectableProviding
     static func live(apiService: ApiServicing, logger: Logger) -> UserService {
-        Self.factoryCount += 1
+        ConstructionLog.record(Self.name)
         return LiveUserService(apiService: apiService, logger: logger)
     }
 
@@ -169,14 +162,13 @@ final class LiveUserService: UserService {
 
 @Injectable
 final class SeededToken {
-    // Test-only counter; the ZerkTests suite is .serialized.
-    nonisolated(unsafe) static var factoryCount = 0
+    static let name = "SeededToken"
     let value: Int
 
     @InjectableProviding
     static func seeded(seed: Int) -> SeededToken {
-        Self.factoryCount += 1
-        return SeededToken(value: seed + Self.factoryCount)
+        ConstructionLog.record(Self.name)
+        return SeededToken(value: seed + ConstructionLog.count(Self.name))
     }
 
     init(value: Int) {
@@ -414,11 +406,15 @@ final class AuditTrail {
 /// are illegal in a generic type, which is the same fact that makes a generic
 /// `@Singleton` impossible.
 /// Locked, not merely `nonisolated(unsafe)`. These fixtures are resolved from
-/// several suites at once, and Swift Testing runs suites in parallel —
-/// `.serialized` orders a suite's own tests and nothing more. An unguarded
-/// `Array.append` from two suites is a genuine data race, and it does not fail
-/// an assertion: it corrupts the buffer and takes the test process down, which
+/// several suites at once and every suite runs in parallel, so an unguarded
+/// `Array.append` from two of them is a genuine data race — and it does not fail
+/// an assertion, it corrupts the buffer and takes the test process down, which
 /// reads as an unexplained crash far from the cause.
+///
+/// Records *which* specializations were built, process-wide, which is why the
+/// one test reading it asserts growth rather than equality. Counting how many
+/// times something was built belongs in ``ConstructionLog`` instead, which is
+/// per test and needs no such care.
 enum CodecCounter {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var storage: [String] = []
@@ -434,12 +430,11 @@ enum CodecCounter {
 
 /// An identity-bearing dependency for the generic fixtures alone.
 ///
-/// Deliberately **not** `Logger`. That one is counted by `resetFixtureState()`
-/// and asserted on by `ZerkTests`, which is `.serialized` — but serialization
-/// orders tests *within* a suite, not across them. A generic test resolving a
-/// `Logger` in parallel therefore breaks an assertion in an unrelated suite,
-/// intermittently and far from the cause. Anything the generic suites resolve
-/// has to be theirs alone.
+/// Deliberately **not** `Logger`. That used to matter a great deal: `Logger` was
+/// counted process-wide, so a generic test resolving one in parallel broke an
+/// assertion in an unrelated suite, intermittently and far from the cause.
+/// ``ConstructionLog`` makes that impossible now, but keeping the generic
+/// fixtures' dependencies to themselves is still the cheaper habit.
 enum StampCounter {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var storage = 0

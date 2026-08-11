@@ -128,6 +128,21 @@ Every failure exits non-zero with a named cause, so the command is usable in CI:
 
 A codegen failure prints the same diagnostics a build would, pointing at your source rather than at generated code.
 
+## Verifying it yourself
+
+Zerk's own repository carries a two-module fixture at `Tests/Fixtures/CrossModule` — one
+target exporting a key, another importing it. It is a real package, so you can point the
+command at it:
+
+```bash
+cd Tests/Fixtures/CrossModule
+swift package zerk graph --format mermaid
+```
+
+The test suite drives the same fixture. `swift test` covers the stitching through the library
+on every run; `ZERK_E2E=1 swift test` additionally runs the command above for real, which
+takes about a minute and leaves a nested build directory behind.
+
 ---
 
 [← Table of contents](../TableOfContents.md)

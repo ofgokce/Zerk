@@ -30,8 +30,11 @@ protocol SessionScoped: AnyObject {
 @Scoped(.fixtureSession)
 @Injectable<SessionScoped>
 final class ScopedCache: SessionScoped {
-    // Test-only counter; `ScopingTests` is `.serialized`, and every test in it
-    // resets the scope before asserting rather than assuming a starting value.
+    // Process-wide on purpose, unlike `ConstructionLog`: what is under test is
+    // a *scope*, which is itself process-wide, so a per-test tally would not be
+    // measuring the thing. `ScopingTests` is `.serialized` for the same reason,
+    // and every test resets the scope before asserting rather than assuming a
+    // starting value.
     nonisolated(unsafe) static var buildCount = 0
     let serial: Int
 

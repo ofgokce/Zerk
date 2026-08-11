@@ -46,9 +46,9 @@ struct NestingPreviewView: View {
 /// registered *before* the content is built — and that guarantee is invisible
 /// from its signature. These pin it.
 ///
-/// `.serialized`: every test here opens its own interjection scope, but they
-/// share one process-wide graph and the counters below are global.
-@Suite("Zerk.view", .serialized)
+/// Runs in parallel: every test opens its own interjection scope, which is
+/// task-local, and nothing here touches shared mutable state.
+@Suite("Zerk.view")
 struct ZerkViewTests {
 
     @Test("interjections are in force while the content is built")
