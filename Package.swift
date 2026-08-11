@@ -26,8 +26,8 @@ let package = Package(
             targets: ["ZerkPlugin"]
         ),
         .plugin(
-            name: "ZerkGraphPlugin",
-            targets: ["ZerkGraphPlugin"]
+            name: "ZerkCLI",
+            targets: ["ZerkCLI"]
         ),
         .library(
             name: "ZerkTesting",
@@ -136,21 +136,15 @@ let package = Package(
             ]
         ),
         .plugin(
-            name: "ZerkGraphPlugin",
-            // No `permissions:`. The command writes to stdout by default, and
-            // `--output` outside the package needs nothing; only writing *into*
-            // the package would, and asking for that permission up front would
-            // prompt every user for a capability most never use. Anyone wanting
-            // a file in their repo can redirect, or pass
-            // `--allow-writing-to-package-directory` themselves.
+            name: "ZerkCLI",
             capability: .command(
                 intent: .custom(
-                    verb: "zerk-graph",
-                    description: "Export the resolved Zerk dependency graph for this package."
+                    verb: "zerk",
+                    description: "Zerk's command-line tools. Run 'swift package zerk help' for the list."
                 )
             ),
             dependencies: ["ZerkCodegen", "ZerkGraphTool"],
-            path: "Sources/ZerkGraphPlugin"
+            path: "Sources/ZerkCLI"
         ),
         .testTarget(
             name: "ZerkTests",

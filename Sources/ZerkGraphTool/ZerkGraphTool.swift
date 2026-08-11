@@ -6,11 +6,11 @@
 import Foundation
 import CodegenToolkit
 
-/// Command-line front end to `GraphExport`, invoked by `ZerkGraphPlugin`.
+/// Command-line front end to `GraphExport`, invoked by `ZerkCLI`.
 ///
 /// Usage: `ZerkGraphTool [--format <json|dot|mermaid>] [--output <path>] <graph.json>...`
 ///
-/// The second half of `swift package zerk-graph`. The command plugin runs
+/// The second half of `swift package zerk graph`. The command plugin runs
 /// `ZerkCodegen` once per target to produce the inputs, then this to join them —
 /// a split the plugin API forces, since a plugin may depend on executables but
 /// cannot import library targets. It earns its keep anyway: everything it does

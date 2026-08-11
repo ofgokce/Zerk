@@ -7,7 +7,7 @@ import Foundation
 
 /// Reads per-module graph files, joins them, and renders the result.
 ///
-/// The public face of the merge-and-render half of `swift package zerk-graph`,
+/// The public face of the merge-and-render half of `swift package zerk graph`,
 /// mirroring how `CodeGenerator` fronts the generation half. Keeping this the
 /// only exported symbol lets ``ZerkGraph``, ``GraphMerger`` and ``GraphRenderer``
 /// stay internal, where they can change without being API.
@@ -77,7 +77,7 @@ public struct GraphExport {
             // since a full disk lands on the same line.
             throw Failure(message: "could not write \(outputPath): \(error.localizedDescription)\n"
                 + "If that path is inside the package, the plugin needs permission: "
-                + "swift package --allow-writing-to-package-directory zerk-graph …")
+                + "swift package --allow-writing-to-package-directory zerk graph …")
         }
         return nil
     }

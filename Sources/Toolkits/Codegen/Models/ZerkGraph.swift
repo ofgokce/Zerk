@@ -47,7 +47,7 @@ struct ZerkGraph: Codable, Equatable {
     ///
     /// Zerk resolves per module, so a graph without this is ambiguous the
     /// moment two of them are in the same room — which is exactly what
-    /// `swift package zerk-graph` puts them in. The build plugin passes the
+    /// `swift package zerk graph` puts them in. The build plugin passes the
     /// target name; a hand invocation may omit it.
     var module: String? = nil
     /// Every key the module resolves, sorted by key.

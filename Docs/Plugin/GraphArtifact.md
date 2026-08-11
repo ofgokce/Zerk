@@ -2,7 +2,7 @@
 
 Every build, Zerk resolves your module's whole dependency graph in order to emit code. `Zerk.graph.json` is that graph, written down instead of thrown away.
 
-This page covers what is in it, where it is, why it is not a build product you can depend on, and what it is useful for.
+This page covers what is in it, where it is, why it is not a build product you can depend on, and what it is useful for. For the command that prints it on demand, see [`ZerkCLI`](ZerkCLI.md).
 
 ## Why it exists
 
@@ -106,28 +106,18 @@ One entry per provider parameter, in declaration order, each saying what satisfi
 
 Paths are recorded exactly as the compiler was given them, which for a SwiftPM build is absolute. Relativize against your own root rather than expecting Zerk to guess it.
 
-## `swift package zerk-graph`
+## The whole package at once
 
-The build artifact is per target, lives in the build directory, and only exists after a successful build. The command plugin is the on-demand counterpart:
-
-```bash
-swift package zerk-graph                                   # every target, JSON, to stdout
-swift package zerk-graph --format mermaid                  # paste into a README or PR
-swift package zerk-graph --target AppCore --target Networking --format dot | dot -Tpng -o graph.png
-swift package zerk-graph --format json --output /tmp/graph.json
-```
-
-It **re-runs codegen** rather than reading the build artifacts — so it works on a clean checkout, needs no prior build, and does not have to guess at build-directory layout. A codegen pass is parsing plus resolution, not compilation, so this is cheap.
-
-Output goes to stdout by default, which pipes and needs no permission. `--output` inside the package needs `--allow-writing-to-package-directory`; outside it, nothing.
-
-In Xcode the same command appears under the project's plugin menu.
+The artifact above is per target. [`swift package zerk graph`](ZerkCLI.md) is the
+on-demand counterpart: it resolves every target and prints them together, with the edges
+between modules drawn in. That page covers invoking it; what follows is what it adds to the
+data.
 
 ### The cross-module view
 
 This is the thing the per-target artifact structurally cannot give you.
 
-Zerk resolves one module at a time — that isolation is what keeps the plugin cheap and correct. A module knows a key is `@ImportedInjectable` and nothing more. The command plugin sees every target at once, so it can say *which* module answers that import:
+Zerk resolves one module at a time — that isolation is what keeps the plugin cheap and correct. A module knows a key is `@ImportedInjectable` and nothing more. Something looking at every target at once can say *which* module answers that import:
 
 ```json
 "imports" : [
@@ -138,20 +128,7 @@ Zerk resolves one module at a time — that isolation is what keeps the plugin c
 ]
 ```
 
-and draw it — dashed edges cross module boundaries, solid ones stay inside:
-
-```mermaid
-graph LR
-    subgraph Core
-        m0k0["ApiServicing<br/>singleton"]
-    end
-    subgraph Feature
-        m1k0["ApiServicing<br/>imported"]
-        m1k1["FeedViewModel"]
-    end
-    m1k1 --> m1k0
-    m1k0 -.-> m0k0
-```
+The whole document is a `modules` array of the per-module shape above, plus those two lists. `--format dot` and `--format mermaid` render the same thing as a picture — see [the formats](ZerkCLI.md#the-formats).
 
 Three rules govern the matching:
 
@@ -188,10 +165,10 @@ jq -r '[.keys[].providers[].dependencies[].key] as $used
 
 That last one is worth calling out: an **unused registration** is invisible to the compiler, because a generated member nobody calls is still valid code. The graph is the only place it shows up.
 
-Against the whole package, `swift package zerk-graph --format json` produces the same shape one level down — `.modules[].keys[]` — plus the `imports` and `unresolvedImports` above. And for rendering there is nothing to write: `--format dot` and `--format mermaid` do it.
+Against the whole package the same queries work one level down — `.modules[].keys[]` — with `imports` and `unresolvedImports` alongside. And for rendering there is nothing to write: `--format dot` and `--format mermaid` do it.
 
 ---
 
 [← Table of contents](../TableOfContents.md)
 
-**See also:** [Generated code](GeneratedCode.md) · [How it works](HowItWorks.md) · [Diagnostics](Diagnostics.md) · [`@Scoped`](../Macros%20and%20Markers/Scoped.md) · [Interjection](../Testing/Interjection.md)
+**See also:** [`ZerkCLI`](ZerkCLI.md) · [Generated code](GeneratedCode.md) · [How it works](HowItWorks.md) · [Diagnostics](Diagnostics.md) · [`@Scoped`](../Macros%20and%20Markers/Scoped.md) · [Interjection](../Testing/Interjection.md)

@@ -7,7 +7,7 @@ import Foundation
 
 /// Several modules' graphs together, with the edges between them drawn in.
 ///
-/// What `swift package zerk-graph` produces, and the one view Zerk does not have
+/// What `swift package zerk graph` produces, and the one view Zerk does not have
 /// at build time. Resolution is module-scoped by design: a module knows a key is
 /// `@ImportedInjectable` and knows nothing else about it, which is exactly the
 /// isolation that makes the plugin cheap and correct. Only something looking at
