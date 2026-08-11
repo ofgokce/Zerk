@@ -255,7 +255,47 @@ _ = Zerk<Repository<String>>.inject() as Repository<String>
 Worth knowing when a dependency's construction has side effects or is expensive. Interject
 the dependency too if that matters.
 
-## 10. XCTest
+A `@Singleton` or `@Scoped` member is the exception. Its subtree is built inside the storage
+initializer or inside the closure handed to its box, and the guard returns before either — so
+interjecting one builds nothing:
+
+```swift
+let before = ScopedDependency.buildCount
+#Interject<Repositorying>(with: FakeRepository())
+#expect(Zerk<Repositorying>.inject() is FakeRepository)
+#expect(ScopedDependency.buildCount == before)   // the real subtree never ran
+```
+
+## 10. A scoped instance, and what the double does to its box
+
+A [`@Scoped`](../Macros%20and%20Markers/Scoped.md) key is interjected exactly like any other
+— there is nothing scope-specific to write — and the box is left untouched:
+
+```swift
+@Suite("Session", .zerk)
+struct SessionTests {
+    @Test func usesTheDouble() {
+        #Interject<Caching>(with: MockCache())
+        #expect(Zerk<Caching>.inject() is MockCache)
+    }
+}
+```
+
+Two properties make that safe, and both follow from the guard sitting ahead of the box rather
+than from anything the test does:
+
+- **the real instance is never built**, so a scoped type with an expensive constructor costs
+  nothing in a test that stands something in for it;
+- **the double is never cached**, so it cannot outlive the scope that registered it. Were it
+  stored in the box, it would leak into every test that ran afterwards — the exact failure
+  per-test interjection scopes exist to prevent.
+
+`Zerk.reset(_:)` is a *runtime* API, not a testing one, and it reaches every box in the
+process. Prefer interjection in tests; reach for a reset only when the thing under test is
+the reset behaviour itself, and serialize those tests, since a scope is process-wide by
+design.
+
+## 11. XCTest
 
 Swift Testing traits do not apply, so open the scope by overriding `invokeTest()`. The
 synchronous `withInterjections` overload exists for exactly this:
@@ -281,7 +321,7 @@ final class FeedTests: XCTestCase {
 `Zerk.withInterjections` is spelled on `Zerk<Never>` so it reads without naming a key — a
 scope covers every key at once.
 
-## 11. SwiftUI previews
+## 12. SwiftUI previews
 
 A preview is the one place `#Interject` works outside a test scope, because the process
 genuinely is the scope:
@@ -304,7 +344,7 @@ one process — so register everything a preview needs rather than relying on a 
 Outside a scope and outside a preview, `#Interject` **traps** rather than leaking into
 whatever runs alongside.
 
-## 12. What none of this costs in release
+## 13. What none of this costs in release
 
 The lookup at the top of every member is `@inlinable` and returns `nil` outside `DEBUG`, so
 an optimized build reduces each member to its construction alone — no branch, no key-path

@@ -11,6 +11,7 @@ Zerk 2 is a ground-up replacement for the original runtime container:
 - Missing providers, ambiguous providers, cycles, unsupported singletons, and isolation mismatches are reported during the build instead of failing at runtime.
 - Swift concurrency is modeled directly: generated injectors mirror provider isolation, propagate `async`/`throws`, and reject constructs that Swift cannot express safely.
 - Test overrides are compile-checked and scoped per test, rather than mutating a shared container.
+- Lifetimes are annotations rather than registration chains: transient by default, [`@Scoped`](../Macros%20and%20Markers/Scoped.md) for one instance per named scope, [`@Singleton`](../Macros%20and%20Markers/Singleton.md) for one per process.
 - Installation is Swift Package Manager only; CocoaPods-era runtime APIs and key-path property injection wrappers are no longer part of the public model.
 
 ## Migrating a module
@@ -19,7 +20,9 @@ For an app using Zerk 1.x, migrate one module at a time:
 
 1. Replace the dependency with [Swift Package Manager](Installation.md) and attach `ZerkPlugin` to each target that declares injectable types or values. Remove CocoaPods integration for Zerk.
 2. Delete central registration code (`Zerk.store`, `AutoStoring`, `transient`, `scoped`, and `singleton` chains). [The graph now comes from declarations in the source files themselves.](../Plugin/HowItWorks.md)
-3. Mark injectable implementations with [`@Injectable`](../Macros%20and%20Markers/Injectable.md) or `@Injectable<Protocol>`. Use [`@Singleton`](../Macros%20and%20Markers/Singleton.md) for the old singleton lifetime, and leave non-singletons unmarked for transient factory-style construction.
+3. Mark injectable implementations with [`@Injectable`](../Macros%20and%20Markers/Injectable.md) or `@Injectable<Protocol>`, then pick a lifetime. Unmarked is transient — a new instance per resolution — and is the right default. [`@Singleton`](../Macros%20and%20Markers/Singleton.md) is the old singleton lifetime. [`@Scoped(.name)`](../Macros%20and%20Markers/Scoped.md) is new in 2.x: one instance kept until `Zerk.reset(.name)` drops it, which is what a 1.x `scoped` chain was most likely reaching for. Check the mapping against what that scope meant in your app rather than assuming — 2.x scopes are named values reset explicitly, not tied to any object's lifetime.
+
+   A consumer that outlives the scope it depends on needs [`@InjectedDynamically`](../Macros%20and%20Markers/Injected.md#injecteddynamically) rather than `@Injected`, since a reset cannot reach a reference already handed out. Zerk makes the worst case — a `@Singleton` capturing a scoped instance — a build error.
 4. Mark each initializer or static factory Zerk may call with [`@InjectableProviding`](../Macros%20and%20Markers/InjectableProviding.md). If there is exactly one initializer and no provider is marked, Zerk infers it. A key with several providers needs one of them marked `@InjectableProviding(primary: true)`.
 5. Convert registered constants or configuration values into [`@InjectableValue`](../Macros%20and%20Markers/InjectableValue.md) declarations, or group static members under `@InjectableValues`. Note that values have their own marker: `@Injectable` registers a *type*.
 6. Replace manual restores with [`Zerk<Key>.inject()`](../Plugin/GeneratedCode.md). Replace property injection with [`@Injected var dependency: Key`](../Macros%20and%20Markers/Injected.md) when the dependency can be resolved synchronously.

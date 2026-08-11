@@ -410,6 +410,69 @@ there would exist once *per key*. It is typed as the concrete `Store`, and both 
 it. The interjection lookup sits in the getter rather than the storage initializer, so a double
 installed later still takes effect and the real instance is never built.
 
+## A scoped instance
+
+One instance per named scope, dropped when that scope is reset. The same "one instance,
+however many keys" arrangement as a singleton, with a different lifetime.
+
+```swift
+protocol Caching {}
+
+extension InjectionScope {
+    nonisolated static let session = InjectionScope("session")
+}
+
+@Scoped(.session)
+@Injectable<Caching>
+final class SessionCache: Caching {
+    @InjectableProviding
+    init() {}
+}
+```
+
+```swift
+// Generated:
+// A scope named from a nonisolated slot must itself be nonisolated. Under
+// SWIFT_DEFAULT_ACTOR_ISOLATION, write `nonisolated static let session = …`.
+private enum _$zerk_scoped {
+    nonisolated static let sessionCache = ZerkScopedBox<SessionCache>(scope: .session)
+}
+
+extension Zerk<Caching> {
+    nonisolated static var sessionCache: Caching {
+        if let interjected = _$interjected(for: \.`sessionCache`) {
+            return interjected
+        }
+        return _$zerk_scoped.sessionCache.value { SessionCache() }
+    }
+
+    nonisolated static func inject() -> Caching {
+        sessionCache
+    }
+
+}
+
+extension Zerk<Caching>.Interjection {
+    nonisolated var `sessionCache`: Void {}
+}
+```
+
+Read it against the singleton above: same private namespace, same one-entry-per-type rule,
+same guard in the getter. The difference is that the member hands the box a closure instead
+of reading a stored instance — the box decides whether to run it, and the *member* is what
+knows how to build. That is what keeps the box `nonisolated` for a `@MainActor` type and
+`Zerk.reset(.session)` callable from anywhere.
+
+```swift
+Zerk<Caching>.inject() === Zerk<Caching>.inject()   // true
+Zerk.reset(.session)
+// the next inject() builds a new one
+```
+
+Everything a singleton refuses, this refuses too — caller arguments, `async`/`throws`
+providers, value types, generic types, more than one provider — because the instance is built
+exactly once from a synchronous expression either way. See [`@Scoped`](../Macros%20and%20Markers/Scoped.md).
+
 ## A parameter that bubbles to `inject(...)`
 
 A provider parameter the graph cannot answer is not an error — it is exposed on the member and

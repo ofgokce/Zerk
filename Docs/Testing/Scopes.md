@@ -2,6 +2,8 @@
 
 Interjections belong to the scope in force. This page covers what a scope is, how one is opened — the `.zerk` trait, a named set of interjections, `Zerk.withInterjections` under XCTest — and what happens outside one.
 
+"Scope" means two unrelated things in Zerk, and this is the testing one: a task-local boundary that keeps one test's doubles out of another's. The other is an [injection scope](../Macros%20and%20Markers/Scoped.md) — a named lifetime that `@Scoped` instances are kept for and `Zerk.reset(_:)` clears. They share a word and nothing else.
+
 ## What a scope is
 
 A scope is a task-local binding. `ZerkInterjector.current` is a `@TaskLocal` holding a `ZerkInterjector`, and `Zerk.withInterjections { }` binds a fresh one for the duration of the operation it is given:

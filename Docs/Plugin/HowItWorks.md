@@ -4,11 +4,13 @@ Zerk is a macro package and a build-tool plugin, and it is worth knowing which d
 
 ## Almost none of the code generation happens in the macros
 
-`@Injectable`, `@InjectableProviding`, `@Singleton`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier, a generic parameter nothing can infer — are reported right at the declaration.
+`@Injectable`, `@InjectableProviding`, `@Singleton`, `@Scoped`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier, a generic parameter nothing can infer — are reported right at the declaration.
 
 The same is true of the rest of the markers: `@InjectableValue`, `@InjectableValues`, `@NonInjectable`, `@ZerkAlias`, `@ZerkImport`, and `@ImportedInjectableValue` all expand to nothing and exist for the same two reasons.
 
-`@Injected` is the marker that generates code, because the expression it needs (`Zerk<Key>.inject()`) depends on nothing but the property's own type. It expands to a peer that uses `@storageRestrictions(initializes:)` (SE-0400), so the backing property *initializes* the annotated one rather than shadowing it — which is why a value passed to the memberwise initializer still wins over the injected default.
+`@Injected` and `@InjectedDynamically` are the two markers that generate code, because the expression they need (`Zerk<Key>.inject()`) depends on nothing but the property's own type. No whole-module view is required, so a macro can do it alone.
+
+They generate different *kinds* of thing, which is why they are two attributes rather than one with an argument. `@Injected` is a **peer** macro: it adds a backing property using `@storageRestrictions(initializes:)` (SE-0400), so the peer *initializes* the annotated one rather than shadowing it — which is why a value passed to the memberwise initializer still wins over the injected default. `@InjectedDynamically` is an **accessor** macro: it replaces the property's storage with a getter, which is the only shape that can re-resolve on each access. Overloads of one macro name must agree on their roles, so the two cannot share a name — see [`@Injected`](../Macros%20and%20Markers/Injected.md#why-it-is-a-separate-attribute).
 
 The macros that are not markers expand for the same kind of reason: what they emit is decidable from the single site they are written at.
 

@@ -138,6 +138,35 @@ synchronous, non-throwing, no external arguments, no cross-domain dependency, an
 generic. The one that cannot apply is "reference types only": the produced type is a name
 Zerk never resolves, so it takes your word for it.
 
+[`@Scoped`](../Macros%20and%20Markers/Scoped.md) works here too, under the same rules and
+with the same exception, and produces the same shape one step removed — the thunk goes inside
+the box's closure rather than into the storage initializer:
+
+```swift
+@Scoped(.session)
+@Injectable
+var urlSession: URLSession { URLSession(configuration: .default) }
+```
+
+```swift
+nonisolated private func _$zerk_provider_urlSession() -> URLSession { urlSession }
+
+private enum _$zerk_scoped {
+    nonisolated static let urlSession = ZerkScopedBox<URLSession>(scope: .session)
+}
+
+extension Zerk<URLSession> {
+    nonisolated static var urlSession: URLSession {
+        if let interjected = _$interjected(for: \.`urlSession`) { return interjected }
+        return _$zerk_scoped.urlSession.value { _$zerk_provider_urlSession() }
+    }
+    nonisolated static func inject() -> URLSession { urlSession }
+}
+```
+
+`Zerk.reset(.session)` then drops the session and the next resolution makes a new one — which
+is the usual reason to want this on a foreign type in the first place.
+
 ## Or put the key on a provider type
 
 When several factories belong together, the key can go on a type instead. The declaration carrying `@Injectable<Key>` does not have to *be* `Key`:

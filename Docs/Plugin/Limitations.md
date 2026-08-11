@@ -54,9 +54,19 @@ Providers may share a member name when their parameters differ — two marked in
 
 Generic injectables have their own rules — three ways to register one, and what each can and cannot do. See [Generics](../Features/Generics.md).
 
-### `@Singleton` constraints
+### `@Singleton` and `@Scoped` constraints
 
-Reference types only; provider must be synchronous and non-throwing; no external arguments; no dependency in a different isolation domain, since resolving one would need `await`; exactly one provider per key, and the *same* provider across every key the type claims. A singleton injectable under several keys must be built by an initializer or by a factory returning the concrete type — its one instance is stored once and read through every key.
+Reference types only; provider must be synchronous and non-throwing; no external arguments; no dependency in a different isolation domain, since resolving one would need `await`; exactly one provider per key, and the *same* provider across every key the type claims. One injectable under several keys must be built by an initializer or by a factory returning the concrete type — its one instance is stored once and read through every key. Neither can be applied to a generic type: the storage is a static stored property, so there is nowhere to keep one instance per specialization.
+
+The two differ only in *why* the provider must be synchronous — a singleton's storage is a `static let`, a scoped instance is built under its box's lock — and that is what each message says.
+
+### A scope reachable from a nonisolated member must itself be `nonisolated`
+
+Under `SWIFT_DEFAULT_ACTOR_ISOLATION`, `extension InjectionScope { static let session = … }` is isolated to that actor, and the generated box slot for a *nonisolated* `@Scoped` type cannot read it. Zerk pins each slot to its member's isolation, which handles every other combination, but it cannot reach into your scope declaration. Write `nonisolated static let session = InjectionScope("session")` and it holds in all of them; the generated storage carries a comment saying so.
+
+### Zerk cannot tell which scope outlives which
+
+A `@Singleton` capturing a `@Scoped` instance is an error, because a singleton outlives every scope by construction. A `@Scoped(.a)` capturing a `@Scoped(.b)` one is only a **warning**: Zerk knows the scopes differ but has no idea which is reset first, or whether either ever is. `.request` inside `.session` is a bug and `.session` inside `.application` is fine, and nothing in the source distinguishes them.
 
 ### Referenced values must be visible to the generated file
 
@@ -72,9 +82,11 @@ Use `try await Zerk<Key>.inject()` manually (or an `@injected` parameter). For l
 
 A point is named after the member it stands in for, so anything that renames the member — renaming an injectable type, renaming an `@InjectableProviding` factory, or adding `typeNamed:`/`name:` to one — makes the interjection a *compile error*, caught rather than silently ignored. Two overloads of one name get separate points, since the name carries the parameters.
 
-### Interjection does not short-circuit resolution
+### Interjection does not short-circuit resolution — except for kept instances
 
-A member's dependencies are resolved before the lookup runs, so an interjected value still builds its real dependency subtree first.
+A parameterized member takes its dependencies as *default arguments*, and Swift evaluates those before the body runs. So an interjected value still builds its real dependency subtree first, which matters when a dependency's construction is expensive or has side effects. Interject the dependency too if that is a problem.
+
+A `@Singleton` or `@Scoped` member is the exception, and it falls out of where the construction sits rather than from any special handling: a singleton's subtree is built inside its `static let` initializer, a scoped one inside the closure handed to its box, and the guard returns ahead of both. Interjecting one of those builds nothing at all.
 
 ### Generated code is per-build
 

@@ -73,11 +73,13 @@ struct InterjectMacroTests {
     }
 
     @Test("interjections do not outlive their scope")
-    func scoped() async {
+    func scoped() {
         #Interject<Loading>(with: MockLoading(tag: "inner"))
         #expect(Zerk<Loading>.live is MockLoading)
-        // A nested scope of its own starts clean.
-        await Zerk.withInterjections {
+        // A nested scope of its own starts clean. Nothing here suspends, so this
+        // takes the synchronous `withInterjections` overload — `await`ing the
+        // async one warns that no async operation occurs within it.
+        Zerk.withInterjections {
             #expect(Zerk<Loading>.live is MockLoading == false)
         }
     }

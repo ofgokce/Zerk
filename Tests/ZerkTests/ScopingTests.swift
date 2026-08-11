@@ -200,6 +200,51 @@ struct ScopingTests {
         #expect(observer.cache.serial != first)
     }
 
+    @Test("interjecting a scoped key neither builds the real instance nor fills the box")
+    func interjectionBypassesTheBox() {
+        Zerk.reset(.fixtureSession)
+        let before = ScopedCache.buildCount
+
+        Zerk.withInterjections {
+            #Interject<SessionScoped>(with: PinnedCache())
+            #expect(Zerk<SessionScoped>.inject().serial == -1)
+            #expect(Zerk<SessionScoped>.inject().serial == -1)
+        }
+
+        // The guard sits ahead of the box, so the real provider never ran…
+        #expect(ScopedCache.buildCount == before)
+
+        // …and the box was left empty rather than holding the double. Both
+        // halves matter: a double cached in the box would outlive the scope that
+        // registered it and leak into every test that ran afterwards.
+        let real = Zerk<SessionScoped>.inject()
+        #expect(real.serial != -1)
+        #expect(ScopedCache.buildCount == before + 1)
+        #expect(Zerk<SessionScoped>.inject() === real)
+    }
+
+    @Test("interjecting a kept instance skips its dependency subtree too")
+    func interjectionSkipsTheSubtree() {
+        Zerk.reset(.fixtureSession)
+        let before = ScopedDependency.buildCount
+
+        Zerk.withInterjections {
+            #Interject<Repositorying>(with: FakeRepository())
+            #expect(Zerk<Repositorying>.inject() is FakeRepository)
+        }
+
+        // Worth asserting because the general rule is the opposite: a
+        // parameterized transient member takes its dependencies as *default
+        // arguments*, which Swift evaluates before the body — so an interjected
+        // one still builds its real subtree. A kept instance resolves inside the
+        // box's closure instead, which the guard returns ahead of.
+        #expect(ScopedDependency.buildCount == before)
+
+        // And the real one still builds normally once nothing stands in.
+        _ = Zerk<Repositorying>.inject()
+        #expect(ScopedDependency.buildCount == before + 1)
+    }
+
     @Test("a dynamic property is interjectable like any other resolution")
     func dynamicRespectsInterjection() {
         // The synchronous overload: nothing in the body suspends, and `await`

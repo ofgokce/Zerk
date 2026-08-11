@@ -129,6 +129,28 @@ final class ScopeCoordinator {
     @InjectedDynamically var current: SessionScoped
 }
 
+protocol Repositorying: AnyObject {}
+
+/// Counted so a test can tell whether interjecting the scoped type that depends
+/// on it skipped building it as well.
+@Injectable
+struct ScopedDependency {
+    nonisolated(unsafe) static var buildCount = 0
+
+    @InjectableProviding
+    init() { Self.buildCount += 1 }
+}
+
+@Scoped(.fixtureSession)
+@Injectable<Repositorying>
+final class ScopedRepository: Repositorying {
+    @InjectableProviding
+    init(dependency: ScopedDependency) {}
+}
+
+/// Keyed by the protocol so a double needs none of the real type's dependencies.
+final class FakeRepository: Repositorying {}
+
 /// The documented way out of the `@Singleton` → `@Scoped` build error: hold the
 /// dependency as a property resolved per use, rather than capturing one at init.
 ///

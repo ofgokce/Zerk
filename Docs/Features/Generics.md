@@ -18,7 +18,7 @@ A generic type can be registered three ways, and which one you get depends on th
 
 **Generic types register under themselves, and only under themselves.** `@Injectable struct Cache<E>` becomes members of an unconstrained `extension Zerk` that bind the key per call — `static func cache<E>() -> Cache<E> where Injectable == Cache<E>` — so `Zerk<Cache<String>>.inject()` resolves, and a dependency on any specialization resolves with it. A concrete registration for one specialization coexists with the generic one and wins it, exactly as Swift's own overload resolution does. Three limits:
 
-- **No `@Singleton`.** Its storage is a static stored property, which Swift does not allow in a generic type — there is nowhere to keep one instance per specialization. This one is permanent.
+- **No `@Singleton`, and no `@Scoped`.** Both keep their instance in a static stored property, which Swift does not allow in a generic type — there is nowhere to put one per specialization. This one is permanent for both.
 - **`@InjectableValue` on a generic function** stays refused: a value's key *is* its return type, so a free parameter there is a key nothing can register.
 - **Members are functions.** A property takes no generic parameters, so a generic key has no `Zerk<Cache<String>>.cache` spelling and no `@Injected(\.member)` key path — call `Zerk<Cache<String>>.cache()` or `inject()`.
 
@@ -232,4 +232,4 @@ A **parameterized existential** key is the exception. An existential conforms to
 
 [← Table of contents](../TableOfContents.md)
 
-**See also:** [`@Injectable`](../Macros%20and%20Markers/Injectable.md) · [`@Singleton`](../Macros%20and%20Markers/Singleton.md) · [`@InjectableValue`](../Macros%20and%20Markers/InjectableValue.md) · [Foreign types](ForeignTypes.md) · [Generated code](../Plugin/GeneratedCode.md) · [Diagnostics](../Plugin/Diagnostics.md) · [Interjection](../Testing/Interjection.md)
+**See also:** [`@Injectable`](../Macros%20and%20Markers/Injectable.md) · [`@Singleton`](../Macros%20and%20Markers/Singleton.md) · [`@Scoped`](../Macros%20and%20Markers/Scoped.md) · [`@InjectableValue`](../Macros%20and%20Markers/InjectableValue.md) · [Foreign types](ForeignTypes.md) · [Generated code](../Plugin/GeneratedCode.md) · [Diagnostics](../Plugin/Diagnostics.md) · [Interjection](../Testing/Interjection.md)

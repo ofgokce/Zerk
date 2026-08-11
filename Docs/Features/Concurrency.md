@@ -113,12 +113,20 @@ protocol ApiServicing: Sendable { ... }   // actors conform automatically
 
 `sending` returns would remove that requirement for freshly constructed values. They are designed but deliberately not emitted yet: eligibility is computed in the codegen and the annotation withheld, because `sending` is not expressible on a property and would force every isolated argument-free provider to change shape. See `isSendingEligible` in `GeneratorOutputBuilder.swift`, which documents the full rationale.
 
-## Singletons
+## Kept instances
 
 `@Singleton` storage mirrors provider isolation the same way, and a singleton whose dependency lives in a different domain is a build error, because resolving it would need `await` and a `static let` initializer cannot. See [`@Singleton`](../Macros%20and%20Markers/Singleton.md).
+
+[`@Scoped`](../Macros%20and%20Markers/Scoped.md) is refused in exactly the same case, for a different reason: a scoped instance is built while its box holds a lock — that is what makes it exactly-once under a race — and a lock cannot be held across an `await`. The message says which of the two you are looking at.
+
+Their *storage* differs, and only one of the two needs an escape hatch. A singleton's slot holds the instance itself, so it carries `nonisolated(unsafe)` when the provider is nonisolated. A scoped slot holds a `ZerkScopedBox`, which is already `Sendable` and locks internally, so it takes a plain isolation prefix instead. Both are pinned rather than left bare, because `SWIFT_DEFAULT_ACTOR_ISOLATION` would otherwise make an unannotated slot `@MainActor` and put it out of reach of a nonisolated member.
+
+The construction of a scoped instance runs in the *member's* domain rather than the box's: `ZerkScopedBox.value` is nonisolated and takes a non-`Sendable`, non-escaping closure, and a synchronous nonisolated call does not switch isolation. So a `@MainActor` scoped type is built on the main actor, inside the lock, while `Zerk.reset(_:)` stays callable from anywhere.
+
+Either kind crossing an isolation boundary must be `Sendable`, for the same reason: it is shared, so its region is not disconnected. Zerk emits the explanatory check described in [Diagnostics](../Plugin/Diagnostics.md#the-one-diagnostic-that-is-not-zerks) wherever that happens.
 
 ---
 
 [← Table of contents](../TableOfContents.md)
 
-**See also:** [`@Singleton`](../Macros%20and%20Markers/Singleton.md) · [`@Isolated`](../Macros%20and%20Markers/Isolated.md) · [Settings](../Plugin/Settings.md) · [Generated code](../Plugin/GeneratedCode.md) · [Limitations](../Plugin/Limitations.md) · [Installation](../Getting%20Started/Installation.md)
+**See also:** [`@Singleton`](../Macros%20and%20Markers/Singleton.md) · [`@Scoped`](../Macros%20and%20Markers/Scoped.md) · [`@Isolated`](../Macros%20and%20Markers/Isolated.md) · [Settings](../Plugin/Settings.md) · [Generated code](../Plugin/GeneratedCode.md) · [Limitations](../Plugin/Limitations.md) · [Installation](../Getting%20Started/Installation.md)
