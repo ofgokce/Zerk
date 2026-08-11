@@ -6,40 +6,74 @@
 #if canImport(SwiftUI)
 import SwiftUI
 
-public extension View {
+public extension Zerk<Never> {
 
-    /// Registers interjections for a preview.
+    /// Builds a preview's content with interjections already in force.
     ///
     /// ```swift
     /// #Preview {
-    ///     ContentView().interjecting {
+    ///     Zerk.view {
+    ///         ContentView()
+    ///     } withInterjections: {
     ///         #Interject<ApiServicing>(with: MockApi())
     ///     }
     /// }
     /// ```
     ///
-    /// The closure is a plain `() -> Void`, not a `@ViewBuilder`, which is the
-    /// whole point of it: written straight into a `#Preview` body, `#Interject`
-    /// is a `Void` expression and the builder rejects it —
-    /// `type '()' cannot conform to 'View'`. Nothing in statement position
-    /// escapes that, declaration macros included, since the builder claims the
-    /// item before the macro's role is resolved. Here there is no builder, so it
-    /// reads plainly.
+    /// ## The ordering is the whole point
     ///
-    /// Registration happens where a preview needs it: on the process-wide set,
-    /// which outlives the closure. A task-local scope could not serve, because
-    /// SwiftUI builds child views and re-runs `body` long after `#Preview` has
-    /// returned.
+    /// `content` is a *closure*, and it is called after `interjections()` — not
+    /// evaluated at the call site. That one line of sequencing is what this
+    /// function exists for.
     ///
-    /// Which means a preview's interjections **accumulate**: two previews in one
-    /// file that both interject the same key leave whichever ran last in force.
-    /// Register everything a preview needs rather than relying on a neighbour.
+    /// `@Injected` resolves when its enclosing value is **initialized**, so a
+    /// view that injects its own dependency has already resolved it by the time
+    /// anything can be registered against it:
     ///
-    /// Outside a preview this traps, exactly as an unscoped `#Interject` does —
-    /// a test must take a scope instead.
-    func interjecting(_ register: () -> Void) -> Self {
-        register()
-        return self
+    /// ```swift
+    /// struct ContentView: View {
+    ///     @Injected var api: ApiServicing   // resolved by `ContentView()`
+    /// }
+    /// ```
+    ///
+    /// Registering doubles *after* constructing that view — which is what a
+    /// `ContentView().someModifier { … }` shape necessarily does, since the
+    /// receiver is built before the modifier runs — leaves the root view holding
+    /// the real graph while its children get the doubles. Half-mocked, and
+    /// silently so. Taking the content as a closure is the only way to put
+    /// registration first.
+    ///
+    /// So the two closures run in the opposite order to the one they are written
+    /// in: `withInterjections` appears second and runs first. That is deliberate.
+    /// The call site reads as "this view, with these doubles", and the sequencing
+    /// needed to make that true lives here rather than at every use.
+    ///
+    /// ## Where the registration goes
+    ///
+    /// Onto the process-wide set, which outlives the closure. A task-local scope
+    /// could not serve: SwiftUI builds child views and re-runs `body` long after
+    /// `#Preview` has returned, by which point any binding would have unwound.
+    ///
+    /// Which means a preview's interjections **accumulate**. Two previews in one
+    /// file that interject the same key leave whichever ran last in force, so
+    /// register everything a preview needs rather than relying on a neighbour's.
+    ///
+    /// Outside a preview this traps, exactly as an unscoped `#Interject` does — a
+    /// test must take a scope of its own with ``Zerk/withInterjections(_:)``.
+    ///
+    /// - Parameters:
+    ///   - content: The view to build. `@ViewBuilder`, so it takes the same
+    ///     multi-statement bodies any other SwiftUI closure does.
+    ///   - interjections: The doubles to register. A plain `() -> Void` rather
+    ///     than a `@ViewBuilder`, which is what lets `#Interject` be written
+    ///     inside it at all: it is a `Void` expression, and a builder rejects one
+    ///     with `type '()' cannot conform to 'View'`.
+    /// - Returns: The content, built with the interjections in force. The
+    ///   concrete `Content` rather than `some View`, so nothing is erased.
+    static func view<Content: View>(@ViewBuilder _ content: () -> Content,
+                                    withInterjections interjections: () -> Void) -> Content {
+        interjections()
+        return content()
     }
 }
 #endif

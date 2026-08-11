@@ -328,15 +328,35 @@ genuinely is the scope:
 
 ```swift
 #Preview {
-    ContentView().interjecting {
+    Zerk.view {
+        ContentView()
+    } withInterjections: {
         #Interject<ApiServicing>(with: MockApi())
     }
 }
 ```
 
-The `interjecting` modifier exists because a `#Preview` body is a `@ViewBuilder`, which
-rejects `#Interject` as `type '()' cannot conform to 'View'`; the modifier's closure is a
-plain `() -> Void`.
+Two things make `Zerk.view` necessary rather than decorative.
+
+**The interjections closure is a plain `() -> Void`.** A `#Preview` body is a
+`@ViewBuilder`, which rejects `#Interject` outright — it is a `Void` expression, and the
+builder reports `type '()' cannot conform to 'View'`.
+
+**The content is a closure, so it is built *after* the doubles are registered.** This is the
+part worth understanding, because getting it wrong fails silently. `@Injected` resolves when
+its enclosing value is initialized:
+
+```swift
+struct ContentView: View {
+    @Injected var api: ApiServicing   // resolved by `ContentView()`
+}
+```
+
+Anything shaped like `ContentView().someModifier { … }` builds the view *first* — the
+receiver is constructed before the modifier runs — so the root view keeps the real graph
+while only its children see the doubles. Half-mocked, with nothing to indicate it. Passing
+the content as a closure is the only way to put registration first, which is why the two
+closures run in the opposite order to the one they are written in.
 
 A preview's interjections outlive the view that made them and accumulate across previews in
 one process — so register everything a preview needs rather than relying on a neighbour's.

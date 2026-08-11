@@ -100,13 +100,17 @@ The one exception is a SwiftUI preview, where the process genuinely is the scope
 
 ```swift
 #Preview {
-    ContentView().interjecting {
+    Zerk.view {
+        ContentView()
+    } withInterjections: {
         #Interject<ApiServicing>(with: MockApi())
     }
 }
 ```
 
-The `interjecting` modifier exists because a `#Preview` body is a `@ViewBuilder`, which rejects `#Interject` as `type '()' cannot conform to 'View'`; its closure is a plain `() -> Void`. A preview's interjections outlive the view that made them and accumulate across previews in one process, so register everything a preview needs rather than relying on a neighbour's.
+`Zerk.view` earns its place twice over. Its interjections closure is a plain `() -> Void`, so `#Interject` can be written inside it — a `#Preview` body is a `@ViewBuilder`, which rejects a `Void` expression as `type '()' cannot conform to 'View'`. And it takes the content as a *closure*, which it calls after registering, so the doubles are in force while the view is built. That matters because `@Injected` resolves during `init`: build the view first and its own injected properties hold the real graph while only its children see the doubles. See [Examples](Examples.md#12-swiftui-previews).
+
+A preview's interjections outlive the view that made them and accumulate across previews in one process, so register everything a preview needs rather than relying on a neighbour's.
 
 A task-local scope could not serve a preview at all: SwiftUI constructs child views and re-invokes `body` long after the `#Preview` closure has returned, by which point any binding has unwound. Registration goes to the process-wide set instead. `ZerkInterjector.current.removeAll()` drops every interjection, for a preview that wants a clean slate; a test should take a fresh scope rather than clear one.
 
