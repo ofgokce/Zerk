@@ -86,6 +86,7 @@ struct GraphBuilder {
             isPrimary: primaryResolutions[resolution.injectableKey]?.provider.location
                 == resolution.provider.location,
             location: location(resolution.provider.location),
+            condition: resolution.condition.guardText,
             dependencies: classification.parameters.map {
                 dependency(for: $0, classifier: classifier)
             }
@@ -160,7 +161,8 @@ struct GraphBuilder {
             isolation: record.isolation.actorName,
             isAsync: record.effects.isAsync,
             isThrowing: record.effects.isThrowing,
-            location: location(record.location)
+            location: location(record.location),
+            condition: record.condition.guardText
         )
     }
 

@@ -42,6 +42,16 @@ The plugin cannot see `SWIFT_DEFAULT_ACTOR_ISOLATION`, so `ZerkSettings.json` ha
 
 It states what the compiler already believes; Zerk cannot check that claim and will generate code matching whatever you wrote.
 
+### `#if` conditions are carried, never evaluated
+
+The plugin is told neither the build configuration nor the active compilation conditions, and SwiftPM caches its result across configurations — so an answer to "is `DEBUG` set?" given during a Debug build would be reused for the Release one. Instead the guard is reproduced in the generated file and the compiler decides. [Conditional compilation](../Features/ConditionalCompilation.md) covers what follows from that; three limits are worth stating here.
+
+**Only clauses of one `#if` are known to be exclusive.** A separate `#if DEBUG` and `#if !DEBUG` are opposites to a reader, but telling so means evaluating `DEBUG` — so they are treated as able to coexist, and a key both claim is reported as ambiguous. Write them as one `#if` / `#else`.
+
+**Branches must agree on what resolving the key costs.** They may build different things; they may not differ in effects, isolation, or the arguments left to the caller, because everything injecting the key resolves it through one `inject()` call emitted for every configuration.
+
+**A `#if` inside an injectable type may not gate its construction.** A conditional initializer or `@InjectableProviding` member would give one type two provider shapes, and the generated member has one signature. A `#if` gating anything else inside a type — a method, a stored property — is not Zerk's business and passes through.
+
 ## Rules the graph enforces
 
 ### A key may have many providers; exactly one of them backs `inject()`
@@ -51,6 +61,8 @@ When several types claim a key, one needs `@Injectable(primary: true)`. When the
 ### Circular dependencies
 
 Circular dependencies are rejected with the cycle path in the error (`Circular dependency detected: Cyc1 -> Cyc2 -> Cyc1`). Break cycles manually (e.g. inject a factory or make one edge parametric).
+
+Cycle detection follows one primary per key. Where `#if` clauses give a key a different primary per configuration, it follows the first — so two keys that *both* vary, and whose branches interlock oppositely, can be reported as a cycle that no single configuration actually has. Restructuring to break the reported cycle is the remedy; it has no false-negative counterpart, since a cycle within one configuration is always found.
 
 ### Generated member names must be unique per key *per signature*
 
@@ -102,4 +114,4 @@ The plugin output lives in the build directory (`Zerk.generated.swift`). Never e
 
 [← Table of contents](../TableOfContents.md)
 
-**See also:** [Diagnostics](Diagnostics.md) · [How it works](HowItWorks.md) · [Generated code](GeneratedCode.md) · [Settings](Settings.md) · [Generics](../Features/Generics.md) · [Concurrency](../Features/Concurrency.md) · [Key aliases](../Macros%20and%20Markers/ZerkAlias.md) · [`@Singleton`](../Macros%20and%20Markers/Singleton.md) · [Interjection](../Testing/Interjection.md)
+**See also:** [Diagnostics](Diagnostics.md) · [How it works](HowItWorks.md) · [Generated code](GeneratedCode.md) · [Settings](Settings.md) · [Generics](../Features/Generics.md) · [Concurrency](../Features/Concurrency.md) · [Conditional compilation](../Features/ConditionalCompilation.md) · [Key aliases](../Macros%20and%20Markers/ZerkAlias.md) · [`@Singleton`](../Macros%20and%20Markers/Singleton.md) · [Interjection](../Testing/Interjection.md)

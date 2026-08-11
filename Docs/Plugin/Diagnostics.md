@@ -18,6 +18,17 @@ Most of these are raised twice — once by the macro, against the declaration, s
 | `@InjectableProviding<Key>` on a member of a type that has no matching `@Injectable<Key>` | Add the key to the type, or drop it from the provider |
 | A dependency cycle | The error names the cycle path (`A -> B -> A`); break it by removing one edge — inject a factory, or make one edge parametric |
 
+Registrations in different clauses of one `#if` do not trigger the primary
+diagnostics above — no build sees both. See
+[Conditional compilation](../Features/ConditionalCompilation.md).
+
+## Conditional compilation
+
+| What triggers it | The fix |
+|---|---|
+| Two branches of one `#if` resolve a key with different effects, in different isolation domains, or leaving different arguments to the caller | Everything injecting the key resolves it through one `inject()` call emitted for every configuration, so the branches have to agree on what it costs. Make them match, or give the branches separate keys |
+| A `#if` inside an injectable type gates an initializer or an `@InjectableProviding` member | One type cannot have two provider shapes. Put the `#if` around the whole type, so each configuration registers its own |
+
 ## Singletons
 
 | What triggers it | The fix |

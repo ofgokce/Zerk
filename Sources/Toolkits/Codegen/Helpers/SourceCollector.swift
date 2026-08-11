@@ -55,10 +55,20 @@ final class SourceCollector: SyntaxVisitor {
     /// `visit(_: ProtocolDeclSyntax)`.
     private(set) var protocolPrimaryAssociatedTypeCounts: [String: Int] = [:]
 
+    /// Module -> the `#if` it was asked for under. See ``importedModules``.
+    private(set) var moduleImportConditions: [String: CompilationCondition] = [:]
+
     private let settings: ZerkSettings
     private var sourceFile: String = ""
     private var converter: SourceLocationConverter?
     private var typeStack: [TypeContext] = []
+    /// The `#if` clauses enclosing whatever is being visited, outermost first.
+    private var conditionStack: [ConditionClause] = []
+
+    /// Where the walk currently is, in `#if` terms.
+    private var currentCondition: CompilationCondition {
+        CompilationCondition(clauses: conditionStack)
+    }
 
     init(settings: ZerkSettings = .default) {
         self.settings = settings
@@ -139,6 +149,79 @@ final class SourceCollector: SyntaxVisitor {
             ))
         }
         return .visitChildren
+    }
+
+    // MARK: - Conditional compilation
+
+    /// Walks each clause of a `#if` with that clause pushed, so every
+    /// registration inside records the guard it was written under.
+    ///
+    /// The default visitor walks the clauses as if they were all present at
+    /// once, which is how a `#if DEBUG` / `#else` pair used to read as two
+    /// competing registrations of one key. Walking them separately is what makes
+    /// them alternatives: same code, one clause each, and
+    /// ``CompilationCondition/areExclusive(_:_:)`` can then tell that no build
+    /// sees both.
+    ///
+    /// The clauses are still *all* walked — Zerk resolves every configuration in
+    /// one pass, because it has no way to know which one is being built and no
+    /// reason to prefer one. A mistake in the branch you are not building today
+    /// is reported today.
+    override func visit(_ node: IfConfigDeclSyntax) -> SyntaxVisitorContinueKind {
+        // Inside a type, a `#if` around an initializer or a provider would give
+        // that type two shapes and the generated member only has one. Refused
+        // here rather than in the resolver: this is the only place that still
+        // knows the `#if` existed.
+        if !typeStack.isEmpty, ConditionalCompilation.gatesConstruction(node) {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "'\(typeStack.last!.name)' builds differently per configuration: this #if gates an initializer or an @InjectableProviding provider. Zerk emits one member per provider and cannot give it two signatures — put the #if around the whole type instead, so each configuration registers its own, or give the type one provider that compiles in every configuration.",
+                location: location(for: Syntax(node))
+            ))
+        }
+
+        let branch = branchIdentity(of: node)
+        var preceding: [String] = []
+
+        for (index, clause) in node.clauses.enumerated() {
+            let condition = clause.condition.map { Self.normalizedCondition($0.trimmedDescription) }
+            conditionStack.append(
+                ConditionClause(branch: branch,
+                                index: index,
+                                condition: condition,
+                                precedingConditions: preceding)
+            )
+            if let elements = clause.elements {
+                walk(elements)
+            }
+            conditionStack.removeLast()
+
+            if let condition {
+                preceding.append(condition)
+            }
+        }
+
+        return .skipChildren
+    }
+
+    /// Identity of one `#if`, as file and offset.
+    ///
+    /// Clause exclusivity compares these, so it has to distinguish two `#if`s
+    /// with identical conditions — which can both be active — from two clauses
+    /// of one `#if`, which cannot.
+    private func branchIdentity(of node: IfConfigDeclSyntax) -> String {
+        // Zero-padded: the identity is compared as text, and "1000" sorts
+        // before "999" unless the widths match.
+        "\(sourceFile):\(CompilationCondition.padded(node.positionAfterSkippingLeadingTrivia.utf8Offset))"
+    }
+
+    /// Flattens a condition to one line, since it is emitted as one.
+    ///
+    /// A condition may be written across lines or carry comments between its
+    /// operands; both are trivia the guard does not need, and a newline inside
+    /// an emitted `#if` would end the directive early.
+    private static func normalizedCondition(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     /// Resolves the declaration's isolation once, hands it to the collectors,
@@ -376,9 +459,21 @@ final class SourceCollector: SyntaxVisitor {
             return
         }
         for argument in arguments {
-            if let module = argument.moduleNameLiteral {
-                importedModules.insert(module)
+            guard let module = argument.moduleNameLiteral else {
+                continue
             }
+            importedModules.insert(module)
+            // Asked for twice, the wider ask wins: an unconditional import is
+            // already correct wherever a conditional one would have been, and
+            // guarding it would drop the module from configurations that were
+            // promised it.
+            let condition = currentCondition
+            if let existing = moduleImportConditions[module] {
+                if !condition.isUnconditional, existing != condition {
+                    continue
+                }
+            }
+            moduleImportConditions[module] = condition
         }
     }
 
@@ -839,7 +934,8 @@ final class SourceCollector: SyntaxVisitor {
                 scope: typeScope,
                 isolation: typeIsolation,
                 genericParameters: genericParameters,
-                parameterizedKeys: parameterizedKeys
+                parameterizedKeys: parameterizedKeys,
+                condition: currentCondition
             )
         )
     }
@@ -1172,7 +1268,8 @@ final class SourceCollector: SyntaxVisitor {
                     enclosingTypePath: enclosingTypePath,
                     effects: effects,
                     isSettable: isSettable(node, binding: binding),
-                    isExported: isExported
+                    isExported: isExported,
+                    condition: currentCondition
                 )
             )
         }
@@ -1283,7 +1380,8 @@ final class SourceCollector: SyntaxVisitor {
                 enclosingTypePath: enclosingTypePath,
                 effects: ProviderEffects(from: binding.getterEffectSpecifiers),
                 isSettable: isSettable(node, binding: binding),
-                isExported: isExported
+                isExported: isExported,
+                condition: currentCondition
             )
         )
     }
@@ -1578,7 +1676,8 @@ final class SourceCollector: SyntaxVisitor {
                 isSingleton: isSingleton,
                 scope: scope,
                 isolation: provider.isolation,
-                genericParameters: genericParameters
+                genericParameters: genericParameters,
+                condition: currentCondition
             )
         )
     }
@@ -1897,6 +1996,7 @@ final class SourceCollector: SyntaxVisitor {
             typeName: typeName,
             typeKind: typeKind,
             kind: kind,
+            condition: currentCondition,
             parameters: collected,
             effects: effects,
             isPublic: effectiveAccess >= .public,

@@ -84,7 +84,9 @@ One entry per key, one per value, and the edges between them.
 
 `lifetime` is `transient`, `scoped` or `singleton`, and `scope` names the scope for a scoped one. `isolation` names the global actor a provider constructs on, and is absent when nonisolated. `memberName` is what the generated member is called — which is also what its [interjection point](../Testing/Interjection.md) is named after, so it is the string you would reach for in a test.
 
-`isPrimary` marks the one provider backing `inject()`. A key with several providers has exactly one.
+`isPrimary` marks the one provider backing `inject()`. A key with several providers has exactly one — unless `#if` clauses gave it one per configuration, in which case each is primary in its own.
+
+`condition` is the `#if` expression the provider's member is emitted under, and is absent when it is unconditional. Zerk does not evaluate it — see [Conditional compilation](../Features/ConditionalCompilation.md) — so this is the text, for a reader or a tool that knows the build settings Zerk does not. Values carry the same field. Without it the graph would claim a key is resolvable in builds where nothing resolves it.
 
 ### Dependencies
 

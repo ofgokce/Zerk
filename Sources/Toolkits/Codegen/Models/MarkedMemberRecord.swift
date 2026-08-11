@@ -56,6 +56,9 @@ struct MarkedMemberRecord {
     /// never one.
     let typeKind: MarkedTypeKind?
     let kind: MemberKind
+    /// The `#if` the marked declaration sits inside. The generated overload
+    /// delegates to it, so it cannot outlive it.
+    var condition: CompilationCondition = .unconditional
     var parameters: [MarkedParameter]
     let effects: ProviderEffects
     let isPublic: Bool

@@ -27,6 +27,12 @@ struct ProviderResolution {
     let isSingleton: Bool
     /// `@Scoped(.session)` — this instance is kept until that scope is reset.
     var scope: InjectionScopeRecord? = nil
+    /// The `#if` clauses the registering declaration sits inside.
+    ///
+    /// Read twice: by the emitter, which puts the generated member under the
+    /// same guard, and by the election, which uses it to tell alternatives from
+    /// rivals. See ``CompilationCondition``.
+    var condition: CompilationCondition = .unconditional
 
     /// Whether this resolution reads a kept instance rather than building one.
     /// See ``TypeRecord/isShared``.

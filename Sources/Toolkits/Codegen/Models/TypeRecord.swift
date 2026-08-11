@@ -47,6 +47,12 @@ struct TypeRecord {
     /// the ones spelled `any P<X, Y>` and gated on the availability of
     /// parameterized existentials.
     var parameterizedKeys: [String: AttributeLocation] = [:]
+    /// The `#if` clauses this declaration sits inside.
+    ///
+    /// Everything generated for the type is emitted under the same guard, and
+    /// registrations in different clauses of one `#if` never compete for a key.
+    /// See ``CompilationCondition``.
+    var condition: CompilationCondition = .unconditional
 
     /// Whether one instance of this type is kept and handed out repeatedly,
     /// however long it is kept for.

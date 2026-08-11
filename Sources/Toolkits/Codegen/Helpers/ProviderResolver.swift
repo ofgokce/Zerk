@@ -131,6 +131,7 @@ struct ProviderResolver {
         return ProviderResolutionResult(
             resolutions: resolutions,
             primaryResolutions: election.primaries,
+            primaryVariants: election.variants,
             diagnostics: diagnostics + election.diagnostics
         )
     }
@@ -155,31 +156,96 @@ extension ProviderResolver {
     /// the `TypeRecord`s the rest of the resolver works from.
     static func electPrimaries(among resolutions: [ProviderResolution],
                                aliases: KeyAliases = .empty)
-    -> (primaries: [String: ProviderResolution], diagnostics: [CodegenDiagnostic]) {
+    -> (primaries: [String: ProviderResolution],
+        variants: [String: [ProviderResolution]],
+        diagnostics: [CodegenDiagnostic]) {
         var primaries: [String: ProviderResolution] = [:]
+        var variants: [String: [ProviderResolution]] = [:]
         var diagnostics: [CodegenDiagnostic] = []
 
         let grouped = Dictionary(grouping: resolutions, by: \.injectableKey)
 
         for key in grouped.keys.sorted() {
             let candidates = grouped[key]!.sorted { $0.provider.location < $1.provider.location }
+            var winners: [ProviderResolution] = []
 
-            guard let typeName = electType(for: key, among: candidates, aliases: aliases, into: &diagnostics) else {
+            // One election per configuration rather than one per key: a
+            // `#if DEBUG` / `#else` pair registers the same key twice, but no
+            // build sees both, so asking them to agree on a primary would be
+            // asking them to resolve an ambiguity that does not exist.
+            for group in coexisting(among: candidates) {
+                guard let typeName = electType(for: key, among: group, aliases: aliases, into: &diagnostics) else {
+                    continue
+                }
+                guard let winner = electProvider(
+                    for: key,
+                    of: typeName,
+                    among: group.filter({ $0.typeName == typeName }),
+                    into: &diagnostics
+                ) else {
+                    continue
+                }
+                if !winners.contains(where: { $0.provider.location == winner.provider.location }) {
+                    winners.append(winner)
+                }
+            }
+
+            guard let representative = winners.first else {
                 continue
             }
-            guard let winner = electProvider(
-                for: key,
-                of: typeName,
-                among: candidates.filter({ $0.typeName == typeName }),
-                into: &diagnostics
-            ) else {
-                continue
-            }
-
-            primaries[key] = winner
+            // Every configuration's winner is kept, because each needs its own
+            // `inject()` under its own guard. The first is the representative:
+            // everything that resolves *through* `inject()` — a dependency
+            // parameter, an `@Injected` property — spells the same call
+            // whichever configuration is built, so it needs one answer, and the
+            // emitter refuses variants that would not agree on what that call
+            // costs.
+            primaries[key] = representative
+            variants[key] = winners
         }
 
-        return (primaries, diagnostics)
+        return (primaries, variants, deduplicated(diagnostics))
+    }
+
+    /// The candidate sets that can be present together, one per configuration
+    /// worth electing for.
+    ///
+    /// A group is built from each distinct position: everything that is not
+    /// mutually exclusive with it. So `#if DEBUG` and `#else` yield two groups —
+    /// each with its own registration plus every unconditional one — while two
+    /// registrations that merely happen to be conditional yield a group holding
+    /// both, since nothing rules out a build that has them both.
+    ///
+    /// Identical groups collapse, so the common case of no `#if` at all is one
+    /// group of everything and the ordinary election runs unchanged.
+    static func coexisting(among candidates: [ProviderResolution]) -> [[ProviderResolution]] {
+        guard candidates.contains(where: { !$0.condition.isUnconditional }) else {
+            return [candidates]
+        }
+
+        var groups: [[ProviderResolution]] = []
+        var seen = Set<String>()
+
+        for candidate in candidates {
+            let group = candidates.filter {
+                !CompilationCondition.areExclusive($0.condition, candidate.condition)
+            }
+            let identity = group.map { String(describing: $0.provider.location) }.joined(separator: "|")
+            if seen.insert(identity).inserted {
+                groups.append(group)
+            }
+        }
+
+        return groups
+    }
+
+    /// Drops repeats, since one mistake reachable from two configurations is
+    /// still one mistake.
+    static func deduplicated(_ diagnostics: [CodegenDiagnostic]) -> [CodegenDiagnostic] {
+        var seen = Set<String>()
+        return diagnostics.filter {
+            seen.insert("\($0.location)|\($0.severity)|\($0.message)").inserted
+        }
     }
 }
 
@@ -295,6 +361,7 @@ private extension ProviderResolver {
             isExported: type.exportedKeys[key] != nil,
             isSingleton: type.isSingleton,
             scope: type.scope,
+            condition: type.condition,
             genericParameters: type.genericParameters,
             isParameterizedExistential: type.parameterizedKeys[key] != nil
         )

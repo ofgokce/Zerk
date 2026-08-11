@@ -120,7 +120,9 @@ public struct CodeGenerator {
             injectedUses: injectedUses,
             markedMembers: markedMembers,
             keyDisplayNames: keyDisplayNames,
-            importedModules: collector.importedModules
+            importedModules: collector.importedModules,
+            moduleImportConditions: collector.moduleImportConditions,
+            primaryVariants: resolution.primaryVariants
         ).build()
 
         diagnostics += output.diagnostics

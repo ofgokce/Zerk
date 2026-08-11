@@ -65,6 +65,19 @@ enum CompileFixture {
 
         static let swift6 = Options()
 
+        /// Swift 6 with the named compilation conditions set, as
+        /// `SWIFT_ACTIVE_COMPILATION_CONDITIONS` would.
+        ///
+        /// The generated file's `#if` guards are the developer's own text, so
+        /// the only way to know they landed on the right declarations is to
+        /// compile the same source twice with different conditions and check
+        /// that both build.
+        static func swift6(defining conditions: String...) -> Options {
+            var options = Options()
+            options.extraFlags = conditions.map { "-D\($0)" }
+            return options
+        }
+
         static func swift6(defaultIsolation: String?) -> Options {
             var options = Options()
             options.defaultActorIsolation = defaultIsolation
@@ -150,7 +163,9 @@ enum CompileFixture {
             injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
             markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
             keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
-            importedModules: collector.importedModules
+            importedModules: collector.importedModules,
+            moduleImportConditions: collector.moduleImportConditions,
+            primaryVariants: resolution.primaryVariants
         ).build()
     }
 
@@ -233,7 +248,9 @@ enum CompileFixture {
             injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
             markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
             keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
-            importedModules: collector.importedModules
+            importedModules: collector.importedModules,
+            moduleImportConditions: collector.moduleImportConditions,
+            primaryVariants: resolution.primaryVariants
         ).build()
 
         // Accumulated rather than summed in one expression: a six-way `+` chain

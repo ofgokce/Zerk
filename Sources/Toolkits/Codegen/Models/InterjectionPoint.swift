@@ -26,4 +26,11 @@ struct InterjectionPoint {
     let scope: Scope
     /// The point's name, unbackticked. See ``InterjectionPointName``.
     let name: String
+    /// The `#if` the member this point names is emitted under.
+    ///
+    /// A point declares the keypath an interjection is written against, so it
+    /// has to exist in exactly the configurations its member does: declared more
+    /// widely it would name a member that is not there, and less widely it would
+    /// make a member that is there un-interjectable.
+    var condition: CompilationCondition = .unconditional
 }

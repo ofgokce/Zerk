@@ -48,6 +48,7 @@ Topics that span several macros.
 | [Foreign types](Features/ForeignTypes.md) | Registering a type you do not declare — `URLSession`, a vendor SDK's client |
 | [Generics](Features/Generics.md) | The three ways to register a generic type, and what each can do |
 | [Concurrency](Features/Concurrency.md) | Isolation, effects, crossing a domain, and what Swift 6 needs from you |
+| [Conditional compilation](Features/ConditionalCompilation.md) | `#if` around registrations — carrying the guard into generated code, and per-configuration primaries |
 
 ## The plugin
 
@@ -92,6 +93,9 @@ How code generation works, and what it produces.
 | by hand, or when the chain is `async`/`throws` | [`@Injected`](Macros%20and%20Markers/Injected.md) and [Concurrency](Features/Concurrency.md) |
 | lazily | [`@Injected`](Macros%20and%20Markers/Injected.md) |
 | afresh on every access | [`@InjectedDynamically`](Macros%20and%20Markers/Injected.md#injecteddynamically) |
+
+**"How do I swap an implementation per build configuration?"** —
+[Conditional compilation](Features/ConditionalCompilation.md).
 
 **"How long does an instance live?"** — one resolution by default;
 [`@Scoped`](Macros%20and%20Markers/Scoped.md) until its scope is reset;

@@ -74,6 +74,10 @@ struct InjectableValueRecord {
     /// parameters called `apiBaseURL` while reading a member called `baseURL`.
     var importedExpression: String? = nil
 
+    /// The `#if` clauses this declaration sits inside, which its generated
+    /// member is emitted under. See ``CompilationCondition``.
+    var condition: CompilationCondition = .unconditional
+
     /// The spelling every `Zerk<Key>` naming this value uses, so the extension
     /// declaring the member and the expressions reading it agree.
     var keyText: String { keyDisplayName ?? typeKey }

@@ -20,5 +20,16 @@ struct ProviderResolutionResult {
     /// members. A key is absent only when resolving it produced a diagnostic.
     let primaryResolutions: [String: ProviderResolution]
 
+    /// Every primary elected for a key — one per configuration, when `#if`
+    /// clauses gave the key a different winner in each.
+    ///
+    /// Normally a single entry, and the same resolution ``primaryResolutions``
+    /// holds. It has more only where mutually exclusive registrations each won
+    /// their own configuration, and then each needs its own `inject()` under its
+    /// own guard. Everything that resolves *through* `inject()` keeps reading
+    /// ``primaryResolutions``, because the call it emits is the same text in
+    /// every configuration.
+    var primaryVariants: [String: [ProviderResolution]] = [:]
+
     let diagnostics: [CodegenDiagnostic]
 }

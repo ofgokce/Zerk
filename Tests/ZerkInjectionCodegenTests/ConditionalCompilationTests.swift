@@ -1,0 +1,522 @@
+//
+//  ConditionalCompilationTests.swift
+//  Zerk
+//
+
+import Testing
+@testable import CodegenToolkit
+
+/// Coverage of `#if` around Zerk declarations.
+///
+/// Zerk never evaluates a condition — it cannot, and
+/// ``CompilationCondition`` says why — so what is under test is that the guard
+/// *travels*: a registration written inside `#if DEBUG` generates code inside
+/// `#if DEBUG`, and registrations in different clauses of one `#if` stop
+/// competing for their key.
+///
+/// The claim "the guard landed on the right declaration" is not something a
+/// golden string can settle on its own: a file can contain exactly the expected
+/// text and still fail to build in one configuration. So the load-bearing cases
+/// go through `swiftc` **twice**, once with the condition set and once without,
+/// and both have to compile.
+@Suite("Conditional compilation")
+struct ConditionalCompilationTests {
+
+    /// The shape from the bug report: one key, a different implementation per
+    /// configuration, both marked primary.
+    static let debugReleaseSwap = """
+    protocol Service {}
+    protocol Logging {}
+
+    @Injectable<Logging>
+    struct Logger: Logging {}
+
+    #if DEBUG
+    @Injectable<Service>(primary: true)
+    struct DebugService: Service {
+        let logging: Logging
+    }
+    #else
+    @Injectable<Service>(primary: true)
+    struct ReleaseService: Service {
+        let logging: Logging
+    }
+    #endif
+
+    @Injectable
+    struct App {
+        let service: Service
+    }
+    """
+
+    // MARK: - The swap
+
+    @Test("branches of one #if do not compete for a key")
+    func exclusiveBranchesBothWin() {
+        let result = CompileFixture.generateWithResolution(source: Self.debugReleaseSwap)
+
+        // Neither "multiple primary injectables" nor "none is primary": the two
+        // registrations are alternatives, not rivals.
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+
+        // One `inject()` per configuration, each under its own guard.
+        #expect(result.output.output.contains("""
+        #if (DEBUG)
+            nonisolated static func inject() -> Service {
+                debugService()
+            }
+        #endif
+        """))
+        #expect(result.output.output.contains("""
+        #if !(DEBUG)
+            nonisolated static func inject() -> Service {
+                releaseService()
+            }
+        #endif
+        """))
+    }
+
+    @Test("the swap compiles in both configurations", arguments: [true, false])
+    func swapCompilesEitherWay(isDebug: Bool) throws {
+        let result = try CompileFixture.run(
+            source: Self.debugReleaseSwap,
+            options: isDebug ? .swift6(defining: "DEBUG") : .swift6
+        )
+        try #require(!result.skipped)
+        #expect(result.didCompile, "\(result.compilerOutput)\n\(result.generated)")
+    }
+
+    @Test("the key's consumers resolve it the same way in both branches")
+    func consumersAreUnguarded() {
+        let generated = CompileFixture.generate(source: Self.debugReleaseSwap)
+
+        // `App` is unconditional, so its member is too — and it resolves the key
+        // through the one call that exists in every configuration.
+        #expect(generated.contains(
+            "nonisolated static func app(service: Service = Zerk<Service>.inject()) -> App {"))
+    }
+
+    // MARK: - A key that exists in one configuration only
+
+    /// The other half of the bug: a lone `#if DEBUG` registration used to emit
+    /// `return DebugOnly()` unconditionally, so a Release build named a type that
+    /// was not there.
+    @Test("a key registered in one branch guards its whole extension")
+    func loneBranchGuardsTheExtension() throws {
+        let source = """
+        #if DEBUG
+        @Injectable
+        struct DebugOnly {}
+        #endif
+        """
+
+        let generated = CompileFixture.generate(source: source)
+
+        // The extension header names the type, so the guard has to be outside
+        // it — inside, the header itself would not compile in Release.
+        #expect(generated.contains("""
+        #if (DEBUG)
+        extension Zerk<DebugOnly> {
+        """))
+        #expect(generated.contains("""
+        #if (DEBUG)
+        extension Zerk<DebugOnly>.Interjection {
+            nonisolated var `debugOnly`: Void {}
+        }
+        #endif
+        """))
+
+        for options in [CompileFixture.Options.swift6(defining: "DEBUG"), .swift6] {
+            let result = try CompileFixture.run(source: source, options: options)
+            try #require(!result.skipped)
+            #expect(result.didCompile, "\(result.compilerOutput)\n\(result.generated)")
+        }
+    }
+
+    @Test("an unconditional module is generated exactly as before")
+    func nothingChangesWithoutAnIf() {
+        let generated = CompileFixture.generate(source: """
+        @Injectable
+        struct Service {}
+        """)
+
+        #expect(!generated.contains("#if"))
+        #expect(!generated.contains("#endif"))
+    }
+
+    // MARK: - Composing conditions
+
+    @Test("nested #ifs become one conjunction")
+    func nestedConditionsCombine() {
+        let generated = CompileFixture.generate(source: """
+        #if DEBUG
+        #if os(iOS)
+        @Injectable
+        struct Probe {}
+        #endif
+        #endif
+        """)
+
+        #expect(generated.contains("#if (DEBUG) && (os(iOS))"))
+    }
+
+    /// An `#elseif` is only reached when every earlier condition failed, so its
+    /// guard has to carry those failures. Emitting the bare condition would
+    /// widen the clause to configurations the developer excluded.
+    @Test("#elseif carries the earlier conditions negated")
+    func elseIfNegatesWhatCameBefore() {
+        let generated = CompileFixture.generate(source: """
+        protocol Service {}
+
+        #if DEBUG
+        @Injectable<Service>(primary: true)
+        struct DebugService: Service {}
+        #elseif BETA
+        @Injectable<Service>(primary: true)
+        struct BetaService: Service {}
+        #else
+        @Injectable<Service>(primary: true)
+        struct ReleaseService: Service {}
+        #endif
+        """)
+
+        #expect(generated.contains("#if !(DEBUG) && (BETA)"))
+        #expect(generated.contains("#if !(DEBUG) && !(BETA)"))
+    }
+
+    @Test("a three-way swap compiles in every configuration",
+          arguments: [[String](), ["DEBUG"], ["BETA"]])
+    func threeWaySwapCompiles(conditions: [String]) throws {
+        let source = """
+        protocol Service {}
+
+        #if DEBUG
+        @Injectable<Service>(primary: true)
+        struct DebugService: Service {}
+        #elseif BETA
+        @Injectable<Service>(primary: true)
+        struct BetaService: Service {}
+        #else
+        @Injectable<Service>(primary: true)
+        struct ReleaseService: Service {}
+        #endif
+
+        @Injectable
+        struct App {
+            let service: Service
+        }
+        """
+
+        var options = CompileFixture.Options.swift6
+        options.extraFlags = conditions.map { "-D\($0)" }
+        let result = try CompileFixture.run(source: source, options: options)
+        try #require(!result.skipped)
+        #expect(result.didCompile, "\(result.compilerOutput)\n\(result.generated)")
+    }
+
+    // MARK: - Everything else the guard has to reach
+
+    @Test("a conditional value guards its member")
+    func conditionalValue() throws {
+        let source = """
+        #if DEBUG
+        @InjectableValue
+        var apiHost: String { "debug.example.com" }
+        #endif
+        """
+
+        let generated = CompileFixture.generate(source: source)
+        #expect(generated.contains("""
+        #if (DEBUG)
+        extension Zerk<String> {
+        """))
+
+        let result = try CompileFixture.run(source: source)
+        try #require(!result.skipped)
+        #expect(result.didCompile, "\(result.compilerOutput)\n\(result.generated)")
+    }
+
+    @Test("a conditional singleton guards its storage slot")
+    func conditionalSingletonStorage() throws {
+        let source = """
+        #if DEBUG
+        @Singleton
+        @Injectable
+        final class Cache: @unchecked Sendable {}
+        #endif
+        """
+
+        let generated = CompileFixture.generate(source: source)
+
+        // The slot names the type, so it cannot outlive it — but the enclosing
+        // namespace is emitted either way, since an empty one is harmless and
+        // wrapping it would take a second guard.
+        #expect(generated.contains("""
+        private enum _$zerk_singletons {
+        #if (DEBUG)
+            nonisolated(unsafe) static let cache: Cache = Cache()
+        #endif
+        }
+        """))
+
+        for options in [CompileFixture.Options.swift6(defining: "DEBUG"), .swift6] {
+            let result = try CompileFixture.run(source: source, options: options)
+            try #require(!result.skipped)
+            #expect(result.didCompile, "\(result.compilerOutput)\n\(result.generated)")
+        }
+    }
+
+    @Test("a conditional @injected initializer guards its overload")
+    func conditionalMarkedMember() throws {
+        let source = """
+        protocol Logging {}
+
+        @Injectable<Logging>
+        struct Logger: Logging {}
+
+        #if DEBUG
+        struct Probe {
+            init(@injected logging: Logging) {}
+        }
+        #endif
+        """
+
+        let generated = CompileFixture.generate(source: source)
+        #expect(generated.contains("""
+        #if (DEBUG)
+        extension Probe {
+        """))
+
+        for options in [CompileFixture.Options.swift6(defining: "DEBUG"), .swift6] {
+            let result = try CompileFixture.run(source: source, options: options)
+            try #require(!result.skipped)
+            #expect(result.didCompile, "\(result.compilerOutput)\n\(result.generated)")
+        }
+    }
+
+    @Test("a conditional #ZerkImport guards its import")
+    func conditionalImport() {
+        let generated = CompileFixture.generate(source: """
+        #if canImport(UIKit)
+        #ZerkImport(module: "UIKit")
+        #endif
+        """)
+
+        #expect(generated.contains("""
+        #if (canImport(UIKit))
+        import UIKit
+        #endif
+        """))
+    }
+
+    /// An unconditional ask is already correct everywhere a conditional one
+    /// would have been, so it wins rather than being narrowed.
+    @Test("a module asked for both ways is imported unconditionally")
+    func widerImportWins() {
+        let generated = CompileFixture.generate(source: """
+        #ZerkImport(module: "Foundation")
+
+        #if DEBUG
+        #ZerkImport(module: "Foundation")
+        #endif
+        """)
+
+        #expect(generated.contains("import Foundation"))
+        #expect(!generated.contains("#if (DEBUG)\nimport Foundation"))
+    }
+
+    // MARK: - What stops being a collision
+
+    @Test("one member name in exclusive branches is not a redeclaration")
+    func sameMemberNameInExclusiveBranches() throws {
+        let source = """
+        protocol Service {}
+
+        #if DEBUG
+        @Injectable<Service>(primary: true)
+        struct Client: Service {}
+        #else
+        @Injectable<Service>(primary: true)
+        struct Client: Service {}
+        #endif
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+
+        // One point, declared once per clause: the two members are different
+        // members that happen to share a name.
+        #expect(result.output.output.contains("""
+        extension Zerk<Service>.Interjection {
+        #if (DEBUG)
+            nonisolated var `client`: Void {}
+        #endif
+        #if !(DEBUG)
+            nonisolated var `client`: Void {}
+        #endif
+        }
+        """))
+
+        for options in [CompileFixture.Options.swift6(defining: "DEBUG"), .swift6] {
+            let compiled = try CompileFixture.run(source: source, options: options)
+            try #require(!compiled.skipped)
+            #expect(compiled.didCompile, "\(compiled.compilerOutput)\n\(compiled.generated)")
+        }
+    }
+
+    @Test("one value name in exclusive branches is not a duplicate")
+    func sameValueNameInExclusiveBranches() {
+        let result = CompileFixture.generateWithResolution(source: """
+        #if DEBUG
+        @InjectableValue
+        var apiHost: String { "debug.example.com" }
+        #else
+        @InjectableValue
+        var apiHost: String { "example.com" }
+        #endif
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+    }
+
+    /// The limit of what Zerk claims to know. `#if DEBUG` and a *separate*
+    /// `#if !DEBUG` are opposites to a reader, but telling so means evaluating
+    /// `DEBUG` — so they are treated as able to coexist, and the ambiguity is
+    /// reported rather than guessed at.
+    @Test("two separate #ifs are not recognised as exclusive")
+    func separateIfsStillCompete() {
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol Service {}
+
+        #if DEBUG
+        @Injectable<Service>(primary: true)
+        struct DebugService: Service {}
+        #endif
+
+        #if !DEBUG
+        @Injectable<Service>(primary: true)
+        struct ReleaseService: Service {}
+        #endif
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("Multiple primary injectables")
+        }, "\(result.diagnostics.map(\.message))")
+    }
+
+    // MARK: - Refusals
+
+    @Test("branches that resolve in different domains are refused")
+    func mismatchedIsolationIsRefused() {
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol Service {}
+
+        #if DEBUG
+        @Injectable<Service>(primary: true)
+        struct DebugService: Service {}
+        #else
+        @MainActor
+        @Injectable<Service>(primary: true)
+        final class ReleaseService: Service {}
+        #endif
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error
+                && $0.message.contains("resolve in different isolation domains")
+        }, "\(result.diagnostics.map(\.message))")
+    }
+
+    @Test("branches that resolve with different effects are refused")
+    func mismatchedEffectsAreRefused() {
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol Service {}
+
+        struct DebugService: Service {}
+        struct ReleaseService: Service {}
+
+        #if DEBUG
+        @Injectable<Service>(primary: true)
+        func debugService() async -> Service { DebugService() }
+        #else
+        @Injectable<Service>(primary: true)
+        func releaseService() -> Service { ReleaseService() }
+        #endif
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("resolve with different effects")
+        }, "\(result.diagnostics.map(\.message))")
+    }
+
+    @Test("a #if gating an initializer is refused")
+    func conditionalInitializerIsRefused() {
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol Dep {}
+
+        @Injectable
+        struct Service {
+            #if DEBUG
+            init(dep: Dep) {}
+            #else
+            init() {}
+            #endif
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("builds differently per configuration")
+        }, "\(result.diagnostics.map(\.message))")
+    }
+
+    @Test("a #if gating an @InjectableProviding factory is refused")
+    func conditionalProviderIsRefused() {
+        let result = CompileFixture.generateWithResolution(source: """
+        @Injectable
+        struct Service {
+            #if DEBUG
+            @InjectableProviding
+            static func make() -> Service { Service() }
+            #endif
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("builds differently per configuration")
+        }, "\(result.diagnostics.map(\.message))")
+    }
+
+    /// The refusal is narrow on purpose: most `#if`s inside a type have nothing
+    /// to do with Zerk, and reporting those would be noise about code Zerk never
+    /// reads.
+    @Test("a #if inside a type that gates nothing Zerk reads is left alone")
+    func harmlessConditionalMemberIsAccepted() {
+        let result = CompileFixture.generateWithResolution(source: """
+        @Injectable
+        struct Service {
+            init() {}
+
+            #if DEBUG
+            func debugHelper() {}
+            #endif
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("nonisolated static var service: Service {"))
+    }
+
+    // MARK: - The graph
+
+    @Test("the graph records the guard each provider is emitted under")
+    func graphRecordsConditions() throws {
+        let graph = CompileFixture.graph(source: Self.debugReleaseSwap)
+
+        let service = try #require(graph.keys.first { $0.key == "Service" })
+        #expect(service.providers.map(\.condition).sorted { ($0 ?? "") < ($1 ?? "") }
+                == ["!(DEBUG)", "(DEBUG)"])
+
+        let app = try #require(graph.keys.first { $0.key == "App" })
+        #expect(app.providers.allSatisfy { $0.condition == nil })
+    }
+}

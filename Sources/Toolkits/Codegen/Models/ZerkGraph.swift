@@ -99,6 +99,14 @@ struct ZerkGraph: Codable, Equatable {
         /// Whether this provider backs the key's `inject()`.
         let isPrimary: Bool
         let location: Location
+        /// The `#if` expression this provider's generated member is emitted
+        /// under, or absent when it is unconditional.
+        ///
+        /// A graph that omitted this would claim a key is resolvable in builds
+        /// where nothing resolves it. Zerk does not evaluate the expression —
+        /// see `CompilationCondition` — so this is the text, for a reader or a
+        /// tool that knows the build settings Zerk does not.
+        var condition: String? = nil
         /// One entry per provider parameter, in declaration order.
         let dependencies: [Dependency]
     }
@@ -136,6 +144,9 @@ struct ZerkGraph: Codable, Equatable {
         let isAsync: Bool
         let isThrowing: Bool
         let location: Location
+        /// The `#if` expression the value's member is emitted under, or absent
+        /// when it is unconditional. See ``Provider/condition``.
+        var condition: String? = nil
     }
 
     /// Where a declaration sits, so a consumer can link back to source.

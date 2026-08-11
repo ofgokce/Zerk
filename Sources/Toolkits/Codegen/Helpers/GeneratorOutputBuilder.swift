@@ -39,6 +39,12 @@ struct GeneratorOutputBuilder {
     /// nothing else by default, since the plugin cannot tell which module a name
     /// came from.
     var importedModules: Set<String> = []
+    /// Modules asked for inside a `#if`, so the emitted `import` can carry the
+    /// same guard. Absent means unconditional.
+    var moduleImportConditions: [String: CompilationCondition] = [:]
+    /// Every primary elected for a key, when `#if` clauses gave it a different
+    /// winner per configuration. See ``ProviderResolutionResult/primaryVariants``.
+    var primaryVariants: [String: [ProviderResolution]] = [:]
 
     ///
     /// They join what is emitted but never `primaryResolutions`: a value is
@@ -50,6 +56,19 @@ struct GeneratorOutputBuilder {
     /// spelling has to be the one the developer wrote.
     func displayName(for key: String) -> String {
         keyDisplayNames[key] ?? key
+    }
+
+    /// Puts generated lines under the `#if` its registration was written under.
+    ///
+    /// This is the whole of how Zerk handles conditional compilation: it does
+    /// not decide which branch is live, it hands the decision back to the
+    /// compiler by reproducing the guard. Empty blocks are dropped rather than
+    /// wrapped — a `#if` around nothing is noise in a file people read.
+    static func guarded(_ lines: [String], by condition: CompilationCondition) -> [String] {
+        guard let text = condition.guardText, !lines.isEmpty else {
+            return lines
+        }
+        return ["#if \(text)"] + lines + ["#endif"]
     }
 
     /// How to call a provider with its dependencies auto-resolved: the
@@ -95,6 +114,9 @@ struct GeneratorOutputBuilder {
         let isolation: ProviderIsolation
         /// `nil` for a singleton; the scope it is kept for otherwise.
         let scope: InjectionScopeRecord?
+        /// The `#if` the owning type is declared under, which the storage slot
+        /// is emitted under too — it names the type, so it cannot outlive it.
+        var condition: CompilationCondition = .unconditional
     }
 
     /// The name of the generated namespace holding every process-lifetime
@@ -130,7 +152,10 @@ struct GeneratorOutputBuilder {
         ]
         // Sorted so the file is byte-identical between builds; `Zerk` stays
         // first because it is the one import that is never optional.
-        output += importedModules.sorted().map { "import \($0)" }
+        for module in importedModules.sorted() {
+            output += Self.guarded(["import \(module)"],
+                                   by: moduleImportConditions[module] ?? .unconditional)
+        }
         output.append("")
         var diagnostics: [CodegenDiagnostic] = []
         var points: [InterjectionPoint] = []
@@ -204,7 +229,8 @@ struct GeneratorOutputBuilder {
                 // A value registered under several keys yields one record per
                 // key, all naming the same source, so thunks dedupe by name.
                 if emittedThunks.insert(value.name).inserted {
-                    thunkLines += referenceThunkLines(for: value)
+                    thunkLines += Self.guarded(referenceThunkLines(for: value),
+                                               by: value.condition)
                 }
             }
 
@@ -224,40 +250,45 @@ struct GeneratorOutputBuilder {
                 ))
             }
 
-            output.append("extension Zerk<\(valueKeyText)> {")
-            output.append("    \(value.isolation.declarationPrefix)\(access)static var \(value.name): \(valueKeyText) {")
+            var valueLines: [String] = []
+            valueLines.append("extension Zerk<\(valueKeyText)> {")
+            valueLines.append("    \(value.isolation.declarationPrefix)\(access)static var \(value.name): \(valueKeyText) {")
 
             if value.injectionMethod == .referenced && value.isSettable {
                 // Only a settable source earns a setter, and only then does the
                 // member need an explicit accessor pair. Effects cannot reach
                 // here: Swift has no effectful setter, so a settable value is
                 // effect-free by construction.
-                output.append("        get {")
-                output += guardLines("            ")
-                output += Self.indented(readExpression, by: "            ")
-                output.append("        }")
-                output.append("        set {")
-                output.append("            \(referenceWrite(for: value, from: "newValue"))")
-                output.append("        }")
+                valueLines.append("        get {")
+                valueLines += guardLines("            ")
+                valueLines += Self.indented(readExpression, by: "            ")
+                valueLines.append("        }")
+                valueLines.append("        set {")
+                valueLines.append("            \(referenceWrite(for: value, from: "newValue"))")
+                valueLines.append("        }")
             } else if value.effects != .none {
                 // An effectful value needs the explicit `get`, since that is the
                 // only place `async`/`throws` can be written on a property. The
                 // guard stays outside the effects — an interjected double is
                 // read synchronously whatever the real value costs.
-                output.append("        get\(value.effects.declarationSuffix) {")
-                output += guardLines("            ")
-                output += Self.indented(readExpression, by: "            ")
-                output.append("        }")
+                valueLines.append("        get\(value.effects.declarationSuffix) {")
+                valueLines += guardLines("            ")
+                valueLines += Self.indented(readExpression, by: "            ")
+                valueLines.append("        }")
             } else {
-                output += guardLines("        ")
-                output += Self.indented(readExpression, by: "        ")
+                valueLines += guardLines("        ")
+                valueLines += Self.indented(readExpression, by: "        ")
             }
 
-            output.append("    }")
-            output.append("}")
+            valueLines.append("    }")
+            valueLines.append("}")
+
+            output += Self.guarded(valueLines, by: value.condition)
             output.append("")
 
-            points.append(InterjectionPoint(scope: .key(value.typeKey), name: point))
+            points.append(InterjectionPoint(scope: .key(value.typeKey),
+                                            name: point,
+                                            condition: value.condition))
         }
 
         // A global `@Injectable` declaration is reached through a private
@@ -274,7 +305,8 @@ struct GeneratorOutputBuilder {
             guard emittedThunks.insert(thunk).inserted else {
                 continue
             }
-            thunkLines += declarationThunkLines(for: resolution)
+            thunkLines += Self.guarded(declarationThunkLines(for: resolution),
+                                       by: resolution.condition)
         }
 
         if !thunkLines.isEmpty {
@@ -319,27 +351,32 @@ struct GeneratorOutputBuilder {
             // are emitted from their own loop, so without this a value named
             // like a provider's member is only caught by `invalid
             // redeclaration` in the generated file.
-            var seenMemberSignatures: [String: String] = [:]
+            var seenMemberSignatures: [String: (owner: String, condition: CompilationCondition)] = [:]
             var valueOwnedSignatures = Set<String>()
             for value in values
             where value.typeKey == injectableKey && !value.isImported {
                 let signature = "\(value.name)()"
-                seenMemberSignatures[signature] = "the @InjectableValue '\(value.name)'"
+                seenMemberSignatures[signature] = ("the @InjectableValue '\(value.name)'", value.condition)
                 valueOwnedSignatures.insert(signature)
             }
 
             for provider in providers {
                 let name = memberName(for: provider)
                 for signature in memberSignatureKeys(for: provider, name: name) {
-                    if let existing = seenMemberSignatures[signature] {
+                    // Two members of one name are only a redeclaration where
+                    // both are compiled. Registered in different clauses of one
+                    // `#if`, they are one member with two definitions — which is
+                    // the ordinary reason to write a `#if` at all.
+                    if let existing = seenMemberSignatures[signature],
+                       !CompilationCondition.areExclusive(existing.condition, provider.condition) {
                         let involvesValue = valueOwnedSignatures.contains(signature)
                         diagnostics.append(CodegenDiagnostic(
                             severity: .error,
-                            message: "Generated member '\(name)' for '\(provider.typeName)' collides with \(existing) in Zerk<\(displayName(for: injectableKey))>: same name, same parameters. \(Self.collisionRemedy(involvesValue: involvesValue))",
+                            message: "Generated member '\(name)' for '\(provider.typeName)' collides with \(existing.owner) in Zerk<\(displayName(for: injectableKey))>: same name, same parameters. \(Self.collisionRemedy(involvesValue: involvesValue))",
                             location: provider.provider.location
                         ))
                     } else {
-                        seenMemberSignatures[signature] = "'\(provider.typeName)'"
+                        seenMemberSignatures[signature] = ("'\(provider.typeName)'", provider.condition)
                     }
                 }
             }
@@ -354,10 +391,20 @@ struct GeneratorOutputBuilder {
             // reason `ZerkSettings.json` exists. Emitted unconditionally: it
             // costs a caller nothing to be told a member is available from 16,
             // and without it a target deploying lower would not build at all.
+            var availabilityLines: [String] = []
             if providers.contains(where: \.isParameterizedExistential) {
-                output.append(Self.parameterizedExistentialAvailability)
+                availabilityLines.append(Self.parameterizedExistentialAvailability)
             }
-            output.append(providers.first?.keyIsGeneric == true
+            // The extension header names the key, so it can only be emitted
+            // where the key's own type exists. Guarding it by what every
+            // provider shares covers the case that matters — a type registered
+            // only inside `#if DEBUG`, whose key is that same type — while
+            // leaving a `#if`/`#else` swap of one protocol key unguarded, since
+            // there the key exists either way and only the members differ.
+            let sharedCondition = CompilationCondition.commonPrefix(of: providers.map(\.condition))
+            var keyLines: [String] = []
+
+            keyLines.append(providers.first?.keyIsGeneric == true
                 ? "extension Zerk {"
                 : "extension Zerk<\(displayName(for: injectableKey))> {")
 
@@ -395,7 +442,8 @@ struct GeneratorOutputBuilder {
                     SendabilityCheck(
                         shared: $0,
                         consumerTypeName: provider.typeName,
-                        consumerIsolation: provider.isolation
+                        consumerIsolation: provider.isolation,
+                        condition: provider.condition
                     )
                 }
 
@@ -412,21 +460,30 @@ struct GeneratorOutputBuilder {
                     continue
                 }
 
-                output += lines
-                output.append("")
+                keyLines += Self.guarded(lines,
+                                         by: provider.condition.dropping(prefix: sharedCondition))
+                keyLines.append("")
             }
 
-            if let primary = primaryResolutions[injectableKey] {
-                output += injectLines(
-                    for: primary,
-                    injectableKey: injectableKey,
-                    classification: classifier.classify(primary),
-                    diagnostics: &diagnostics
+            // One `inject()` per configuration that elected its own primary.
+            // Their guards are mutually exclusive by construction — that is what
+            // made them separate elections — so at most one is ever compiled.
+            for primary in injectVariants(for: injectableKey, diagnostics: &diagnostics) {
+                keyLines += Self.guarded(
+                    injectLines(
+                        for: primary,
+                        injectableKey: injectableKey,
+                        classification: classifier.classify(primary),
+                        diagnostics: &diagnostics
+                    ),
+                    by: primary.condition.dropping(prefix: sharedCondition)
                 )
-                output.append("")
+                keyLines.append("")
             }
 
-            output.append("}")
+            keyLines.append("}")
+
+            output += Self.guarded(availabilityLines + keyLines, by: sharedCondition)
             output.append("")
         }
 
@@ -485,7 +542,9 @@ struct GeneratorOutputBuilder {
                 return nil
             }
             let point = pointNames[pointIdentity(for: provider)] ?? memberName
-            points.append(InterjectionPoint(scope: .key(injectableKey), name: point))
+            points.append(InterjectionPoint(scope: .key(injectableKey),
+                                            name: point,
+                                            condition: provider.condition))
             return sharedInstanceLines(
                 for: provider,
                 injectableKey: injectableKey,
@@ -521,7 +580,9 @@ struct GeneratorOutputBuilder {
             lines.append("    }")
 
             if let scope = pointScope(for: provider, injectableKey: injectableKey) {
-                points.append(InterjectionPoint(scope: scope, name: point))
+                points.append(InterjectionPoint(scope: scope,
+                                                name: point,
+                                                condition: provider.condition))
             }
 
             // The companion `var` is a property too, so it goes the same way.
@@ -546,7 +607,9 @@ struct GeneratorOutputBuilder {
             lines.append("    }")
 
             if let scope = pointScope(for: provider, injectableKey: injectableKey) {
-                points.append(InterjectionPoint(scope: scope, name: point))
+                points.append(InterjectionPoint(scope: scope,
+                                                name: point,
+                                                condition: provider.condition))
             }
         }
 
@@ -791,7 +854,8 @@ struct GeneratorOutputBuilder {
             typeName: provider.sharedStorageTypeName,
             construction: construction,
             isolation: provider.isolation,
-            scope: provider.scope
+            scope: provider.scope,
+            condition: provider.condition
         )
     }
 
@@ -880,11 +944,15 @@ struct GeneratorOutputBuilder {
                 // instance across isolation domains is the documented contract
                 // of @Singleton (Swift 6 would otherwise require the stored type
                 // to be Sendable).
-                lines.append("    nonisolated(unsafe) static let \(entry.memberName): \(entry.typeName) = \(entry.construction)")
+                lines += Self.guarded(
+                    ["    nonisolated(unsafe) static let \(entry.memberName): \(entry.typeName) = \(entry.construction)"],
+                    by: entry.condition)
             case .globalActor(let name):
                 // Global-actor isolation already protects the storage, so no
                 // `nonisolated(unsafe)` escape hatch is needed here.
-                lines.append("    @\(name) static let \(entry.memberName): \(entry.typeName) = \(entry.construction)")
+                lines += Self.guarded(
+                    ["    @\(name) static let \(entry.memberName): \(entry.typeName) = \(entry.construction)"],
+                    by: entry.condition)
             }
         }
 
@@ -929,7 +997,9 @@ struct GeneratorOutputBuilder {
 
         for entry in entries {
             let scope = entry.scope?.expression ?? ""
-            lines.append("    \(entry.isolation.declarationPrefix)static let \(entry.memberName) = ZerkScopedBox<\(entry.typeName)>(scope: \(scope))")
+            lines += Self.guarded(
+                ["    \(entry.isolation.declarationPrefix)static let \(entry.memberName) = ZerkScopedBox<\(entry.typeName)>(scope: \(scope))"],
+                by: entry.condition)
         }
 
         lines.append("}")
@@ -1031,7 +1101,12 @@ struct GeneratorOutputBuilder {
             guard let first = declarations.first else {
                 continue
             }
-            for duplicate in declarations.dropFirst() where duplicate.location != first.location {
+            // Same name, same key, different `#if` clauses is one value with a
+            // definition per configuration — the whole point of writing the
+            // `#if` — so only declarations a single build can both see clash.
+            for duplicate in declarations.dropFirst()
+            where duplicate.location != first.location
+                && !CompilationCondition.areExclusive(duplicate.condition, first.condition) {
                 diagnostics.append(CodegenDiagnostic(
                     severity: .error,
                     message: "'\(duplicate.name)' is declared as a '\(duplicate.typeName)' value more than once (also at \(first.location.filePath):\(first.location.line)). Values are matched by name as well as type, so two of one name under one key can never be told apart. Rename one, or register it under a different key.",
@@ -1157,6 +1232,92 @@ struct GeneratorOutputBuilder {
                               parameters: [ParameterRecord],
                               classification: ProviderClassification) -> String {
         key
+    }
+
+    /// The primaries a key needs an `inject()` for: one per configuration.
+    ///
+    /// Normally exactly one, and then this is just `primaryResolutions[key]`. A
+    /// key gets several only when mutually exclusive registrations each won
+    /// their own configuration — a `#if DEBUG` / `#else` swap — and then each
+    /// needs its own `inject()`, because they build different things.
+    ///
+    /// What they may *not* differ in is the contract: everything that resolves
+    /// the key through a default argument spells one call, emitted once, with
+    /// one set of effects and one parameter list. If the branches disagree about
+    /// those, that single call site would be wrong in one configuration — so it
+    /// is refused here rather than emitted and left to fail in the branch nobody
+    /// built today.
+    private func injectVariants(for injectableKey: String,
+                                diagnostics: inout [CodegenDiagnostic]) -> [ProviderResolution] {
+        guard let representative = primaryResolutions[injectableKey] else {
+            return []
+        }
+        let variants = primaryVariants[injectableKey] ?? [representative]
+        guard variants.count > 1 else {
+            return variants
+        }
+
+        let expected = wrapperPlan(for: representative)
+        var accepted = [representative]
+
+        for variant in variants.dropFirst() {
+            let plan = wrapperPlan(for: variant)
+            let mismatch = Self.contractMismatch(
+                between: (representative, expected),
+                and: (variant, plan)
+            )
+            guard let mismatch else {
+                accepted.append(variant)
+                continue
+            }
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "'\(variant.typeName)' and '\(representative.typeName)' both resolve '\(displayName(for: injectableKey))', in different branches of one #if, but they \(mismatch). Everything that injects this key resolves it through a single 'Zerk<\(displayName(for: injectableKey))>.inject()' call, emitted once for every configuration, so the branches have to agree on what that call costs. Make them match, or give the branches separate keys.",
+                location: variant.provider.location
+            ))
+        }
+
+        return accepted
+    }
+
+    /// How two configurations' primaries differ in what a caller must do to
+    /// resolve them, or `nil` when they are interchangeable.
+    ///
+    /// Only the *observable* half is compared. What each one builds, how it is
+    /// named, and whether it is kept are exactly what the branches are there to
+    /// vary; the effects, the isolation, and the arguments left for the caller
+    /// are what the single emitted call site depends on.
+    private static func contractMismatch(
+        between representative: (ProviderResolution, WrapperPlan),
+        and variant: (ProviderResolution, WrapperPlan)
+    ) -> String? {
+        if representative.1.effects != variant.1.effects {
+            return "resolve with different effects (\(Self.effectsDescription(representative.1.effects)) versus \(Self.effectsDescription(variant.1.effects)))"
+        }
+        if representative.0.isolation.actorName != variant.0.isolation.actorName {
+            return "resolve in different isolation domains (\(Self.isolationDescription(representative.0.isolation)) versus \(Self.isolationDescription(variant.0.isolation)))"
+        }
+        let left = representative.1.parameters.map { "\($0.label ?? $0.name): \($0.typeName)" }
+        let right = variant.1.parameters.map { "\($0.label ?? $0.name): \($0.typeName)" }
+        if left != right {
+            return "leave different arguments to the caller (\(Self.parameterList(left)) versus \(Self.parameterList(right)))"
+        }
+        return nil
+    }
+
+    private static func parameterList(_ parameters: [String]) -> String {
+        parameters.isEmpty ? "none" : parameters.joined(separator: ", ")
+    }
+
+    /// How a diagnostic names what resolving costs, as a developer would write
+    /// it at the call site.
+    private static func effectsDescription(_ effects: ProviderEffects) -> String {
+        let suffix = effects.declarationSuffix.trimmingCharacters(in: .whitespaces)
+        return suffix.isEmpty ? "neither async nor throwing" : suffix
+    }
+
+    private static func isolationDescription(_ isolation: ProviderIsolation) -> String {
+        isolation.actorName.map { "@\($0)" } ?? "nonisolated"
     }
 
     /// Emits `inject()`, the entry point every other generated member and every
@@ -1313,6 +1474,9 @@ struct GeneratorOutputBuilder {
         let grouped = Dictionary(grouping: markedMembers, by: \.typeName)
         for typeName in grouped.keys.sorted(by: { ($0 ?? "") < ($1 ?? "") }) {
             var memberLines: [String] = []
+            // The extension names the type, so it is guarded by whatever every
+            // member of it shares — the type's own `#if` when it has one.
+            let sharedCondition = CompilationCondition.commonPrefix(of: grouped[typeName]!.map(\.condition))
 
             for record in grouped[typeName]! {
                 var argumentExpressions: [String] = []
@@ -1468,7 +1632,7 @@ struct GeneratorOutputBuilder {
                     ]
                 }
 
-                if !seenOverloads.insert(overloadKey).inserted {
+                if !seenOverloads.insert("\(overloadKey)|\(record.condition.guardText ?? "")").inserted {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
                         message: "Two @injected \(typeName.map { "members of '\($0)'" } ?? "global functions") generate the same overload \(overloadKey). Differentiate the remaining parameters.",
@@ -1477,18 +1641,21 @@ struct GeneratorOutputBuilder {
                     continue
                 }
 
-                memberLines.append(contentsOf: declarationLines)
+                memberLines += Self.guarded(declarationLines,
+                                            by: record.condition.dropping(prefix: sharedCondition))
                 memberLines.append("")
             }
 
             if !memberLines.isEmpty {
+                var block: [String] = []
                 if let typeName {
-                    lines.append("extension \(typeName) {")
-                    lines.append(contentsOf: memberLines.dropLast())
-                    lines.append("}")
+                    block.append("extension \(typeName) {")
+                    block.append(contentsOf: memberLines.dropLast())
+                    block.append("}")
                 } else {
-                    lines.append(contentsOf: memberLines.dropLast())
+                    block.append(contentsOf: memberLines.dropLast())
                 }
+                lines += Self.guarded(block, by: sharedCondition)
                 lines.append("")
             }
         }
@@ -1915,8 +2082,10 @@ struct GeneratorOutputBuilder {
                   declaredMarkers.insert(protocolName).inserted else {
                 continue
             }
-            lines.append("protocol `\(protocolName)` {}")
-            lines.append("extension \(baseType): `\(protocolName)` {}")
+            lines += Self.guarded([
+                "protocol `\(protocolName)` {}",
+                "extension \(baseType): `\(protocolName)` {}"
+            ], by: CompilationCondition.commonPrefix(of: grouped[scope]!.map(\.condition)))
             lines.append("")
         }
 
@@ -1924,16 +2093,26 @@ struct GeneratorOutputBuilder {
             // Deduped by name, which already carries the parameters: several
             // providers for one key can share a member name, and each overload
             // needs its own point.
-            var seen = Set<String>()
-            let names = grouped[scope]!.map(\.name).sorted()
+            //
+            // A name reached from two `#if` clauses is declared once per clause,
+            // under each guard, since the members it stands for are different
+            // members. One reachable unconditionally is declared once and
+            // unguarded — the widest of its conditions covers the rest, and
+            // declaring it twice in one configuration would not compile.
+            var conditionsByName: [String: [CompilationCondition]] = [:]
+            for point in grouped[scope]! {
+                conditionsByName[point.name, default: []].append(point.condition)
+            }
+            let sharedCondition = CompilationCondition.commonPrefix(of: grouped[scope]!.map(\.condition))
 
+            var block: [String] = []
             switch scope {
             case .key(let key):
-                lines.append("extension Zerk<\(displayName(for: key))>.Interjection {")
+                block.append("extension Zerk<\(displayName(for: key))>.Interjection {")
             case .marker(let protocolName, _):
-                lines.append("extension Zerk.Interjection where Injectable: `\(protocolName)` {")
+                block.append("extension Zerk.Interjection where Injectable: `\(protocolName)` {")
             }
-            for name in names where seen.insert(name).inserted {
+            for name in conditionsByName.keys.sorted() {
                 // Pinned `nonisolated`, and not from the member's isolation: a
                 // point is a `Void` marker with no state, and every member has
                 // to form a key path to it. Left unannotated it inherits the
@@ -1942,9 +2121,21 @@ struct GeneratorOutputBuilder {
                 // all — "cannot form key path to main actor-isolated property".
                 // Nonisolated is reachable from every domain, including an
                 // isolated member's.
-                lines.append("    nonisolated var `\(name)`: Void {}")
+                let declaration = "    nonisolated var `\(name)`: Void {}"
+                let conditions = conditionsByName[name]!.map { $0.dropping(prefix: sharedCondition) }
+                guard !conditions.contains(where: \.isUnconditional) else {
+                    block.append(declaration)
+                    continue
+                }
+                var emitted = Set<String>()
+                for condition in conditions.sorted(by: { $0.sortKey < $1.sortKey })
+                where emitted.insert(condition.guardText ?? "").inserted {
+                    block += Self.guarded([declaration], by: condition)
+                }
             }
-            lines.append("}")
+            block.append("}")
+
+            lines += Self.guarded(block, by: sharedCondition)
             lines.append("")
         }
 
@@ -2011,6 +2202,9 @@ struct GeneratorOutputBuilder {
         let shared: SharedDependency
         let consumerTypeName: String
         let consumerIsolation: ProviderIsolation
+        /// The `#if` the consuming provider is declared under. The check names
+        /// both types, so it belongs in the same configurations.
+        var condition: CompilationCondition = .unconditional
 
         var sharedTypeName: String { shared.typeName }
 
@@ -2052,11 +2246,13 @@ struct GeneratorOutputBuilder {
 
         for check in unique {
             let domain = check.consumerIsolation.actorName.map { "'\($0)'-isolated " } ?? ""
-            lines.append("private func _$zerk_sendable_conformance_check_\(sanitizedIdentifier(check.sharedTypeName))_in_\(sanitizedIdentifier(check.consumerTypeName))() {")
-            lines.append("    // '\(check.attributeName) \(check.sharedTypeName)' is injected into \(domain)'\(check.consumerTypeName)'.")
-            lines.append("    // A shared instance that crosses isolation domains must be Sendable.")
-            lines.append("    _$zerk_sendable_conformance_check(\(check.sharedTypeName).self)")
-            lines.append("}")
+            lines += Self.guarded([
+                "private func _$zerk_sendable_conformance_check_\(sanitizedIdentifier(check.sharedTypeName))_in_\(sanitizedIdentifier(check.consumerTypeName))() {",
+                "    // '\(check.attributeName) \(check.sharedTypeName)' is injected into \(domain)'\(check.consumerTypeName)'.",
+                "    // A shared instance that crosses isolation domains must be Sendable.",
+                "    _$zerk_sendable_conformance_check(\(check.sharedTypeName).self)",
+                "}"
+            ], by: check.condition)
             lines.append("")
         }
 
