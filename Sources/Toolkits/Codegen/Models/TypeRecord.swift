@@ -47,6 +47,13 @@ struct TypeRecord {
     /// the ones spelled `any P<X, Y>` and gated on the availability of
     /// parameterized existentials.
     var parameterizedKeys: [String: AttributeLocation] = [:]
+    /// Why Zerk declined to infer an initializer, when it declined for a reason
+    /// worth telling the developer.
+    ///
+    /// Carried rather than diagnosed on the spot so that one mistake produces
+    /// one error: not inferring is only a problem if nothing else provides the
+    /// type, and that is settled a stage later.
+    var initializerInferenceRefusal: String? = nil
     /// The `#if` clauses this declaration sits inside.
     ///
     /// Everything generated for the type is emitted under the same guard, and

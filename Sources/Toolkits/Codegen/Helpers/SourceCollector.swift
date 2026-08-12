@@ -914,11 +914,15 @@ final class SourceCollector: SyntaxVisitor {
             }
         }
 
-        if initializers.isEmpty,
-           var inferredInitializer = node.inferredSynthesizedInitializer(in: location,
-                                                                        genericScope: scope) {
-            inferredInitializer.isolation = typeIsolation
-            initializers.append(inferredInitializer)
+        var inferenceRefusal: String?
+        if initializers.isEmpty {
+            if var inferredInitializer = node.inferredSynthesizedInitializer(in: location,
+                                                                            genericScope: scope) {
+                inferredInitializer.isolation = typeIsolation
+                initializers.append(inferredInitializer)
+            } else if let (attribute, property) = node.unreadableStoredProperty {
+                inferenceRefusal = "'@\(attribute)' on '\(property)' may change what the initializer takes — a property wrapper and an attached macro are spelled the same, and Zerk reads syntax rather than expanding them, so it will not guess."
+            }
         }
 
         types.append(
@@ -935,6 +939,7 @@ final class SourceCollector: SyntaxVisitor {
                 isolation: typeIsolation,
                 genericParameters: genericParameters,
                 parameterizedKeys: parameterizedKeys,
+                initializerInferenceRefusal: inferenceRefusal,
                 condition: currentCondition
             )
         )
@@ -1433,6 +1438,7 @@ final class SourceCollector: SyntaxVisitor {
                 // actually wrote.
                 macroName: "@\(attribute.name)",
                 namesMemberDirectly: namesMemberDirectly,
+                enclosingTypeName: typeStack.last?.name,
                 location: location(for: Syntax(node))
             ))
         }

@@ -26,5 +26,13 @@ struct InjectedUseRecord {
     /// `async` or `throws` property, so anything reachable this way is already
     /// effect-free.
     var namesMemberDirectly: Bool = false
+    /// The type whose declaration this property sits in, when it has one.
+    ///
+    /// An `@Injected` property is not a provider parameter, so it contributes
+    /// no edge to the graph — and a cycle running through one used to be
+    /// invisible, then overflow the stack at run time. This is what lets cycle
+    /// detection see it. `nil` for a use at file scope, which is nobody's
+    /// dependency.
+    var enclosingTypeName: String? = nil
     let location: AttributeLocation
 }

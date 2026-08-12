@@ -9,19 +9,21 @@ import SharedToolkit
 import SwiftSyntax
 
 extension DeclGroupSyntax {
-    
+
     /// Whether the compiler synthesizes a no-argument `init()` for this type.
     ///
     /// It does when every stored instance property already holds a value —
-    /// given an initializer expression, or computed rather than stored. Enums
-    /// are excluded outright: they get no synthesized initializer at all.
+    /// given an initializer expression, computed rather than stored, or
+    /// satisfied by an attached macro. Enums are excluded outright: they get no
+    /// synthesized initializer at all.
     var canInferImplicitDefaultInitializer: Bool {
         guard self.as(EnumDeclSyntax.self) == nil else { return false }
 
         for member in memberBlock.members {
             guard let variable = member.decl.as(VariableDeclSyntax.self),
-                  !variable.modifiers.isStatic else { continue }
-            
+                  !variable.modifiers.isStatic,
+                  !variable.attributes.satisfiesItsOwnStorage else { continue }
+
             for binding in variable.bindings
             where binding.initializer == nil && binding.accessorBlock == nil {
                 return false
@@ -52,9 +54,21 @@ extension DeclGroupSyntax {
         for member in memberBlock.members {
             guard let variable = member.decl.as(VariableDeclSyntax.self) else { continue }
             guard !variable.modifiers.isStatic else { continue }
+            // A property an attached macro takes care of is not a memberwise
+            // parameter — the macro either computes it or defaults it — so
+            // asking a caller for one would name an argument the initializer
+            // does not have.
+            guard !variable.attributes.satisfiesItsOwnStorage else { continue }
 
             for binding in variable.bindings {
                 if binding.accessorBlock != nil || binding.initializer != nil { continue }
+
+                // Anything Zerk cannot read might do to this property what the
+                // attributes above do, and it would find out by emitting a call
+                // that does not type-check inside the generated file. Refusing
+                // to infer sends it down the "declare a provider" path instead,
+                // where the diagnostic names the declaration.
+                if variable.attributes.unreadableStorageAttribute != nil { return nil }
 
                 guard let identifier = binding.pattern.as(IdentifierPatternSyntax.self),
                       let annotation = binding.typeAnnotation else { return nil }
@@ -78,6 +92,28 @@ extension DeclGroupSyntax {
             location: location)
     }
     
+    /// The first stored property whose attributes Zerk cannot read, as
+    /// (attribute, property), or `nil` when there is none.
+    ///
+    /// Only properties that would become *required* parameters count: one that
+    /// already has a value is not asked for either way, so an attribute on it
+    /// changes nothing Zerk depends on.
+    var unreadableStoredProperty: (attribute: String, property: String)? {
+        for member in memberBlock.members {
+            guard let variable = member.decl.as(VariableDeclSyntax.self),
+                  !variable.modifiers.isStatic,
+                  let attribute = variable.attributes.unreadableStorageAttribute else {
+                continue
+            }
+            for binding in variable.bindings
+            where binding.initializer == nil && binding.accessorBlock == nil {
+                let name = binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.text
+                return (attribute, name ?? binding.pattern.trimmedDescription)
+            }
+        }
+        return nil
+    }
+
     /// The initializer the compiler would synthesize, if any: memberwise for a
     /// struct, otherwise the no-argument `init()` — and `nil` when neither
     /// applies, meaning the type must declare a provider explicitly.

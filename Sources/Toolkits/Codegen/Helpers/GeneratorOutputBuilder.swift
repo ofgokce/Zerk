@@ -1722,6 +1722,29 @@ struct GeneratorOutputBuilder {
     /// Non-primary providers contribute no edges. They are never resolved on
     /// anyone's behalf, so a cycle through one is not a cycle Zerk can walk into
     /// — the caller has to name that member itself.
+    /// `@Injected` uses, grouped by the type that declares them.
+    ///
+    /// Only uses inside a type participate: a property at file scope, or in a
+    /// view that nothing injects, is not a node in this graph and cannot be
+    /// part of a cycle in it.
+    private var eagerInjectedUses: [String: [InjectedUseRecord]] {
+        Dictionary(
+            grouping: injectedUses.filter {
+                $0.macroName == "@Injected" && $0.enclosingTypeName != nil
+            },
+            by: { $0.enclosingTypeName! }
+        )
+    }
+
+    /// Whether this key's provider reaches its dependencies through an
+    /// `@Injected` property, which is what makes the lazy remedy applicable.
+    private func hasEagerInjectedProperty(_ key: String) -> Bool {
+        guard let typeName = primaryResolutions[key]?.typeName else {
+            return false
+        }
+        return eagerInjectedUses[typeName]?.isEmpty == false
+    }
+
     private func cycleDiagnostics() -> [CodegenDiagnostic] {
         let classifier = self.classifier
 
@@ -1736,6 +1759,20 @@ struct GeneratorOutputBuilder {
                 // registration is a shape and a parameter naming one of its
                 // specializations would point at a node that does not exist.
                 if let dependency = primaryResolutions[parameter] {
+                    edges[key, default: []].append(dependency.injectableKey)
+                }
+            }
+
+            // `@Injected` properties are edges too, and they are the ones that
+            // used to be missed: not being provider parameters, they left no
+            // trace in the graph, so a cycle running through them built cleanly
+            // and then overflowed the stack on the first resolution.
+            //
+            // `@InjectedDynamically` is deliberately absent. Its accessor
+            // resolves per read rather than at construction, so it does not
+            // close a cycle — it is the remedy this diagnostic points at.
+            for use in eagerInjectedUses[resolution.typeName] ?? [] {
+                if let dependency = primaryResolutions[use.typeKey, shape: use.typeKeyShape] {
                     edges[key, default: []].append(dependency.injectableKey)
                 }
             }
@@ -1756,7 +1793,10 @@ struct GeneratorOutputBuilder {
                         // Spelled as the developer would write it: a generic
                         // key's node is a shape (`Cache<#0>`), which is Zerk's
                         // own notation and appears nowhere in their source.
-                        message: "Circular dependency detected: \(cycle.map { displayName(for: $0) }.joined(separator: " -> ")). Break the cycle by removing one dependency.",
+                        message: "Circular dependency detected: \(cycle.map { displayName(for: $0) }.joined(separator: " -> ")). Break the cycle by removing one dependency."
+                            + (cycle.contains(where: hasEagerInjectedProperty)
+                               ? " One of these resolves the next through an @Injected property, which is read while the instance is being built — @InjectedDynamically resolves on each access instead, which breaks the cycle."
+                               : ""),
                         location: location
                     ))
                 }

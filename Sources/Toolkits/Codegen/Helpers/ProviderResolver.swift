@@ -55,7 +55,8 @@ struct ProviderResolver {
                     } else {
                         diagnostics.append(CodegenDiagnostic(
                             severity: .error,
-                            message: "No @InjectableProviding provider found for @Injectable<\(key)> on '\(type.name)'.",
+                            message: "No @InjectableProviding provider found for @Injectable<\(key)> on '\(type.name)'."
+                                + (type.initializerInferenceRefusal.map { " \($0) Declare an initializer, or mark a factory @InjectableProviding." } ?? ""),
                             location: type.injectableKeys[key]!
                         ))
                     }

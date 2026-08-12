@@ -68,4 +68,87 @@ public extension AttributeListSyntax {
     var isolatedMarkerName: String? {
         attributes(named: "Isolated").first?.genericArgumentKeys.first
     }
+
+    /// Zerk's own property macros, which leave the property needing nothing
+    /// from an initializer.
+    ///
+    /// `@Injected` expands to a peer holding the resolved value, which
+    /// initializes the property through `@storageRestrictions`; and
+    /// `@InjectedDynamically` expands to a getter, so there is no storage at
+    /// all. Either way the compiler's synthesized initializer does not ask for
+    /// one, and neither may Zerk's model of it.
+    static let storageSatisfyingAttributes: Set<String> = [
+        "Injected", "InjectedDynamically"
+    ]
+
+    /// Attributes that provably leave a property's storage alone, so seeing one
+    /// is no reason to stop inferring an initializer.
+    ///
+    /// Global actors are handled by ``globalActorName`` rather than listed
+    /// here, so there is one definition of "this names a global actor" instead
+    /// of two that can drift. They belong in this category on merit: a
+    /// global-actor annotation changes neither the synthesized initializer's
+    /// parameters nor its isolation — a nonisolated initializer may still
+    /// initialize an isolated stored property.
+    static let storageNeutralAttributes: Set<String> = [
+        "objc", "nonobjc", "available", "inlinable", "usableFromInline",
+        "preconcurrency", "unchecked", "Sendable", "IBOutlet", "IBInspectable",
+        "NSCopying", "NSManaged", "Isolated"
+    ]
+
+    /// Property wrappers whose memberwise contribution is the *wrapped* value,
+    /// so Zerk's reading of the property is already right.
+    ///
+    /// A wrapper with `init(wrappedValue:)` puts the wrapped type in the
+    /// memberwise initializer — `@Bindable var model: SearchModel` takes a
+    /// `SearchModel` — which is exactly what reading the annotation gives.
+    ///
+    /// **Curated and incomplete on purpose.** It cannot be derived: the
+    /// declaration lives in another module, and syntax cannot tell a wrapper
+    /// with that initializer from one without. `@Environment` is the
+    /// counterexample worth remembering — it has no `init(wrappedValue:)`, so it
+    /// contributes nothing to the memberwise initializer, and listing it here
+    /// would be wrong.
+    static let wrappedValueAttributes: Set<String> = [
+        "Bindable", "State", "StateObject", "ObservedObject", "Published"
+    ]
+
+    /// Whether an attached macro here already gives the property its value.
+    var satisfiesItsOwnStorage: Bool {
+        contains { element in
+            guard case .attribute(let attribute) = element else {
+                return false
+            }
+            return Self.storageSatisfyingAttributes.contains(attribute.name)
+        }
+    }
+
+    /// The first attribute whose effect on storage Zerk cannot read, or `nil`
+    /// when every attribute here is one it can account for.
+    ///
+    /// A property wrapper and an attached macro are both spelled `@Name`, and
+    /// either can change whether a property is stored, whether it is defaulted,
+    /// and what type the memberwise initializer asks for. Syntax cannot tell
+    /// them from an annotation that does nothing — so anything not accounted
+    /// for is reported rather than assumed harmless.
+    var unreadableStorageAttribute: String? {
+        for element in self {
+            guard case .attribute(let attribute) = element else {
+                continue
+            }
+            let name = attribute.name
+            if Self.storageSatisfyingAttributes.contains(name)
+                || Self.storageNeutralAttributes.contains(name)
+                || Self.wrappedValueAttributes.contains(name) {
+                continue
+            }
+            // Reuses the heuristic the isolation reader uses, so a custom global
+            // actor is recognised here exactly as it is there.
+            if AttributeListSyntax([element]).globalActorName != nil {
+                continue
+            }
+            return name
+        }
+        return nil
+    }
 }

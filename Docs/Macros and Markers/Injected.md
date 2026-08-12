@@ -183,6 +183,29 @@ Everything else is identical. The same async/throwing chain check applies — a 
 `await` any more than an initializer can — and it reports against whichever attribute you
 wrote.
 
+### It also breaks a dependency cycle
+
+`@Injected` resolves while the enclosing instance is being built, so two types holding each
+other through one is a cycle that runs at construction time:
+
+```swift
+@Injectable final class A { @Injected var b: B }   // error: Circular dependency detected
+@Injectable final class B { @Injected var a: A }
+```
+
+Zerk reports it, and names this attribute as the fix. Swapping either side to
+`@InjectedDynamically` resolves the dependency on access instead, so constructing `A` no longer
+constructs `B`:
+
+```swift
+@Injectable final class A { @InjectedDynamically var b: B }   // fine
+@Injectable final class B { @InjectedDynamically var a: A }
+```
+
+Note what that costs: the dependency is re-resolved on every read, so for a transient
+registration each access builds a new instance. Between two `@Singleton`s — the usual shape for
+a cycle — it costs a lookup and nothing else.
+
 ### Why it is a separate attribute
 
 It would read better as an argument on `@Injected`. That does not work, and the reason is

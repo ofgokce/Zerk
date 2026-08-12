@@ -42,6 +42,20 @@ The plugin cannot see `SWIFT_DEFAULT_ACTOR_ISOLATION`, so `ZerkSettings.json` ha
 
 It states what the compiler already believes; Zerk cannot check that claim and will generate code matching whatever you wrote.
 
+### The initializer is inferred from syntax, and declines when syntax is not enough
+
+A type with no `@InjectableProviding` member falls back to the initializer the compiler would synthesize — memberwise for a struct, `init()` for anything whose stored properties all already hold a value. Zerk works that out by reading the declaration, which is exact for plain properties and guesswork the moment a property carries an attribute.
+
+**A property wrapper and an attached macro are spelled the same**, and either can change whether a property is stored, whether it is defaulted, and what the memberwise initializer asks for. Three cases, and Zerk treats them differently:
+
+- **Zerk's own** — `@Injected` and `@InjectedDynamically` give the property its value, so they contribute no parameter. Reading them as ordinary stored properties is what used to emit `A(b:)` against a type whose initializer takes nothing.
+- **Known to pass the wrapped value through** — `@Bindable`, `@State`, `@StateObject`, `@ObservedObject`, `@Published` have `init(wrappedValue:)`, so the memberwise initializer takes the wrapped type, which is what the annotation says. The list is curated and cannot be derived; `@Environment` is the counterexample, since it has no such initializer and contributes nothing.
+- **Everything else** — Zerk stops inferring rather than guessing, and the "no provider" error names the attribute and the property. Declare an initializer, or mark a factory `@InjectableProviding`.
+
+The guard is narrow on purpose: it only applies to a property that would become a *required* parameter. One that already has a value is not asked for either way, so an attribute on it changes nothing.
+
+Global actors are read, not refused. A global-actor annotation on a stored property changes neither the synthesized initializer's parameters nor its isolation — a nonisolated initializer may still initialize an isolated stored property.
+
 ### `#if` conditions are carried, never evaluated
 
 The plugin is told neither the build configuration nor the active compilation conditions, and SwiftPM caches its result across configurations — so an answer to "is `DEBUG` set?" given during a Debug build would be reused for the Release one. Instead the guard is reproduced in the generated file and the compiler decides. [Conditional compilation](../Features/ConditionalCompilation.md) covers what follows from that; three limits are worth stating here.

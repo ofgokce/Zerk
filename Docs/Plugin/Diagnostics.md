@@ -16,7 +16,8 @@ Most of these are raised twice — once by the macro, against the declaration, s
 | The winning type declares several providers for a key and none is primary | `@InjectableProviding(primary: true)` on one of them |
 | The winning type declares several primary providers for a key | Only one provider can be primary for a key |
 | `@InjectableProviding<Key>` on a member of a type that has no matching `@Injectable<Key>` | Add the key to the type, or drop it from the provider |
-| A dependency cycle | The error names the cycle path (`A -> B -> A`); break it by removing one edge — inject a factory, or make one edge parametric |
+| A dependency cycle | The error names the cycle path (`A -> B -> A`); break it by removing one edge — inject a factory, or make one edge parametric. When the cycle runs through an `@Injected` property the error also names the lazy remedy: `@InjectedDynamically` resolves per access rather than during construction |
+| A type has no provider *and* a property carries an attribute Zerk cannot read | The error names the attribute and the property. A property wrapper and an attached macro are spelled the same, so Zerk will not guess what the initializer takes — declare one, or mark a factory `@InjectableProviding`. See [Limitations](Limitations.md) |
 
 Registrations in different clauses of one `#if` do not trigger the primary
 diagnostics above — no build sees both. See
