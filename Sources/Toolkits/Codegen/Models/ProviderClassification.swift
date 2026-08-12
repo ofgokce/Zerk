@@ -128,6 +128,28 @@ struct ProviderClassification {
         !bodyResolved.isEmpty
     }
 
+    /// Every resolved parameter's expression, keyed by parameter name —
+    /// including the ones that cannot sit in a default argument.
+    ///
+    /// ``defaultExpressions`` answers "what can the signature declare"; this
+    /// answers "what does the construction pass". They differ for an `await`,
+    /// which is illegal in a default argument but fine inside an async closure —
+    /// which is exactly the position a kept instance's construction is in.
+    var resolvedExpressions: [String: String] {
+        var result: [String: String] = [:]
+        for classified in parameters {
+            switch classified.binding {
+            case .defaulted(let expression):
+                result[classified.parameter.name] = expression
+            case .bodyResolved(let expression, _):
+                result[classified.parameter.name] = expression
+            case .external:
+                continue
+            }
+        }
+        return result
+    }
+
     /// Default expressions keyed by parameter name, for the emitted signature.
     var defaultExpressions: [String: String] {
         var result: [String: String] = [:]

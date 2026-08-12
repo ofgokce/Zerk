@@ -313,15 +313,12 @@ both are dropped by the same reset and both are rebuilt on the next resolution.
 ## Constraints
 
 The rules `@Scoped` shares with `@Singleton`, and for the same reason — the instance is built
-exactly once, from a synchronous expression, with no help from the caller:
+exactly once, with no help from the caller:
 
 - **Reference types only** (`class` or `actor`). A value type is copied on every read, so
   keeping one for a scope would keep nothing.
 - **No external arguments.** The instance is built once and handed to every caller, so there
   is no answer to which caller's arguments it was built with.
-- **No `async` or `throws` provider.** A scoped instance is built while its box holds a lock,
-  so that exactly one is built however many callers race — and a lock cannot be held across
-  an `await`. (A singleton's reason differs: its storage is a `static let`.)
 - **One provider across every key.** One instance cannot be built two ways.
 - **Not on a generic type.** The box is a static stored property, which Swift does not allow
   in a generic type, so there is nowhere to keep one instance per specialization. Permanent,
@@ -342,6 +339,12 @@ A `@MainActor` scoped type works, and the arrangement that makes it work is wort
 closure runs synchronously in the caller's domain. A synchronous nonisolated function does
 not switch isolation, so a `@MainActor` member builds its `@MainActor` instance on the main
 actor, inside the box's lock.
+
+An `async` or `throws` provider is allowed, and changes the storage: `ZerkScopedBox` builds
+under its lock, which cannot span an `await`, so such an instance is kept in a `ZerkAsyncBox`
+instead. Same scope, same reset — but reading it becomes `async`, and the construction hops
+into its own domain rather than inheriting the member's, because the box's closure is
+`@Sendable`. See [Concurrency](../Features/Concurrency.md#kept-instances-that-have-to-await).
 
 A scoped instance that crosses an isolation boundary must be `Sendable`, exactly as a
 singleton must — it is shared, so its region is not disconnected. Zerk emits the same

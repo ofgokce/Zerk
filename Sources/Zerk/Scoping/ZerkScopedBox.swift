@@ -115,11 +115,19 @@ public final class ZerkScopedBox<Value>: @unchecked Sendable {
 /// existentials — and a `ZerkScopedBox<Value>` cannot be one of those while
 /// `Value` is in the way.
 protocol ZerkScopeResettable: AnyObject, Sendable {
-    var scope: InjectionScope { get }
+    /// The scope that clears this box, or `nil` for a box no scope owns — a
+    /// `@Singleton`'s, which is kept for the life of the process.
+    ///
+    /// Optional rather than a sentinel scope because a singleton must be
+    /// unreachable from `resetAllScopes()`, and "belongs to no scope" is the
+    /// honest way to say that.
+    var resetScope: InjectionScope? { get }
     func reset()
 }
 
-extension ZerkScopedBox: ZerkScopeResettable {}
+extension ZerkScopedBox: ZerkScopeResettable {
+    var resetScope: InjectionScope? { scope }
+}
 
 /// Every ``ZerkScopedBox`` in the process, so `Zerk.reset(_:)` can reach the
 /// ones a scope owns.
@@ -164,7 +172,7 @@ final class ZerkScopeRegistry: @unchecked Sendable {
     /// ordering problem, not something a finer lock could fix.
     func reset(_ scope: InjectionScope) {
         lock.lock()
-        let targets = boxes.filter { $0.scope == scope }
+        let targets = boxes.filter { $0.resetScope == scope }
         lock.unlock()
 
         for box in targets {
@@ -173,9 +181,12 @@ final class ZerkScopeRegistry: @unchecked Sendable {
     }
 
     /// Clears every box in every scope.
+    ///
+    /// Scoped boxes only. A `@Singleton`'s box registers nothing, so it cannot
+    /// appear here — "every scope" does not include the process.
     func resetAll() {
         lock.lock()
-        let targets = boxes
+        let targets = boxes.filter { $0.resetScope != nil }
         lock.unlock()
 
         for box in targets {

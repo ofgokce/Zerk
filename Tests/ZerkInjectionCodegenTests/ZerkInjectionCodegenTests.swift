@@ -456,8 +456,8 @@ struct GeneratorOutputBuilderTests {
         #expect(result.output.contains("static func inject() -> ApiServicing"))
     }
 
-    @Test("async or throwing singleton providers emit a diagnostic")
-    func effectfulSingletonProvidersEmitDiagnostic() {
+    @Test("an async singleton provider is kept in an async box")
+    func effectfulSingletonUsesAsyncBox() {
         let resolution = makeResolution(
             typeName: "ApiService",
             injectableKey: "ApiServicing",
@@ -469,8 +469,12 @@ struct GeneratorOutputBuilderTests {
 
         let result = buildOutput(values: [], resolutions: [resolution])
 
-        #expect(result.diagnostics.count == 1)
-        #expect(result.diagnostics[0].message.contains("@Singleton providers cannot be async or throwing"))
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        // No `nonisolated(unsafe)`: the box is Sendable, unlike the instance a
+        // plain `static let` would hold.
+        #expect(result.output.contains(
+            "nonisolated static let apiService = ZerkAsyncBox<ApiService>()"))
+        #expect(result.output.contains("static func apiService() async -> ApiServicing"))
     }
 
     @Test("isolated providers resolve without a diagnostic")
@@ -488,7 +492,7 @@ struct GeneratorOutputBuilderTests {
         #expect(result.resolutions[0].isolation == .globalActor("MainActor"))
     }
 
-    @Test("a singleton whose dependency lives in another domain emits a diagnostic")
+    @Test("a singleton whose dependency lives in another domain awaits it in the box")
     func crossDomainSingletonDependencyEmitsDiagnostic() {
         let store = makeResolution(
             typeName: "Store",
@@ -509,8 +513,14 @@ struct GeneratorOutputBuilderTests {
 
         let result = buildOutput(values: [], resolutions: [store, cache])
 
-        #expect(result.diagnostics.count == 1)
-        #expect(result.diagnostics[0].message.contains("crosses an isolation boundary"))
+        // Once the instance lives in an async box, the crossing is just an
+        // `await` inside the construction closure — which is a place an `await`
+        // is legal, unlike a `static let` initializer.
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        // The construction is awaited too: `Cache` is @MainActor and the box's
+        // closure is @Sendable, so it hops rather than inheriting.
+        #expect(result.output.contains(
+            "return await _$zerk_singletons.cache.value { await Cache(store: await Zerk<Store>.inject()) }"))
     }
 
     @Test("a nonisolated dependency reaches an isolated singleton for free")

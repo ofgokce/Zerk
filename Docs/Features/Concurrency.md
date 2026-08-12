@@ -115,15 +115,61 @@ protocol ApiServicing: Sendable { ... }   // actors conform automatically
 
 ## Kept instances
 
-`@Singleton` storage mirrors provider isolation the same way, and a singleton whose dependency lives in a different domain is a build error, because resolving it would need `await` and a `static let` initializer cannot. See [`@Singleton`](../Macros%20and%20Markers/Singleton.md).
-
-[`@Scoped`](../Macros%20and%20Markers/Scoped.md) is refused in exactly the same case, for a different reason: a scoped instance is built while its box holds a lock — that is what makes it exactly-once under a race — and a lock cannot be held across an `await`. The message says which of the two you are looking at.
+`@Singleton` storage mirrors provider isolation the same way. See [`@Singleton`](../Macros%20and%20Markers/Singleton.md).
 
 Their *storage* differs, and only one of the two needs an escape hatch. A singleton's slot holds the instance itself, so it carries `nonisolated(unsafe)` when the provider is nonisolated. A scoped slot holds a `ZerkScopedBox`, which is already `Sendable` and locks internally, so it takes a plain isolation prefix instead. Both are pinned rather than left bare, because `SWIFT_DEFAULT_ACTOR_ISOLATION` would otherwise make an unannotated slot `@MainActor` and put it out of reach of a nonisolated member.
 
 The construction of a scoped instance runs in the *member's* domain rather than the box's: `ZerkScopedBox.value` is nonisolated and takes a non-`Sendable`, non-escaping closure, and a synchronous nonisolated call does not switch isolation. So a `@MainActor` scoped type is built on the main actor, inside the lock, while `Zerk.reset(_:)` stays callable from anywhere.
 
 Either kind crossing an isolation boundary must be `Sendable`, for the same reason: it is shared, so its region is not disconnected. Zerk emits the explanatory check described in [Diagnostics](../Plugin/Diagnostics.md#the-one-diagnostic-that-is-not-zerks) wherever that happens.
+
+## Kept instances that have to await
+
+Neither storage above can suspend: a `static let` initializer has no suspension point, and `ZerkScopedBox` builds *while holding its lock*, which is what makes it exactly-once and is exactly what a lock may not do across an `await`.
+
+So a kept instance whose construction carries any effect is stored in a `ZerkAsyncBox` instead. That covers three cases, and they all reach it the same way:
+
+- the provider is `async` or `throws`;
+- a dependency is `async` or `throws`;
+- a dependency lives in a *different* isolation domain, so resolving it needs `await`.
+
+```swift
+@Singleton
+@Injectable<Connecting>
+final class Client: Connecting, @unchecked Sendable {
+    init() async throws { … }
+}
+```
+```swift
+private enum _$zerk_singletons {
+    nonisolated static let client = ZerkAsyncBox<Client>()
+}
+
+extension Zerk<Connecting> {
+    nonisolated static func client() async throws -> Connecting {
+        …
+        return try await _$zerk_singletons.client.value { try await Client() }
+    }
+}
+```
+
+### What changes for you
+
+**Reading it becomes `async`** — a member, not a `var` — and that propagates: `inject()` is `async`, and every consumer resolves it in its body rather than in a default argument, since `await` is illegal in one. [`@Injected`](../Macros%20and%20Markers/Injected.md) cannot resolve it at all, for the reason it cannot resolve any async chain; use `await Zerk<Key>.inject()`.
+
+**Reading is `async` even when the construction only `throws`.** Building it throws; *joining* the one build is what suspends. A throwing kept instance therefore reads as `async throws`.
+
+**The instance must be `Sendable`.** The box coordinates callers through a `Task`, whose result the standard library requires to be `Sendable`. In practice this excludes nothing worth keeping — a global-actor-isolated class is implicitly `Sendable`, an `actor` is, and the `@unchecked Sendable` a shared instance already needs still applies. The one shape it rules out, a nonisolated non-`Sendable` class, is the one that should not be shared to begin with. Zerk cannot see conformances, so this failure comes from the compiler at the storage slot.
+
+**Construction hops into its own domain.** The closure the box is handed is `@Sendable`, so unlike `ZerkScopedBox`'s synchronous closure it does *not* inherit the member's isolation — it runs on the build's task. A `@MainActor` type is still constructed on the main actor, by an `await` Zerk emits into the closure.
+
+### What it still guarantees
+
+Concurrent callers get **one** instance: the first stores its `Task`, and everyone arriving while it runs awaits that same `Task` rather than starting a second build. The lock is taken only to move the state, never across the `await`.
+
+A **failed** build is not remembered. The next caller tries again, and every caller waiting on a failing build receives that failure. A kept instance poisoned for the process by one timed-out connection would be the worse default, and a caller that wants the failure remembered can remember it.
+
+`Zerk.reset(_:)` stays **synchronous** and clears these boxes like any other. A build already in flight is not cancelled — whoever is awaiting it still receives that instance — but it is not kept, so the next resolution starts a new build.
 
 ---
 

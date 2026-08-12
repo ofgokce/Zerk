@@ -74,9 +74,9 @@ Generic injectables have their own rules — three ways to register one, and wha
 
 ### `@Singleton` and `@Scoped` constraints
 
-Reference types only; provider must be synchronous and non-throwing; no external arguments; no dependency in a different isolation domain, since resolving one would need `await`; exactly one provider per key, and the *same* provider across every key the type claims. One injectable under several keys must be built by an initializer or by a factory returning the concrete type — its one instance is stored once and read through every key. Neither can be applied to a generic type: the storage is a static stored property, so there is nowhere to keep one instance per specialization.
+Reference types only; no external arguments; exactly one provider per key, and the *same* provider across every key the type claims. One injectable under several keys must be built by an initializer or by a factory returning the concrete type — its one instance is stored once and read through every key. Neither can be applied to a generic type: the storage is a static stored property, so there is nowhere to keep one instance per specialization.
 
-The two differ only in *why* the provider must be synchronous — a singleton's storage is a `static let`, a scoped instance is built under its box's lock — and that is what each message says.
+An `async` or `throws` provider, or one whose dependency is effectful or lives in another isolation domain, is allowed: the instance moves from a `static let` or a `ZerkScopedBox` into a `ZerkAsyncBox`. What it costs is that *reading* it becomes `async` — including when the construction only throws, since joining the one build is what suspends — and that the instance must be `Sendable`, which the box's `Task` requires. See [Concurrency](../Features/Concurrency.md#kept-instances-that-have-to-await).
 
 ### A scope reachable from a nonisolated member must itself be `nonisolated`
 

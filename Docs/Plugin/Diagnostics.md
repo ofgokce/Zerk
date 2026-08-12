@@ -34,9 +34,7 @@ diagnostics above — no build sees both. See
 | What triggers it | The fix |
 |---|---|
 | `@Singleton` on a struct or enum | Reference types only (`class` or `actor`) |
-| A singleton's provider is `async` or `throws` | Singleton storage is initialized synchronously — drop the effects, or drop `@Singleton` |
 | A singleton's provider takes external arguments | A singleton is built once, so there is no call site to supply them |
-| A singleton depends on something in a different isolation domain | Resolving it would need `await`. Make the dependency share the singleton's isolation, or drop `@Singleton` and resolve through `inject()` |
 | A singleton declares more than one provider for one key | A singleton has exactly one provider in total — the same one for every key it claims — keep whichever builds the shared instance |
 | A singleton resolves to different providers for different keys | One instance means one provider across all its keys |
 | A multi-key singleton whose provider returns a key rather than the concrete type | The provider must return the concrete type — storage typed as one key cannot serve the others |
@@ -46,7 +44,9 @@ A singleton that crosses an isolation boundary is checked for `Sendable` — see
 
 ## Scopes
 
-Every constraint in the table above applies to [`@Scoped`](../Macros%20and%20Markers/Scoped.md) too, worded for it — a kept instance is a kept instance, however long it is kept. The reason for the "no `async`/`throws`" rule differs and the message says so: a scoped instance is built while its box holds a lock, and a lock cannot be held across an `await`.
+Every constraint in the table above applies to [`@Scoped`](../Macros%20and%20Markers/Scoped.md) too, worded for it — a kept instance is a kept instance, however long it is kept.
+
+An `async` or `throws` provider is **not** a constraint any more, for either: the instance moves into a `ZerkAsyncBox` and reading it becomes `async`. See [Concurrency](../Features/Concurrency.md#kept-instances-that-have-to-await).
 
 These are `@Scoped`'s own:
 

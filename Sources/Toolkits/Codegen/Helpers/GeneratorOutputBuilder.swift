@@ -114,6 +114,14 @@ struct GeneratorOutputBuilder {
         let isolation: ProviderIsolation
         /// `nil` for a singleton; the scope it is kept for otherwise.
         let scope: InjectionScopeRecord?
+        /// What building the instance costs — the provider's own effects merged
+        /// with its dependencies'.
+        ///
+        /// `.none` is the ordinary case and keeps the synchronous storage. Any
+        /// effect at all moves the instance into a ``ZerkAsyncBox``, because
+        /// neither a `static let` initializer nor a lock-held `build()` can
+        /// await.
+        var effects: ProviderEffects = .none
         /// The `#if` the owning type is declared under, which the storage slot
         /// is emitted under too — it names the type, so it cannot outlive it.
         var condition: CompilationCondition = .unconditional
@@ -799,10 +807,6 @@ struct GeneratorOutputBuilder {
                                     classification: ProviderClassification,
                                     diagnostics: inout [CodegenDiagnostic]) -> SharedStorage? {
         let attribute = provider.sharingAttributeName
-        // Why "once, synchronously" is not negotiable for this lifetime.
-        let synchronyReason = provider.isSingleton
-            ? "a singleton's storage is initialized synchronously"
-            : "a scoped instance is built while its box holds a lock, so that exactly one is built however many callers race — and a lock cannot be held across an 'await'"
 
         if !classification.isFullyResolvable {
             diagnostics.append(CodegenDiagnostic(
@@ -813,34 +817,12 @@ struct GeneratorOutputBuilder {
             return nil
         }
 
-        if provider.provider.effects.isAsync || provider.provider.effects.isThrowing {
-            diagnostics.append(CodegenDiagnostic(
-                severity: .error,
-                message: "\(attribute) providers cannot be async or throwing: \(synchronyReason).",
-                location: provider.provider.location
-            ))
-            return nil
-        }
-
-        // A dependency that has to be resolved in the body has no legal
-        // generated form here. This fires only when two distinct domains
-        // collide: nonisolated dependencies reach an isolated instance for free.
-        if classification.requiresSplit {
-            let crossings = classification.bodyResolved.map(\.parameter.typeName).joined(separator: ", ")
-            let reason = classification.hasIsolationCrossing
-                ? "resolving '\(crossings)' crosses an isolation boundary, which requires 'await'"
-                : "resolving '\(crossings)' is async or throwing"
-            diagnostics.append(CodegenDiagnostic(
-                severity: .error,
-                message: "\(attribute) '\(provider.typeName)' cannot be built: \(reason), but \(synchronyReason). Make the dependency share '\(provider.typeName)'s isolation, or drop \(attribute) and resolve it through inject().",
-                location: provider.provider.location
-            ))
-            return nil
-        }
-
         diagnostics += stalenessDiagnostics(for: provider, classification: classification)
 
-        let defaults = classification.defaultExpressions
+        // Everything resolvable, not just what a default argument could hold: an
+        // effectful construction is emitted inside the box's closure, where an
+        // `await` is legal.
+        let defaults = classification.resolvedExpressions
 
         // Every other provider is *called*, so the parentheses are
         // unconditional there. An `@Injectable` static property is read, and
@@ -855,6 +837,7 @@ struct GeneratorOutputBuilder {
             construction: construction,
             isolation: provider.isolation,
             scope: provider.scope,
+            effects: provider.provider.effects.merged(with: classification.dependencyEffects),
             condition: provider.condition
         )
     }
@@ -937,6 +920,18 @@ struct GeneratorOutputBuilder {
         var lines = ["private enum \(Self.singletonStorageEnumName) {"]
 
         for entry in entries {
+            // An effectful build cannot happen in a `static let` initializer, so
+            // the slot holds a box and the construction moves to the member.
+            // The box is Sendable, so the `nonisolated(unsafe)` the plain form
+            // needs does not apply — but the slot is still pinned to the
+            // member's isolation, for the reason `scopedStorageLines` gives.
+            guard entry.effects == .none else {
+                lines += Self.guarded(
+                    ["    \(entry.isolation.declarationPrefix)static let \(entry.memberName) = ZerkAsyncBox<\(entry.typeName)>()"],
+                    by: entry.condition)
+                continue
+            }
+
             switch entry.isolation {
             case .nonisolated:
                 // `static let` initialization is thread-safe in the Swift
@@ -997,8 +992,11 @@ struct GeneratorOutputBuilder {
 
         for entry in entries {
             let scope = entry.scope?.expression ?? ""
+            // `ZerkScopedBox` builds under its lock, which an effectful build
+            // cannot do. Same storage, same reset, different box.
+            let box = entry.effects == .none ? "ZerkScopedBox" : "ZerkAsyncBox"
             lines += Self.guarded(
-                ["    \(entry.isolation.declarationPrefix)static let \(entry.memberName) = ZerkScopedBox<\(entry.typeName)>(scope: \(scope))"],
+                ["    \(entry.isolation.declarationPrefix)static let \(entry.memberName) = \(box)<\(entry.typeName)>(scope: \(scope))"],
                 by: entry.condition)
         }
 
@@ -1027,17 +1025,63 @@ struct GeneratorOutputBuilder {
                                      memberName: String,
                                      point: String,
                                      storage: SharedStorage) -> [String] {
+        let namespace = storage.scope == nil
+            ? Self.singletonStorageEnumName
+            : Self.scopedStorageEnumName
+
+        guard storage.effects == .none else {
+            // Reading an effectful kept instance is `async` even when only the
+            // construction throws: the box coordinates concurrent callers onto
+            // one build, and joining that build is what suspends.
+            let read = Self.keptReadEffects(storage.effects)
+            var lines = [
+                "    \(provider.isolation.declarationPrefix)\(access)static func \(memberName)()\(read.declarationSuffix) -> \(displayName(for: injectableKey)) {"
+            ]
+            lines += interjectionGuardLines(point: "`\(point)`")
+            // Two effect prefixes, and they are not the same one: the outer
+            // belongs to joining the build, the inner to the construction the
+            // box is handed.
+            //
+            // The inner is the provider's own effects *plus a hop into its own
+            // domain*. The closure is `@Sendable`, so it does not inherit the
+            // member's isolation the way `ZerkScopedBox`'s synchronous closure
+            // does — it runs on the build's task, and reaching a global-actor
+            // isolated initializer from there costs an `await`. What it must
+            // not include is the dependencies' effects: those already carry
+            // their own `try`/`await` inside the construction, and prefixing
+            // the whole expression again would await a call that never
+            // suspends.
+            let construction = provider.provider.effects.merged(
+                with: ProviderEffects(isAsync: provider.isolation.isGlobalActor, isThrowing: false))
+            lines.append("        return \(read.callPrefix)\(namespace).\(storage.memberName).value { \(construction.callPrefix)\(storage.construction) }")
+            lines.append("    }")
+            return lines
+        }
+
         var lines = [
             "    \(provider.isolation.declarationPrefix)\(access)static var \(memberName): \(displayName(for: injectableKey)) {"
         ]
         lines += interjectionGuardLines(point: "`\(point)`")
         if storage.scope == nil {
-            lines.append("        return \(Self.singletonStorageEnumName).\(storage.memberName)")
+            lines.append("        return \(namespace).\(storage.memberName)")
         } else {
-            lines.append("        return \(Self.scopedStorageEnumName).\(storage.memberName).value { \(storage.construction) }")
+            lines.append("        return \(namespace).\(storage.memberName).value { \(storage.construction) }")
         }
         lines.append("    }")
         return lines
+    }
+
+    /// What *reading* a kept instance costs, given what *building* it costs.
+    ///
+    /// Not the same thing, and the difference is the box. A construction that
+    /// merely throws still goes through ``ZerkAsyncBox``, because a `static let`
+    /// cannot hold a failure and re-attempt it — so reading it is `async throws`
+    /// where building it was only `throws`. A construction with no effects at
+    /// all keeps its synchronous storage and reads for free.
+    static func keptReadEffects(_ building: ProviderEffects) -> ProviderEffects {
+        building == .none
+            ? .none
+            : ProviderEffects(isAsync: true, isThrowing: building.isThrowing)
     }
 
     /// Where a `sending` return would go.
@@ -1330,14 +1374,15 @@ struct GeneratorOutputBuilder {
         let memberName = memberName(for: provider)
         let isolation = provider.isolation
         let generics = genericClauses(for: provider, injectableKey: injectableKey)
-        // A kept instance's member is always a `var` reading its storage,
-        // whatever shape its provider had — so it is read, never called.
-        let memberIsCallable =
-            !provider.isShared &&
-            (provider.memberIsGeneric ||
-             !provider.provider.parameters.isEmpty ||
-             provider.provider.effects.isAsync ||
-             provider.provider.effects.isThrowing)
+        // A kept instance's member is a `var` reading its storage, whatever
+        // shape its provider had — unless building it carries effects, in which
+        // case it is a function that awaits the box.
+        let memberIsCallable = provider.isShared
+            ? plan.effects != .none
+            : (provider.memberIsGeneric ||
+               !provider.provider.parameters.isEmpty ||
+               provider.provider.effects.isAsync ||
+               provider.provider.effects.isThrowing)
 
         let accessPrefix = exportedAccessPrefix(for: provider, injectableKey: injectableKey)
         if provider.isExported, accessPrefix.isEmpty {
@@ -2403,7 +2448,11 @@ struct GeneratorOutputBuilder {
                         : "Zerk<\(call.typeName)>.inject(\(arguments.joined(separator: ", ")))")
                 return "\(call.prefix)\(resolved)"
             },
-            effects: effects,
+            // A kept instance is *read*, and reading it costs what the box
+            // charges rather than what the construction did. Applied here so
+            // every consumer of the plan agrees — `inject()`, a default
+            // argument, an `@injected` overload, and the `@Injected` refusal.
+            effects: resolution.isShared ? Self.keptReadEffects(effects) : effects,
             collisions: bubble.collisions
         )
     }

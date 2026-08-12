@@ -453,26 +453,28 @@ struct ScopedTests {
         #expect(errors.first?.message.contains("@Scoped injectables cannot accept external arguments") == true)
     }
 
-    @Test("an async or throwing scoped provider is refused")
-    func scopedWithEffectsIsRefused() {
+    @Test("an async scoped provider is kept in an async box")
+    func scopedWithEffectsUsesAsyncBox() {
         let source = """
         \(Self.scopeDeclarations)
 
         @Scoped(.session)
         @Injectable
-        final class Thing {
+        final class Thing: @unchecked Sendable {
             @InjectableProviding
             static func make() async -> Thing { Thing() }
         }
         """
 
         let result = CompileFixture.generateWithResolution(source: source)
-        let errors = result.diagnostics.filter { $0.severity == .error }
-        #expect(errors.count == 1)
-        #expect(errors.first?.message.contains("@Scoped providers cannot be async or throwing") == true)
-        // The reason is the box's lock, not a `static let` initializer — the
-        // singleton's wording would be wrong here.
-        #expect(errors.first?.message.contains("cannot be held across an 'await'") == true)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        // `ZerkScopedBox` builds under its lock, which cannot span an await, so
+        // an effectful scoped type takes the other box — same slot, same scope.
+        #expect(result.output.output.contains(
+            "nonisolated static let thing = ZerkAsyncBox<Thing>(scope: .session)"))
+        #expect(result.output.output.contains(
+            "return await _$zerk_scoped.thing.value { await Thing.make() }"))
     }
 
     @Test("two providers for one scoped key are refused")

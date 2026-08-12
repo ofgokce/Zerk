@@ -126,16 +126,55 @@ private enum _$zerk_singletons {
 }
 ```
 
-Singletons stay synchronous and non-throwing, so a singleton whose dependency lives in a
-*different* domain is a build error — resolving it would need `await`, and a `static let`
-initializer cannot. A nonisolated dependency reaching an isolated singleton is free; the error
-fires only when two distinct domains collide:
+A nonisolated dependency reaching an isolated singleton is free, as above. When two distinct
+domains collide, resolving the dependency needs `await` — which a `static let` initializer
+cannot do, so the instance moves into a `ZerkAsyncBox` and reading it becomes `async`:
 
+```swift
+private enum _$zerk_singletons {
+    @MainActor static let cache = ZerkAsyncBox<Cache>()
+}
+
+extension Zerk<Cache> {
+    @MainActor static func cache() async -> Cache {
+        …
+        return await _$zerk_singletons.cache.value { await Cache(store: await Zerk<Store>.inject()) }
+    }
+}
 ```
-error: @Singleton 'Cache' cannot be built: resolving 'Store' crosses an isolation boundary,
-which requires 'await', but a singleton's storage is initialized synchronously. Make the
-dependency share 'Cache's isolation, or drop @Singleton and resolve it through inject().
+
+See [Concurrency](../Features/Concurrency.md#kept-instances-that-have-to-await) for when that
+happens and what it costs.
+
+## Async and throwing construction
+
+A `@Singleton` whose construction has to `await` — a client that connects, a store that opens a
+file — is stored the same way:
+
+```swift
+@Singleton
+@Injectable<Connecting>
+final class Client: Connecting, @unchecked Sendable {
+    init() async throws { … }
+}
 ```
+
+```swift
+private enum _$zerk_singletons {
+    nonisolated static let client = ZerkAsyncBox<Client>()
+}
+
+extension Zerk<Connecting> {
+    nonisolated static func client() async throws -> Connecting {
+        …
+        return try await _$zerk_singletons.client.value { try await Client() }
+    }
+}
+```
+
+Three things follow, all covered in [Concurrency](../Features/Concurrency.md#kept-instances-that-have-to-await):
+the instance must be `Sendable`, concurrent callers still get exactly one, and a *failed*
+construction is not remembered — the next caller tries again.
 
 ## Interjection
 
@@ -203,7 +242,6 @@ The corresponding errors, in Zerk's own words:
 | `@Singleton` on a struct or enum | `@Singleton can only be applied to reference types (class or actor).` |
 | `@Singleton` on a generic `@Injectable` declaration | `@Singleton cannot be applied to the generic type 'Box'. …` |
 | a provider with a parameter the graph cannot satisfy | `@Singleton injectables cannot accept external arguments.` |
-| an `async` or `throws` provider | `@Singleton providers cannot be async or throwing.` |
 | two providers for one key | `@Singleton 'Loader' declares multiple providers for 'Loading'. A singleton is stored once and read through every key it claims, so it has exactly one provider in total — not one per key. Keep whichever builds the shared instance.` |
 | a different factory per key | `@Singleton 'Dep' resolves to different providers for … A singleton has one instance, so it must have one provider across all its keys.` |
 | a multi-key factory returning a key | `@Singleton 'Dep' is injectable under 2 keys, so its provider must return 'Dep' rather than 'TypeA'. One instance is shared by every key, and storage typed 'TypeA' cannot serve the others.` |

@@ -393,13 +393,14 @@ struct InjectableDeclarationTests {
         // An external argument cannot be supplied to storage built once.
         ("@Singleton\n@Injectable(typeNamed: true)\nfunc make(port: Int) -> Session { Session() }",
          "cannot accept external arguments"),
-        // Storage is initialized synchronously.
-        ("@Singleton\n@Injectable\nvar session: Session { get async { Session() } }",
-         "cannot be async or throwing"),
         // No static stored property exists to hold one per specialization.
         ("@Singleton\n@Injectable(typeNamed: true)\nfunc make<X>(x: X) -> Box<X> { Box() }",
          "@Singleton cannot be applied to the generic type"),
     ])
+    ///
+    /// The async constraint is deliberately absent: an effectful declaration is
+    /// no longer refused, it moves into a `ZerkAsyncBox`. See
+    /// ``asyncSingletonDeclarationIsKeptInABox``.
     func singletonConstraintsStillApply(source: String, message: String) {
         let result = CompileFixture.generateWithResolution(source: """
         final class Session { init() {} }
@@ -411,6 +412,32 @@ struct InjectableDeclarationTests {
         #expect(result.diagnostics.contains {
             $0.severity == .error && $0.message.contains(message)
         })
+    }
+
+    @Test("an async singleton declaration is kept in an async box")
+    func asyncSingletonDeclarationIsKeptInABox() throws {
+        let source = """
+        final class Session: @unchecked Sendable { init() {} }
+
+        @Singleton
+        @Injectable
+        var session: Session { get async { Session() } }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains(
+            "nonisolated static let session = ZerkAsyncBox<Session>()"))
+        // A declaration is reached through its thunk here exactly as it is when
+        // transient — the box changes where the value is kept, not how it is
+        // built.
+        #expect(result.output.output.contains(
+            "return await _$zerk_singletons.session.value { await _$zerk_provider_session() }"))
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, "\(compiled.compilerOutput)\n\(compiled.generated)")
     }
 
     // MARK: - Isolation
