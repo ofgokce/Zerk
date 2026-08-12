@@ -184,7 +184,9 @@ struct PackageGraphTests {
         let mermaid = try GraphRenderer(graph: merged).render(.mermaid)
 
         #expect(mermaid.hasPrefix("graph LR"))
-        #expect(mermaid.contains("subgraph Core"))
+        // Quoted and given a positional identifier, so a title needing escaping
+        // survives the parser.
+        #expect(mermaid.contains("subgraph cluster0[\"Core\"]"))
         #expect(mermaid.contains("m1k1 --> m1k0"))
         #expect(mermaid.contains("m1k0 -.-> m0k0"))
     }

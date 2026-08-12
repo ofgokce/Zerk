@@ -265,23 +265,24 @@ struct AsyncKeptInstanceTests {
         }, "\(result.diagnostics.map(\.message))")
     }
 
-    /// `Task`'s result must be `Sendable`, so the box constrains its value. The
-    /// plugin cannot see conformances, so this is the compiler's error to raise
-    /// — the test's job is to prove it *is* raised rather than silently accepted.
-    @Test("a non-Sendable async kept instance is rejected by the compiler")
-    func nonSendableAsyncKeptInstanceFailsToCompile() throws {
+    /// Gaining an effect must not narrow what may be kept. A `Task`'s result has
+    /// to be `Sendable`, which would impose a constraint the synchronous slot
+    /// does not — so the box carries the value past it, on the same contract
+    /// `@Singleton` already documents: sharing *across domains* is what requires
+    /// `Sendable`, and that is checked where it happens.
+    @Test("a non-Sendable kept instance is accepted, async or not", arguments: ["", "async"])
+    func nonSendableKeptInstanceIsAccepted(effect: String) throws {
         let result = try CompileFixture.run(source: """
         @Singleton
         @Injectable
         final class Client {
             var mutable = 0
-            init() async {}
+            init() \(effect) {}
         }
         """)
 
         try #require(!result.skipped)
-        #expect(!result.didCompile)
-        #expect(result.compilerOutput.contains("Sendable"), Comment(rawValue: result.compilerOutput))
+        #expect(result.didCompile, "\(result.compilerOutput)\n\(result.generated)")
     }
 
     private func expectCompiles(_ source: String,

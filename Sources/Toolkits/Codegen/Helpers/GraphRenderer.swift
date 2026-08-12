@@ -75,13 +75,25 @@ struct GraphRenderer {
             let detailWidth = rows.map(\.1.count).max() ?? 0
 
             for (key, detail, location) in rows {
-                let padded = key.padding(toLength: max(keyWidth, key.count), withPad: " ", startingAt: 0)
-                let paddedDetail = detail.padding(toLength: max(detailWidth, detail.count), withPad: " ", startingAt: 0)
+                let padded = Self.padded(key, to: keyWidth)
+                let paddedDetail = Self.padded(detail, to: detailWidth)
                 lines.append(Self.trimmingTrailingSpaces("  \(padded)  \(paddedDetail)  \(location)"))
             }
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    /// Pads to a width measured in `Character`s.
+    ///
+    /// Deliberately not `String.padding(toLength:withPad:startingAt:)`, which is
+    /// the `NSString` method and counts UTF-16 code units — so for any key whose
+    /// UTF-16 length exceeds its `Character` count it *truncates*, printing a
+    /// name that matches no declaration. A legal Swift identifier can contain an
+    /// emoji or a combining sequence, and `Café` written with a combining accent
+    /// is exactly that.
+    static func padded(_ text: String, to width: Int) -> String {
+        text + String(repeating: " ", count: max(0, width - text.count))
     }
 
     /// An imported key has no location, so its row would otherwise end in the
@@ -204,8 +216,13 @@ struct GraphRenderer {
         let ids = identifiers
         var lines = ["graph LR"]
 
-        for module in graph.modules {
-            lines.append("    subgraph \(mermaidEscaped(module.name))")
+        for (index, module) in graph.modules.enumerated() {
+            // Quoted, like every node label, and given an identifier of its own
+            // for the same reason node identifiers are positional. The escaper's
+            // entities are only interpreted inside a quoted string, so a bare
+            // title showed `My#amp;Module` verbatim — and a title needing no
+            // escaping could still break the parser on a space.
+            lines.append("    subgraph cluster\(index)[\"\(mermaidEscaped(module.name))\"]")
             for key in module.keys {
                 guard let id = ids[module.name]?[key.key] else { continue }
                 lines.append("        \(id)[\"\(mermaidEscaped(label(for: key)))\"]")

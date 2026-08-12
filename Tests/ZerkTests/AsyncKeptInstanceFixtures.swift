@@ -102,6 +102,21 @@ nonisolated final class FlakyGate: @unchecked Sendable {
     }
 }
 
+/// A plain, non-`Sendable` class kept across an `await`.
+///
+/// Its existence is the test: gaining an `async` provider must not narrow what
+/// may be kept, so this has to *compile*. A `Task`'s result must be `Sendable`,
+/// which is why `ZerkAsyncBox` carries the value past that requirement rather
+/// than constraining it — the synchronous slot accepts exactly this shape.
+@Singleton
+@Injectable
+final class NonSendableAsyncClient {
+    var mutable = 0
+
+    @InjectableProviding
+    init() async {}
+}
+
 @Scoped(.fixtureFlaky)
 @Injectable
 final class FlakyResource: @unchecked Sendable {

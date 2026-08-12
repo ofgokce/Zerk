@@ -81,6 +81,30 @@ final class C {
 // }
 ```
 
+### Methods declared in an extension
+
+A method in an `extension` is marked the same way, and its overload lands in an extension of
+the same type:
+
+```swift
+extension Service {
+    func run(@injected repo: Repo, id: Int) -> Int { ... }
+}
+
+// generated:
+// extension Service {
+//     nonisolated func run(id: Int) -> Int {
+//         run(repo: Zerk<Repo>.inject(), id: id)
+//     }
+// }
+```
+
+An **initializer** in an extension is refused. The generated overload has to delegate with
+`self.init(…)`, and that must say `convenience` when the extended type is a class and must not
+when it is a struct — a fact about a type Zerk may never see, since an extension can extend a
+type from another module. Declare the initializer on the type itself, or resolve the dependency
+in its body.
+
 ### Global functions
 
 A top-level `func` is marked the same way, and gets a file-scope overload rather than one in

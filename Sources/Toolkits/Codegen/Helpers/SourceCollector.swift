@@ -140,6 +140,7 @@ final class SourceCollector: SyntaxVisitor {
     /// `@Injectable` on an `extension` is refused. Children are still visited,
     /// since an `@InjectableValue` inside an extension is collected as usual.
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
+        collectMarkedExtensionMembers(node)
         if node.attributes.hasAttribute(named: "Injectable") {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
@@ -172,10 +173,11 @@ final class SourceCollector: SyntaxVisitor {
         // that type two shapes and the generated member only has one. Refused
         // here rather than in the resolver: this is the only place that still
         // knows the `#if` existed.
-        if !typeStack.isEmpty, ConditionalCompilation.gatesConstruction(node) {
+        if let enclosing = typeStack.last,
+           ConditionalCompilation.gatesConstruction(node, in: enclosing.kind) {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "'\(typeStack.last!.name)' builds differently per configuration: this #if gates an initializer or an @InjectableProviding provider. Zerk emits one member per provider and cannot give it two signatures — put the #if around the whole type instead, so each configuration registers its own, or give the type one provider that compiles in every configuration.",
+                message: "'\(enclosing.name)' is read differently per configuration: this #if gates an initializer, an @InjectableProviding provider, a stored property, or a member with @injected parameters. Zerk reads a type's members without expanding conditions, so what is inside would be missed — put the #if around the whole type instead, so each configuration declares its own, or move the condition inside the member's body where it changes no signature.",
                 location: location(for: Syntax(node))
             ))
         }
@@ -248,6 +250,7 @@ final class SourceCollector: SyntaxVisitor {
         typeStack.append(
             TypeContext(
                 name: node.declaredName,
+                kind: typeKind,
                 isolation: isolation,
                 sweptValueMethod: sweep.map { statedValueMethod($0) ?? settings.valueInjectionMethod },
                 sweptValuesArePublic: sweep?.publicArgument.isTrue ?? false,
@@ -463,17 +466,24 @@ final class SourceCollector: SyntaxVisitor {
                 continue
             }
             importedModules.insert(module)
-            // Asked for twice, the wider ask wins: an unconditional import is
-            // already correct wherever a conditional one would have been, and
-            // guarding it would drop the module from configurations that were
+            // Asked for twice, the wider ask wins: an import that is correct in
+            // more configurations is correct in all the narrower ones too, and
+            // guarding it would drop the module from a configuration that was
             // promised it.
+            //
+            // Two *different* conditions widen to unconditional rather than to
+            // their disjunction. The disjunction would be exact, but it is only
+            // reachable when the same module is asked for under conditions that
+            // do not match — and an unnecessary import is a warning at worst,
+            // while a missing one does not compile. Keeping the first was also
+            // order-dependent, so which ask survived depended on which file the
+            // collector reached first.
             let condition = currentCondition
-            if let existing = moduleImportConditions[module] {
-                if !condition.isUnconditional, existing != condition {
-                    continue
-                }
+            if let existing = moduleImportConditions[module], existing != condition {
+                moduleImportConditions[module] = .unconditional
+            } else {
+                moduleImportConditions[module] = condition
             }
-            moduleImportConditions[module] = condition
         }
     }
 
@@ -1861,6 +1871,64 @@ final class SourceCollector: SyntaxVisitor {
     /// the stack is also empty inside a global `var`'s accessor — and a function
     /// declared there is local, so nothing outside the file could call the
     /// overload.
+    /// `@injected` members of an `extension`, whose overload belongs in an
+    /// extension of the same type rather than at file scope.
+    ///
+    /// Kept apart from ``collectMarkedMembers(_:typeKind:typeIsGeneric:)``
+    /// because an extension is not a declaration Zerk registers: it has no kind
+    /// of its own, and the type it extends may be declared in another module.
+    /// Only what can be generated without knowing that is collected.
+    private func collectMarkedExtensionMembers(_ node: ExtensionDeclSyntax) {
+        let extendedType = node.extendedType.trimmedDescription
+        let typeIsolation = statedIsolation(modifiers: node.modifiers, attributes: node.attributes)
+            .resolved(default: ambientIsolation)
+
+        for member in node.memberBlock.members {
+            if let initializer = member.decl.as(InitializerDeclSyntax.self),
+               initializer.signature.parameterClause.parameters.contains(where: {
+                   $0.attributes.contains { element in
+                       guard case .attribute(let attribute) = element else { return false }
+                       return ConditionalCompilation.markerAttributes.contains(attribute.name)
+                   }
+               }) {
+                // The generated overload would have to delegate with
+                // `self.init(…)`, and a class's extension initializer must say
+                // `convenience` while a struct's must not. Which one is a fact
+                // about a type Zerk may never see.
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "@injected parameters are not supported on an initializer declared in an extension of '\(extendedType)'. Zerk cannot tell whether the generated overload needs 'convenience', which depends on whether '\(extendedType)' is a class — declare the initializer on the type itself, or resolve the dependency in its body.",
+                    location: location(for: Syntax(initializer))
+                ))
+                continue
+            }
+
+            guard let function = member.decl.as(FunctionDeclSyntax.self) else {
+                continue
+            }
+            collectMarkedMember(
+                parameters: function.signature.parameterClause.parameters,
+                kind: .method(
+                    name: function.name.text,
+                    isStatic: function.modifiers.isStatic,
+                    returnType: function.signature.returnClause?.type.trimmedDescription
+                ),
+                effects: ProviderEffects(from: function.signature.effectSpecifiers?.trimmedDescription),
+                memberIsGeneric: function.genericParameterClause != nil,
+                modifiers: function.modifiers,
+                typeName: extendedType,
+                typeKind: nil,
+                typeIsGeneric: node.genericWhereClause != nil,
+                typeAccess: node.modifiers.accessRank,
+                isolation: .explicit(statedIsolation(
+                    modifiers: function.modifiers,
+                    attributes: function.attributes
+                ).resolved(default: typeIsolation)),
+                location: location(for: Syntax(function))
+            )
+        }
+    }
+
     private func collectMarkedGlobalFunction(_ node: FunctionDeclSyntax) {
         guard typeStack.isEmpty, Self.isTopLevel(node) else {
             return
@@ -1908,7 +1976,13 @@ final class SourceCollector: SyntaxVisitor {
             }
             if ancestor.is(CodeBlockSyntax.self)
                 || ancestor.is(AccessorDeclSyntax.self)
-                || ancestor.is(ClosureExprSyntax.self) {
+                || ancestor.is(ClosureExprSyntax.self)
+                // A member of a type or an extension. `typeStack` catches the
+                // type case, since entering one pushes a frame — but an
+                // `extension` pushes nothing, so without this a method in one
+                // was collected as a global and the generated overload landed
+                // at file scope, calling a method that is not there.
+                || ancestor.is(MemberBlockSyntax.self) {
                 return false
             }
             current = ancestor.parent

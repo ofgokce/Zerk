@@ -465,7 +465,7 @@ struct ConditionalCompilationTests {
         """)
 
         #expect(result.diagnostics.contains {
-            $0.severity == .error && $0.message.contains("builds differently per configuration")
+            $0.severity == .error && $0.message.contains("is read differently per configuration")
         }, "\(result.diagnostics.map(\.message))")
     }
 
@@ -482,7 +482,7 @@ struct ConditionalCompilationTests {
         """)
 
         #expect(result.diagnostics.contains {
-            $0.severity == .error && $0.message.contains("builds differently per configuration")
+            $0.severity == .error && $0.message.contains("is read differently per configuration")
         }, "\(result.diagnostics.map(\.message))")
     }
 

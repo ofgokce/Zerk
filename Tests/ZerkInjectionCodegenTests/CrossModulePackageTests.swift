@@ -106,7 +106,7 @@ struct CrossModulePackageTests {
         try #require(result.status == 0, Comment(rawValue: result.error))
 
         #expect(result.out.hasPrefix("graph LR"))
-        #expect(result.out.contains("subgraph CrossCore"))
+        #expect(result.out.contains("[\"CrossCore\"]"))
         #expect(result.out.contains("-.->"))
     }
 

@@ -368,10 +368,10 @@ enum CompileFixture {
         nonisolated public func value(_ build: () -> Value) -> Value { build() }
     }
 
-    // The async counterpart. `Value: Sendable` is the load-bearing part to
-    // mirror — it is what a Task's result requires, and the reason a fixture
-    // with a non-Sendable kept instance must not type-check.
-    public final class ZerkAsyncBox<Value: Sendable>: @unchecked Sendable {
+    // The async counterpart. Deliberately *unconstrained*, like the real one:
+    // a kept instance is not required to be Sendable just because building it
+    // suspends, so a fixture with a non-Sendable one must still type-check.
+    public final class ZerkAsyncBox<Value>: @unchecked Sendable {
         nonisolated public let scope: InjectionScope?
         nonisolated public init() { self.scope = nil }
         nonisolated public init(scope: InjectionScope) { self.scope = scope }

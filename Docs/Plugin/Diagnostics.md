@@ -28,7 +28,7 @@ diagnostics above — no build sees both. See
 | What triggers it | The fix |
 |---|---|
 | Two branches of one `#if` resolve a key with different effects, in different isolation domains, or leaving different arguments to the caller | Everything injecting the key resolves it through one `inject()` call emitted for every configuration, so the branches have to agree on what it costs. Make them match, or give the branches separate keys |
-| A `#if` inside an injectable type gates an initializer or an `@InjectableProviding` member | One type cannot have two provider shapes. Put the `#if` around the whole type, so each configuration registers its own |
+| A `#if` inside a type gates an initializer, an `@InjectableProviding` member, a stored property, or a member with `@injected` parameters | Zerk reads a type's members without expanding conditions, so what is inside would be missed. Put the `#if` around the whole type, or move the condition into the member's body where it changes no signature |
 
 ## Singletons
 
@@ -100,6 +100,10 @@ One failure Zerk cannot report lands in generated code instead: under `SWIFT_DEF
 | `#ZerkAlias` with fewer than two distinct types | It needs at least two types to relate, written `#ZerkAlias<A, B>()` — every listed type must be a distinct key |
 
 ## Parameter markers
+
+| What triggers it | The fix |
+|---|---|
+| `@injected` on an initializer declared in an `extension` | Whether the generated overload needs `convenience` depends on whether the extended type is a class, which Zerk may not be able to see. Declare the initializer on the type itself, or resolve the dependency in its body |
 
 | What triggers it | The fix |
 |---|---|

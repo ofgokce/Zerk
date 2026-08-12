@@ -1512,7 +1512,9 @@ struct GeneratorOutputBuilder {
         }
 
         var lines: [String] = []
-        var seenOverloads = Set<String>()
+        /// Overload signature -> the conditions it has already been emitted
+        /// under, so a clash is decided by what a single build sees.
+        var emittedOverloads: [String: [CompilationCondition]] = [:]
 
         // Globals group under `nil`, which has no ordering of its own — sorted
         // by the empty string so they come first, deterministically.
@@ -1677,7 +1679,16 @@ struct GeneratorOutputBuilder {
                     ]
                 }
 
-                if !seenOverloads.insert("\(overloadKey)|\(record.condition.guardText ?? "")").inserted {
+                // Keyed on exclusivity, not on the guard's *text*: two records
+                // under `#if DEBUG` and `#if os(macOS)` have different text and
+                // are both compiled on a macOS debug build, so comparing text
+                // would let a real redeclaration through — and replace a clear
+                // Zerk error with the compiler's.
+                let clash = emittedOverloads[overloadKey]?.contains {
+                    !CompilationCondition.areExclusive($0, record.condition)
+                } ?? false
+                emittedOverloads[overloadKey, default: []].append(record.condition)
+                if clash {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
                         message: "Two @injected \(typeName.map { "members of '\($0)'" } ?? "global functions") generate the same overload \(overloadKey). Differentiate the remaining parameters.",

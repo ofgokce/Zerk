@@ -157,8 +157,8 @@ struct CrossModuleGraphTests {
         let mermaid = try GraphRenderer(graph: merged).render(.mermaid)
         let dot = try GraphRenderer(graph: merged).render(.dot)
 
-        #expect(mermaid.contains("subgraph CrossCore"))
-        #expect(mermaid.contains("subgraph CrossFeature"))
+        #expect(mermaid.contains("[\"CrossCore\"]"))
+        #expect(mermaid.contains("[\"CrossFeature\"]"))
         // A dashed edge is what crossing a module boundary looks like.
         #expect(mermaid.contains("-.->"))
         #expect(dot.contains("[style=dashed, constraint=false];"))

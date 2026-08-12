@@ -211,33 +211,70 @@ extension ProviderResolver {
     /// The candidate sets that can be present together, one per configuration
     /// worth electing for.
     ///
-    /// A group is built from each distinct position: everything that is not
-    /// mutually exclusive with it. So `#if DEBUG` and `#else` yield two groups —
-    /// each with its own registration plus every unconditional one — while two
-    /// registrations that merely happen to be conditional yield a group holding
-    /// both, since nothing rules out a build that has them both.
+    /// Every group is **pairwise** compatible: no two of its members are
+    /// mutually exclusive. Taking "everything compatible with one pivot" is not
+    /// enough and was the bug — an unconditional candidate is compatible with
+    /// *both* clauses of a `#if`/`#else`, so pivoting on it produced a group
+    /// containing both branches, a configuration no build ever has. A fallback
+    /// registration plus a per-configuration override then collided with itself.
     ///
-    /// Identical groups collapse, so the common case of no `#if` at all is one
-    /// group of everything and the ordinary election runs unchanged.
+    /// Split by branch rather than by enumerating cliques. Exclusivity only ever
+    /// comes from two positions choosing different clauses of one `#if`, so
+    /// finding a branch the candidates disagree on and partitioning by clause
+    /// removes exactly one disagreement — and a candidate that does not mention
+    /// that `#if` belongs to every part. Recursion terminates because each level
+    /// settles one branch.
     static func coexisting(among candidates: [ProviderResolution]) -> [[ProviderResolution]] {
-        guard candidates.contains(where: { !$0.condition.isUnconditional }) else {
+        guard let branch = disputedBranch(among: candidates) else {
             return [candidates]
         }
 
         var groups: [[ProviderResolution]] = []
         var seen = Set<String>()
 
-        for candidate in candidates {
-            let group = candidates.filter {
-                !CompilationCondition.areExclusive($0.condition, candidate.condition)
+        for index in clauseIndices(of: branch, among: candidates) {
+            let part = candidates.filter { candidate in
+                guard let clause = candidate.condition.clauses.first(where: { $0.branch == branch }) else {
+                    // Outside this `#if` entirely, so present whichever clause
+                    // the configuration takes.
+                    return true
+                }
+                return clause.index == index
             }
-            let identity = group.map { String(describing: $0.provider.location) }.joined(separator: "|")
-            if seen.insert(identity).inserted {
-                groups.append(group)
+
+            for group in coexisting(among: part) {
+                let identity = group.map { String(describing: $0.provider.location) }.joined(separator: "|")
+                if seen.insert(identity).inserted {
+                    groups.append(group)
+                }
             }
         }
 
         return groups
+    }
+
+    /// A `#if` whose clauses these candidates do not agree on, or `nil` when
+    /// every candidate can coexist with every other.
+    static func disputedBranch(among candidates: [ProviderResolution]) -> String? {
+        var seen: [String: Int] = [:]
+        for candidate in candidates {
+            for clause in candidate.condition.clauses {
+                if let existing = seen[clause.branch], existing != clause.index {
+                    return clause.branch
+                }
+                seen[clause.branch] = clause.index
+            }
+        }
+        return nil
+    }
+
+    /// The clauses of `branch` these candidates actually occupy, in source
+    /// order, so the groups come out deterministically.
+    static func clauseIndices(of branch: String,
+                              among candidates: [ProviderResolution]) -> [Int] {
+        Set(candidates.compactMap { candidate in
+            candidate.condition.clauses.first(where: { $0.branch == branch })?.index
+        }).sorted()
     }
 
     /// Drops repeats, since one mistake reachable from two configurations is

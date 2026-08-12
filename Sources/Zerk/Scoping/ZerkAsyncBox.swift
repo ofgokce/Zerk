@@ -41,15 +41,26 @@ import Foundation
 /// every critical section here *has* to be a synchronous method — an `async`
 /// function cannot take the lock at all.
 ///
-/// ## `Value: Sendable`, unlike the synchronous boxes
+/// ## `Sendable`, on the same terms as the synchronous boxes
 ///
-/// A `Task`'s result crosses concurrency domains by definition, so the standard
-/// library requires it. In practice this excludes nothing worth keeping: a
-/// global-actor-isolated class is implicitly `Sendable`, an `actor` is
-/// `Sendable`, and the `@unchecked Sendable` a `@Singleton` already needs today
-/// still applies. What it does exclude — a nonisolated, non-`Sendable` class —
-/// is the one shape that should not be shared process-wide to begin with.
-public final class ZerkAsyncBox<Value: Sendable>: @unchecked Sendable {
+/// A `Task`'s result must be `Sendable`, which would put a constraint on `Value`
+/// that neither a `@Singleton`'s `static let` nor `ZerkScopedBox` imposes — so a
+/// type that is kept perfectly well today would stop being keepable the moment
+/// its provider gained an `async`. ``Payload`` carries the value past that
+/// requirement instead, on exactly the contract the synchronous storage already
+/// documents: a kept instance is shared, and sharing one *across isolation
+/// domains* requires it to be `Sendable`. That is checked where it actually
+/// happens, by the conformance check the plugin emits, rather than by
+/// constraining every kept instance whether it crosses a domain or not.
+public final class ZerkAsyncBox<Value>: @unchecked Sendable {
+
+    /// Carries the built value out of the build task.
+    ///
+    /// `@unchecked` for the reason above, and no wider than the
+    /// `nonisolated(unsafe)` a synchronous singleton's slot already carries.
+    private struct Payload: @unchecked Sendable {
+        let value: Value
+    }
 
     /// The scope this box is cleared by, or `nil` for a `@Singleton`, which
     /// belongs to no scope and is never reset.
@@ -57,7 +68,7 @@ public final class ZerkAsyncBox<Value: Sendable>: @unchecked Sendable {
 
     private enum State {
         case empty
-        case building(Task<Value, Error>)
+        case building(Task<Payload, Error>)
         case ready(Value)
     }
 
@@ -65,7 +76,7 @@ public final class ZerkAsyncBox<Value: Sendable>: @unchecked Sendable {
     /// build to join.
     private enum Entry {
         case ready(Value)
-        case awaiting(Task<Value, Error>)
+        case awaiting(Task<Payload, Error>)
     }
 
     private let lock = NSLock()
@@ -95,7 +106,7 @@ public final class ZerkAsyncBox<Value: Sendable>: @unchecked Sendable {
             return value
         case .awaiting(let task):
             do {
-                let value = try await task.value
+                let value = try await task.value.value
                 publish(value, from: task)
                 return value
             } catch {
@@ -113,11 +124,23 @@ public final class ZerkAsyncBox<Value: Sendable>: @unchecked Sendable {
     /// The non-throwing form, so a provider that is merely `async` does not
     /// force `try` on every consumer.
     ///
-    /// The `try!` is discharged by the signature: `build` cannot throw, so the
-    /// task it feeds cannot fail, and the only error `value(_:)` propagates is
-    /// the one `build` raised.
+    /// It cannot simply force-unwrap the throwing form. The two share one box,
+    /// so this call may *join* a build some other caller started with a closure
+    /// that does throw — and then the error is not ours to have ruled out. The
+    /// generator never mixes them on one box, but both overloads are public, so
+    /// "cannot happen" would be a trap rather than an invariant.
+    ///
+    /// Retrying is the answer rather than propagating, because our own build
+    /// cannot fail: a failure is never cached, so the next attempt either finds
+    /// a value or starts our build, which will produce one. Only a caller
+    /// supplying a fresh failing build each time could keep this going, and that
+    /// caller has an unresolvable dependency either way.
     public func value(_ build: @Sendable @escaping () async -> Value) async -> Value {
-        try! await value { () async throws -> Value in await build() }
+        while true {
+            if let value = try? await value({ () async throws -> Value in await build() }) {
+                return value
+            }
+        }
     }
 
     /// Reads the state, starting the build if nothing else has.
@@ -134,7 +157,7 @@ public final class ZerkAsyncBox<Value: Sendable>: @unchecked Sendable {
         case .building(let task):
             return .awaiting(task)
         case .empty:
-            let task = Task { try await build() }
+            let task = Task { Payload(value: try await build()) }
             state = .building(task)
             return .awaiting(task)
         }
@@ -145,7 +168,7 @@ public final class ZerkAsyncBox<Value: Sendable>: @unchecked Sendable {
     /// The task identity check is what makes ``reset()`` mean something while a
     /// build is in flight: without it, a build that started before the reset
     /// would publish afterwards and quietly undo it.
-    private func publish(_ value: Value, from task: Task<Value, Error>) {
+    private func publish(_ value: Value, from task: Task<Payload, Error>) {
         lock.lock()
         defer { lock.unlock() }
 
@@ -154,7 +177,7 @@ public final class ZerkAsyncBox<Value: Sendable>: @unchecked Sendable {
         }
     }
 
-    private func clear(_ task: Task<Value, Error>) {
+    private func clear(_ task: Task<Payload, Error>) {
         lock.lock()
         defer { lock.unlock() }
 

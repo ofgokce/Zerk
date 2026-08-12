@@ -15,6 +15,13 @@ struct TypeContext {
     /// itself, so consumers join the frames with "." where they need a
     /// qualified name rather than storing one here.
     let name: String
+    /// What kind of declaration this is.
+    ///
+    /// Read when deciding whether a `#if` inside the body changes how the type
+    /// is built: a struct's memberwise initializer is shaped by every stored
+    /// property, while a class's `init()` only exists when all of them already
+    /// hold a value.
+    var kind: MarkedTypeKind? = nil
     /// Isolation of this declaration, used as the fallback for members and
     /// nested declarations that state none of their own.
     var isolation: ProviderIsolation = .nonisolated

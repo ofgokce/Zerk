@@ -121,6 +121,38 @@ struct AsyncKeptInstanceTests {
         #expect(resource === again)
     }
 
+    /// The two overloads share one box, so a non-throwing call can *join* a
+    /// build some other caller started with a throwing closure. Force-unwrapping
+    /// there trapped: the error was never ours to rule out.
+    @Test("the non-throwing overload survives joining a failed build")
+    func nonThrowingOverloadDoesNotTrapOnAJoinedFailure() async throws {
+        struct Failure: Error {}
+        let box = ZerkAsyncBox<Int>()
+
+        let failing = Task {
+            try? await box.value { () async throws -> Int in
+                try await Task.sleep(for: .milliseconds(120))
+                throw Failure()
+            }
+        }
+        // Long enough that the throwing build is still in flight to be joined.
+        try await Task.sleep(for: .milliseconds(20))
+
+        let value = await box.value { 7 }
+        _ = await failing.value
+
+        // Its own build cannot fail, so it always produces a value.
+        #expect(value == 7)
+    }
+
+    @Test("a non-Sendable instance can be kept across an await")
+    func nonSendableInstanceIsKept() async {
+        let first = await Zerk<NonSendableAsyncClient>.inject()
+        let again = await Zerk<NonSendableAsyncClient>.inject()
+
+        #expect(first === again)
+    }
+
     @Test("concurrent callers of a failing build all see the failure")
     func failureReachesEveryWaiter() async {
         AsyncBuildLog.shared.reset()

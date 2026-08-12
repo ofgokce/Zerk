@@ -140,7 +140,7 @@ Everything Zerk generates for a conditional declaration:
 | `@InjectableValue` | Its member's extension and its interjection point |
 | `@Singleton` / `@Scoped` | Its slot in the generated storage namespace |
 | `@injected` parameter markers | The generated overload, and its `extension YourType` |
-| `#ZerkImport(module:)` | The `import` line — unless the module is *also* asked for unconditionally, in which case the wider ask wins |
+| `#ZerkImport(module:)` | The `import` line. Asked for under two *different* conditions, it is emitted unconditionally: the wider ask wins, because an unnecessary import is a warning at worst while a missing one does not compile |
 
 The [graph artifact](../Plugin/GraphArtifact.md) records the guard too: each provider carries a `condition` field with the expression its member is emitted under, absent when unconditional. A graph that omitted it would claim a key is resolvable in builds where nothing resolves it.
 
@@ -185,7 +185,7 @@ final class ReleaseService: Service {}
 
 Make the branches match, or give them separate keys.
 
-### A `#if` inside a type may not gate how it is built
+### A `#if` inside a type may not gate what Zerk reads off its members
 
 ```swift
 @Injectable
@@ -198,9 +198,18 @@ struct Service {
 }
 ```
 
-One type, two provider shapes — and the generated member has a single signature. Put the `#if` around the whole type instead, so each configuration registers its own.
+One type, two provider shapes — and the generated member has a single signature. Put the `#if` around the whole type instead, so each configuration declares its own.
 
-This refusal is narrow on purpose. A `#if` inside a type that gates something Zerk does not read — a conditional method, a conditional stored property, a debug-only helper — is none of Zerk's business and passes through untouched. Only an initializer or an `@InjectableProviding` member triggers it.
+Zerk reads a type's members without expanding conditions, so four things trigger this, and they are four ways the same mistake shows up:
+
+| Inside a `#if` | Why it cannot be carried |
+|---|---|
+| an initializer | two provider shapes, one member signature |
+| an `@InjectableProviding` member | the same |
+| a **stored property** | a struct's memberwise initializer is shaped by them, so a conditional one silently vanishes from the parameters Zerk thinks exist — and it emits a call missing an argument. In a class, only a property *without* a default counts, since that is when `init()` stops being synthesized |
+| a member with **`@injected` parameters** | its generated overload is assembled from the member list too, so the member was being dropped without a word |
+
+The refusal stays narrow. A `#if` gating something Zerk does not read — a conditional method with no markers, a computed property, a debug-only helper, a `#if` around an import — is none of Zerk's business and passes through untouched.
 
 ---
 
