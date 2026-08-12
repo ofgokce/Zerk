@@ -79,6 +79,7 @@ One entry per key, one per value, and the edges between them.
 | `isImported` | Satisfied by another module through `@ImportedInjectable`, so nothing here builds it |
 | `isGeneric` | Registered under a [key shape](../Features/Generics.md) rather than a concrete type |
 | `primaryMember` | The member backing `inject()`, or absent when the key is imported |
+| `directResolutions` | How many `@Injected` properties and `@injected` parameters resolve this key in the module. Not edges — nothing in the graph *provides* them — and the reason a key at the top of the graph can be told from one nothing wants. See [`--unused`](ZerkCLI.md#finding-what-nothing-uses) |
 
 ### Providers
 

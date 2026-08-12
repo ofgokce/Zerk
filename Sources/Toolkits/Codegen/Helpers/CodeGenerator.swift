@@ -167,7 +167,9 @@ public struct CodeGenerator {
                 values: values,
                 resolutions: resolution.resolutions,
                 primaryResolutions: KeyIndex(imports.primaries),
-                keyDisplayNames: keyDisplayNames
+                keyDisplayNames: keyDisplayNames,
+                injectedUses: injectedUses,
+                markedMembers: markedMembers
             ).build()
             graph.module = moduleName
 

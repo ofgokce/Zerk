@@ -202,7 +202,9 @@ enum CompileFixture {
             values: importedValues.values,
             resolutions: resolution.resolutions,
             primaryResolutions: KeyIndex(imports.primaries),
-            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
+            keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
+            injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
+            markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers)
         ).build()
     }
 

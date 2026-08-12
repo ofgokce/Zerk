@@ -19,6 +19,7 @@ struct GraphRenderer {
     let graph: ZerkPackageGraph
 
     enum Format: String, CaseIterable {
+        case text
         case json
         case dot
         case mermaid
@@ -26,6 +27,8 @@ struct GraphRenderer {
 
     func render(_ format: Format) throws -> String {
         switch format {
+        case .text:
+            return text()
         case .json:
             return String(decoding: try graph.encoded(), as: UTF8.self)
         case .dot:
@@ -33,6 +36,62 @@ struct GraphRenderer {
         case .mermaid:
             return mermaid()
         }
+    }
+
+    // MARK: - Text
+
+    /// A plain listing: one block per module, one line per key, each naming
+    /// where the key is declared.
+    ///
+    /// The other three formats answer "what is the shape of this"; this one
+    /// answers "what is in here, and where do I go to change it". A location is
+    /// the point — every other format either omits it or buries it.
+    ///
+    /// The primary provider speaks for a key, since that is the one `inject()`
+    /// uses. A key with several is marked so the count is not silently lost.
+    private func text() -> String {
+        var lines: [String] = []
+
+        for module in graph.modules {
+            if !lines.isEmpty {
+                lines.append("")
+            }
+            lines.append(module.name)
+
+            let rows = module.keys.map { key -> (String, String, String) in
+                let provider = key.providers.first(where: \.isPrimary) ?? key.providers.first
+                var detail = provider?.typeName ?? "imported"
+                if key.providers.count > 1 {
+                    detail += " (+\(key.providers.count - 1))"
+                }
+                let where_ = provider.map { "\($0.location.file):\($0.location.line)" } ?? ""
+                return (key.displayName, detail, where_)
+            }
+
+            // Padded to the widest entry so the columns line up, which is the
+            // only reason this is not three `\t`s: a key like `any Storing` and
+            // one like `Cache<String>` differ enough in width that tabs stagger.
+            let keyWidth = rows.map(\.0.count).max() ?? 0
+            let detailWidth = rows.map(\.1.count).max() ?? 0
+
+            for (key, detail, location) in rows {
+                let padded = key.padding(toLength: max(keyWidth, key.count), withPad: " ", startingAt: 0)
+                let paddedDetail = detail.padding(toLength: max(detailWidth, detail.count), withPad: " ", startingAt: 0)
+                lines.append(Self.trimmingTrailingSpaces("  \(padded)  \(paddedDetail)  \(location)"))
+            }
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    /// An imported key has no location, so its row would otherwise end in the
+    /// padding meant to align one.
+    private static func trimmingTrailingSpaces(_ line: String) -> String {
+        var result = line
+        while result.hasSuffix(" ") {
+            result.removeLast()
+        }
+        return result
     }
 
     // MARK: - Node identity
