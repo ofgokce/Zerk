@@ -24,7 +24,7 @@ import Foundation
 /// closer or depends on it.
 struct ZerkPackageGraph: Codable, Equatable {
 
-    static let currentFormatVersion = 1
+    static let currentFormatVersion = 2
 
     var formatVersion: Int = ZerkPackageGraph.currentFormatVersion
     /// Every module that contributed a graph, sorted by name.

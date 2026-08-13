@@ -380,6 +380,44 @@ struct ReviewRegressionsFourthPassTests {
             $0.severity == .error && $0.message.contains("'Hidden<Int>' is fileprivate")
         }, "\(result.diagnostics.map(\.message))")
     }
+
+    @Test("conditional referenced values emit one thunk per branch")
+    func conditionalReferencedValueThunksCoverEachBranch() {
+        let generated = CompileFixture.generate(source: """
+        #if DEBUG
+        @InjectableValue(.referenced)
+        var baseURL: String = "debug"
+        #else
+        @InjectableValue(.referenced)
+        var baseURL: String = "release"
+        #endif
+        """)
+
+        #expect(generated.contains("#if (DEBUG)\nnonisolated private func _$zerk_ref_baseURL()"))
+        #expect(generated.contains("#if !(DEBUG)\nnonisolated private func _$zerk_ref_baseURL()"))
+    }
+
+    @Test("conditional global providers emit one thunk per branch")
+    func conditionalGlobalProviderThunksCoverEachBranch() {
+        let generated = CompileFixture.generate(source: """
+        protocol Service {}
+
+        #if DEBUG
+        struct DebugService: Service {}
+
+        @Injectable<Service>
+        func liveService() -> Service { DebugService() }
+        #else
+        struct ReleaseService: Service {}
+
+        @Injectable<Service>
+        func liveService() -> Service { ReleaseService() }
+        #endif
+        """)
+
+        #expect(generated.contains("#if (DEBUG)\nnonisolated private func _$zerk_provider_liveService()"))
+        #expect(generated.contains("#if !(DEBUG)\nnonisolated private func _$zerk_provider_liveService()"))
+    }
 }
 
 /// The second review pass: defects in the fixes above, plus the extension path

@@ -328,7 +328,8 @@ private extension InjectableMacro {
             }
         }
 
-        for (key, attribute) in injectableKeys {
+        for key in injectableKeys.keys.sorted() {
+            let attribute = injectableKeys[key]!
             if providerInfo.typedProviders[key] != nil {
                 continue
             }

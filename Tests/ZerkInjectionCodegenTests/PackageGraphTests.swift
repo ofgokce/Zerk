@@ -76,6 +76,14 @@ struct PackageGraphTests {
 
     // MARK: - Stitching
 
+    @Test("merged package graphs use the current format version")
+    func mergedPackageGraphUsesCurrentFormatVersion() {
+        let merged = GraphMerger(graphs: Self.twoModules).merge()
+
+        #expect(merged.formatVersion == ZerkPackageGraph.currentFormatVersion)
+        #expect(merged.formatVersion == 2)
+    }
+
     @Test("an import is matched to the module that exports it")
     func matchesImportsToExporters() {
         let merged = GraphMerger(graphs: Self.twoModules).merge()

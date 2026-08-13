@@ -32,7 +32,7 @@ One entry per key, one per value, and the edges between them.
 
 ```json
 {
-  "formatVersion" : 1,
+  "formatVersion" : 2,
   "keys" : [
     {
       "key" : "Caching",

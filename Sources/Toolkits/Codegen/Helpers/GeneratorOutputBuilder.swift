@@ -212,7 +212,8 @@ struct GeneratorOutputBuilder {
         }
 
         var thunkLines: [String] = []
-        var emittedThunks = Set<String>()
+        var referencedValueThunks: [InjectableValueRecord] = []
+        var providerThunks: [ProviderResolution] = []
 
         for value in values.sorted(by: { $0.name < $1.name }) {
             // An import matches parameters but declares nothing: the member, and
@@ -239,11 +240,10 @@ struct GeneratorOutputBuilder {
                 // in `return` to match the statement form a copied body is in.
                 readExpression = "return \(value.effects.callPrefix)\(referenceRead(for: value))"
                 // A value registered under several keys yields one record per
-                // key, all naming the same source, so thunks dedupe by name.
-                if emittedThunks.insert(value.name).inserted {
-                    thunkLines += Self.guarded(referenceThunkLines(for: value),
-                                               by: value.condition)
-                }
+                // key, all naming the same source. Thunk emission is deferred so
+                // same-name declarations in exclusive #if branches each keep
+                // their own forwarding function.
+                referencedValueThunks.append(value)
             }
 
             // A value is always property-shaped, so its point is just its name.
@@ -305,21 +305,16 @@ struct GeneratorOutputBuilder {
 
         // A global `@Injectable` declaration is reached through a private
         // forwarding function, for the same reason a referenced value is.
-        //
-        // Deduped by thunk name: a declaration registered under several keys has
-        // one resolution per key but is still one declaration, and emitting its
-        // thunk per key is `invalid redeclaration` in the generated file.
         for resolution in resolutions {
             guard case .explicit(let provider) = resolution.provider,
-                  case .declaration(_, _, let thunk?) = provider.kind else {
+                  case .declaration(_, _, _?) = provider.kind else {
                 continue
             }
-            guard emittedThunks.insert(thunk).inserted else {
-                continue
-            }
-            thunkLines += Self.guarded(declarationThunkLines(for: resolution),
-                                       by: resolution.condition)
+            providerThunks.append(resolution)
         }
+
+        thunkLines += referencedValueThunkDeclarations(for: referencedValueThunks)
+        thunkLines += providerThunkDeclarations(for: providerThunks)
 
         if !thunkLines.isEmpty {
             output += thunkLines
@@ -1200,6 +1195,67 @@ struct GeneratorOutputBuilder {
             return "_$zerk_ref_\(value.name)()"
         }
         return "\(path).\(value.name)"
+    }
+
+    private func referencedValueThunkDeclarations(for values: [InjectableValueRecord]) -> [String] {
+        let topLevelValues = values.filter { $0.enclosingTypePath == nil }
+        let grouped = Dictionary(grouping: topLevelValues, by: \.name)
+        var lines: [String] = []
+
+        for name in grouped.keys.sorted() {
+            for value in Self.distinctThunkRecords(grouped[name]!, condition: \.condition, location: \.location) {
+                lines += Self.guarded(referenceThunkLines(for: value), by: value.condition)
+            }
+        }
+
+        return lines
+    }
+
+    private func providerThunkDeclarations(for resolutions: [ProviderResolution]) -> [String] {
+        var grouped: [String: [ProviderResolution]] = [:]
+        for resolution in resolutions {
+            guard case .explicit(let provider) = resolution.provider,
+                  case .declaration(_, _, let thunk?) = provider.kind else {
+                continue
+            }
+            grouped[thunk, default: []].append(resolution)
+        }
+
+        var lines: [String] = []
+        for thunk in grouped.keys.sorted() {
+            for resolution in Self.distinctThunkRecords(grouped[thunk]!,
+                                                        condition: \.condition,
+                                                        location: { $0.provider.location }) {
+                lines += Self.guarded(declarationThunkLines(for: resolution), by: resolution.condition)
+            }
+        }
+
+        return lines
+    }
+
+    private static func distinctThunkRecords<Record>(
+        _ records: [Record],
+        condition: (Record) -> CompilationCondition,
+        location: (Record) -> AttributeLocation
+    ) -> [Record] {
+        var seen = Set<String>()
+        var result: [Record] = []
+
+        for record in records.sorted(by: { lhs, rhs in
+            let leftCondition = condition(lhs)
+            let rightCondition = condition(rhs)
+            if leftCondition.sortKey != rightCondition.sortKey {
+                return leftCondition.sortKey < rightCondition.sortKey
+            }
+            return location(lhs) < location(rhs)
+        }) {
+            let identity = "\(condition(record).guardText ?? "")|\(location(record))"
+            if seen.insert(identity).inserted {
+                result.append(record)
+            }
+        }
+
+        return result
     }
 
     /// The private forwarding function a **global** `@Injectable` declaration is
