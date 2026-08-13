@@ -23,10 +23,6 @@ struct GraphBuilder {
     let resolutions: [ProviderResolution]
     let primaryResolutions: KeyIndex<ProviderResolution>
     var keyDisplayNames: [String: String] = [:]
-    /// `@Injected` properties, which resolve a key without being providers.
-    var injectedUses: [InjectedUseRecord] = []
-    /// Members with `@injected` parameters, likewise.
-    var markedMembers: [MarkedMemberRecord] = []
 
     private var classifier: ParameterClassifier {
         ParameterClassifier(values: values, primaryResolutions: primaryResolutions)
@@ -35,7 +31,6 @@ struct GraphBuilder {
     func build() -> ZerkGraph {
         let classifier = self.classifier
         let grouped = Dictionary(grouping: resolutions, by: \.injectableKey)
-        let directResolutions = directResolutionCounts()
 
         // Imported keys have a primary but no resolutions of their own — they
         // are satisfied elsewhere — so they would vanish if the graph were built
@@ -60,7 +55,6 @@ struct GraphBuilder {
                     isImported: isImported,
                     isGeneric: KeyShape.isShape(key),
                     primaryMember: isImported ? nil : primaryResolutions[key]?.memberName,
-                    directResolutions: directResolutions[key] ?? 0,
                     providers: providers.map { provider(for: $0, classifier: classifier) }
                 )
             )
@@ -72,37 +66,6 @@ struct GraphBuilder {
                 .sorted { ($0.typeKey, $0.name) < ($1.typeKey, $1.name) }
                 .map(value(for:))
         )
-    }
-
-    /// How many times each key is resolved by something that is not a provider.
-    ///
-    /// Counted through `primaryResolutions` rather than from the use's own
-    /// spelling, because the two need not match: an `@Injected var cache:
-    /// Cache<String>` reaches a registration filed under the shape
-    /// `Cache<#0>`, and counting the spelling would credit a key that does not
-    /// exist.
-    private func directResolutionCounts() -> [String: Int] {
-        var counts: [String: Int] = [:]
-
-        for use in injectedUses {
-            guard let resolved = primaryResolutions[use.typeKey, shape: use.typeKeyShape] else {
-                continue
-            }
-            counts[resolved.injectableKey, default: 0] += 1
-        }
-
-        for member in markedMembers {
-            for marked in member.parameters where marked.isMarked {
-                // A marked parameter may resolve to an `@InjectableValue`
-                // instead, which is not a key and has no entry here.
-                guard let resolved = primaryResolutions[marked.parameter] else {
-                    continue
-                }
-                counts[resolved.injectableKey, default: 0] += 1
-            }
-        }
-
-        return counts
     }
 
     private func provider(for resolution: ProviderResolution,

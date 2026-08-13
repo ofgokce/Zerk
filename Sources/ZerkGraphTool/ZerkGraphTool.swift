@@ -8,7 +8,7 @@ import CodegenToolkit
 
 /// Command-line front end to `GraphExport`, invoked by `ZerkCLI`.
 ///
-/// Usage: `ZerkGraphTool [--format <text|json|dot|mermaid>] [--unused] [--output <path>] <graph.json>...`
+/// Usage: `ZerkGraphTool [--format <text|json|dot|mermaid>] [--output <path>] <graph.json>...`
 ///
 /// The second half of `swift package zerk graph`. The command plugin runs
 /// `ZerkCodegen` once per target to produce the inputs, then this to join them —
@@ -21,18 +21,14 @@ import CodegenToolkit
 @main
 struct ZerkGraphTool {
     static func main() {
-        var format: String?
+        var format = "json"
         var outputPath: String?
-        var unusedOnly = false
         var inputPaths: [String] = []
 
         let arguments = Array(CommandLine.arguments.dropFirst())
         var index = 0
         while index < arguments.count {
             switch arguments[index] {
-            case "--unused":
-                unusedOnly = true
-                index += 1
             case "--format", "--output":
                 guard index + 1 < arguments.count else {
                     fail("\(arguments[index]) expects a value")
@@ -50,18 +46,14 @@ struct ZerkGraphTool {
         }
 
         guard !inputPaths.isEmpty else {
-            fail("Usage: ZerkGraphTool [--format <\(GraphExport.formats.joined(separator: "|"))>] [--unused] [--output <path>] <graph.json>...")
+            fail("Usage: ZerkGraphTool [--format <\(GraphExport.formats.joined(separator: "|"))>] [--output <path>] <graph.json>...")
         }
 
         do {
             let rendered = try GraphExport(
                 inputPaths: inputPaths,
-                // `--unused` is a report before it is a graph, so it defaults to
-                // the readable rendering. An explicit `--format` still wins, for
-                // the machine-readable case.
-                format: format ?? (unusedOnly ? "text" : "json"),
-                outputPath: outputPath,
-                unusedOnly: unusedOnly
+                format: format,
+                outputPath: outputPath
             ).run()
 
             if let rendered {

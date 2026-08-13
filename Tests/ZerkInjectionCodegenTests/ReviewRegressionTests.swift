@@ -6,8 +6,7 @@
 import Testing
 @testable import CodegenToolkit
 
-/// One test per defect found reviewing the `#if`, async-kept-instance and
-/// `--unused` work.
+/// One test per defect found reviewing the `#if` and async-kept-instance work.
 ///
 /// Grouped by what was wrong rather than by the file it was in, because that is
 /// what a future change is likely to break again: each of these passed a full

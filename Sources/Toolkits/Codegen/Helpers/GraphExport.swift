@@ -21,17 +21,11 @@ public struct GraphExport {
     let inputPaths: [String]
     let format: String
     var outputPath: String? = nil
-    /// Narrow the result to keys nothing in the package resolves.
-    var unusedOnly: Bool = false
 
-    public init(inputPaths: [String],
-                format: String,
-                outputPath: String? = nil,
-                unusedOnly: Bool = false) {
+    public init(inputPaths: [String], format: String, outputPath: String? = nil) {
         self.inputPaths = inputPaths
         self.format = format
         self.outputPath = outputPath
-        self.unusedOnly = unusedOnly
     }
 
     /// Every format ``run()`` accepts, for a caller building a usage message.
@@ -62,24 +56,8 @@ public struct GraphExport {
             }
         }
 
-        let package = GraphMerger(graphs: graphs).merge()
-        var rendered: String
-
-        if unusedOnly {
-            let analysis = GraphAnalysis(graph: package)
-            rendered = try GraphRenderer(graph: analysis.unusedGraph()).render(format)
-            // The other formats carry their own emptiness legibly — an empty
-            // JSON graph, an empty diagram. A blank page does not, and "nothing
-            // to report" is the answer people most want to be sure of.
-            if format == .text {
-                let count = analysis.unusedKeys().count
-                rendered = count == 0
-                    ? "No unused keys: every registration is resolved by something."
-                    : "\(count) \(count == 1 ? "key is" : "keys are") registered but resolved by nothing:\n\n\(rendered)"
-            }
-        } else {
-            rendered = try GraphRenderer(graph: package).render(format)
-        }
+        let rendered = try GraphRenderer(graph: GraphMerger(graphs: graphs).merge())
+            .render(format)
 
         guard let outputPath else {
             return rendered

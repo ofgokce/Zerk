@@ -110,24 +110,6 @@ struct CrossModulePackageTests {
         #expect(result.out.contains("-.->"))
     }
 
-    @Test("--unused reports against the whole package")
-    func reportsUnusedKeys() throws {
-        let result = try Self.zerk(["zerk", "graph", "--unused"])
-        try #require(result.status == 0, Comment(rawValue: result.error))
-
-        // `ApiServicing` is exported and imported by CrossFeature, so it must
-        // not appear however the analysis is worded — that crossing is the one
-        // thing a per-module view gets wrong.
-        #expect(!result.out.contains("ApiServicing"))
-        #expect(result.out.contains("InternalOnly") || result.out.contains("No unused keys"))
-
-        // The machine-readable form is the same finding, as a graph.
-        let json = try Self.zerk(["zerk", "graph", "--unused", "--format", "json"])
-        try #require(json.status == 0, Comment(rawValue: json.error))
-        let graph = try JSONDecoder().decode(ZerkPackageGraph.self, from: Data(json.out.utf8))
-        #expect(!graph.modules.flatMap { $0.keys.map(\.key) }.contains("ApiServicing"))
-    }
-
     @Test("help works and asks for nothing")
     func printsHelp() throws {
         let bare = try Self.zerk(["zerk"])
@@ -137,7 +119,6 @@ struct CrossModulePackageTests {
         let graph = try Self.zerk(["zerk", "graph", "--help"])
         #expect(graph.status == 0)
         #expect(graph.out.contains("Usage: swift package zerk graph"))
-        #expect(graph.out.contains("--unused"))
     }
 
     @Test("a bad invocation fails loudly", arguments: [

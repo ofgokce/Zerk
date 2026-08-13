@@ -53,7 +53,7 @@ Resolves every target's dependency graph and prints it, [joined across module bo
 ```bash
 swift package zerk graph                                   # every target, JSON, to stdout
 swift package zerk graph --format mermaid                  # paste into a README or PR
-swift package zerk graph --unused                          # what nothing resolves
+swift package zerk graph --format text                     # an inventory, with locations
 swift package zerk graph --target AppCore --target Networking --format dot | dot -Tpng -o graph.png
 swift package zerk graph --format json --output /tmp/graph.json
 ```
@@ -62,13 +62,12 @@ swift package zerk graph --format json --output /tmp/graph.json
 |---|---|
 | `--target <name>` | Only this target. Repeat for several; the default is all of them |
 | `--format <format>` | `text`, `json` (default), `dot`, or `mermaid` |
-| `--unused` | Only the keys nothing resolves. See [below](#finding-what-nothing-uses) |
 | `--output <path>` | Write to a file instead of stdout. See [permissions](#writing-a-file) |
 | `-h`, `--help` | Show the command's options |
 
 ### The formats
 
-**`text`** is a plain listing — one block per module, one line per key, each naming the type behind it and the file and line it is declared on. It is the only format that shows you *where to go*, which is why `--unused` defaults to it.
+**`text`** is a plain listing — one block per module, one line per key, each naming the type behind it and the file and line it is declared on. It is the only format that shows you *where to go*.
 
 **`json`** is the [`ZerkPackageGraph`](GraphArtifact.md#the-cross-module-view) — every module's keys and values, plus the resolved and unresolved imports between them. Pipe it into `jq`.
 
@@ -76,10 +75,10 @@ swift package zerk graph --format json --output /tmp/graph.json
 
 ```mermaid
 graph LR
-    subgraph Core
+    subgraph cluster0["Core"]
         m0k0["ApiServicing<br/>singleton"]
     end
-    subgraph Feature
+    subgraph cluster1["Feature"]
         m1k0["ApiServicing<br/>imported"]
         m1k1["FeedViewModel"]
     end
@@ -88,38 +87,6 @@ graph LR
 ```
 
 Mermaid renders in GitHub and most Markdown viewers, so it is the one to reach for in a PR. DOT is for `dot -Tpng`, `-Tsvg`, and anything else Graphviz can do.
-
-## Finding what nothing uses
-
-```bash
-swift package zerk graph --unused
-```
-```
-2 keys are registered but resolved by nothing:
-
-CrossCore
-  InternalOnly   InternalService  Sources/CrossCore/CrossCore.swift:20
-
-CrossFeature
-  FeedViewModel  FeedViewModel    Sources/CrossFeature/CrossFeature.swift:22
-```
-
-A key is reported when **nothing in the package resolves it**: no provider depends on it, and no `@Injected` property or `@injected` parameter asks for it. Both halves matter — the graph's edges only record providers resolving *each other*, so without counting direct resolutions every root your app actually asks for would be reported, and the report would be noise.
-
-Two kinds of key are deliberately left out:
-
-- **Exported keys.** `@Injectable(public: true)` is a promise to consumers this package cannot see, so a public key with no internal consumer is the normal state of a library's surface rather than a finding.
-- **Imported keys.** An `@ImportedInjectable` is a reference to another module's registration, not a registration of its own.
-
-Cross-module use counts, which is the reason this lives in the package command rather than in a build. A key registered in one module and resolved only from another looks unused from inside either one; only the joined view has both halves.
-
-It reports and never fails: the exit code is `0` whether or not anything was found. For a CI check, ask for JSON and test it yourself — the filtered graph is an ordinary [`ZerkPackageGraph`](GraphArtifact.md#the-cross-module-view):
-
-```bash
-swift package zerk graph --unused --format json | jq -e '[.modules[].keys[]] | length == 0'
-```
-
-**Values are not analysed.** Zerk records which *key* an `@Injected(\.member)` resolves but not which member, so an `@InjectableValue` reached that way cannot be told apart from a dead one — and a report that cries wolf is one people learn to skip.
 
 ## It re-runs codegen
 

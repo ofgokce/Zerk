@@ -79,7 +79,6 @@ One entry per key, one per value, and the edges between them.
 | `isImported` | Satisfied by another module through `@ImportedInjectable`, so nothing here builds it |
 | `isGeneric` | Registered under a [key shape](../Features/Generics.md) rather than a concrete type |
 | `primaryMember` | The member backing `inject()`, or absent when the key is imported |
-| `directResolutions` | How many `@Injected` properties and `@injected` parameters resolve this key in the module. Not edges — nothing in the graph *provides* them — and the reason a key at the top of the graph can be told from one nothing wants. See [`--unused`](ZerkCLI.md#finding-what-nothing-uses) |
 
 ### Providers
 
@@ -166,7 +165,7 @@ jq -r '[.keys[].providers[].dependencies[].key] as $used
        | .keys[] | select([.key] - $used == [.key]) | .key' "$G"
 ```
 
-That last one is worth calling out: an **unused registration** is invisible to the compiler, because a generated member nobody calls is still valid code. The graph is the only place it shows up.
+That last one is worth calling out, in both directions. An **unused registration** is invisible to the compiler, because a generated member nobody calls is still valid code, and the graph is the only place it shows up. But read the result as *candidates*: the graph records providers resolving each other, so a key resolved by an `@Injected` property or by a hand-written `Zerk<Key>.inject()` has no incoming edge either, and appears in that list next to the genuinely dead ones.
 
 Against the whole package the same queries work one level down — `.modules[].keys[]` — with `imports` and `unresolvedImports` alongside. And for rendering there is nothing to write: `--format dot` and `--format mermaid` do it.
 

@@ -74,14 +74,6 @@ struct ZerkGraph: Codable, Equatable {
         /// The member backing `inject()`, or `nil` when the key is imported or
         /// its providers were ambiguous.
         let primaryMember: String?
-        /// How many `@Injected` properties and `@injected` parameters resolve
-        /// this key in the declaring module.
-        ///
-        /// The graph's edges only record providers resolving *each other*, so
-        /// without this a key at the top of the graph — the one an app actually
-        /// asks for — is indistinguishable from a key nothing wants. That
-        /// distinction is the whole of `zerk graph --unused`.
-        var directResolutions: Int = 0
         let providers: [Provider]
     }
 

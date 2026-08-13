@@ -113,15 +113,7 @@ struct ZerkCLI: CommandPlugin {
     private func render(tool: PluginContext.Tool,
                         graphPaths: [String],
                         options: GraphOptions) throws {
-        // Passed through only when stated, so the tool keeps ownership of what
-        // the default is — which depends on `--unused`.
-        var arguments: [String] = []
-        if let format = options.format {
-            arguments += ["--format", format]
-        }
-        if options.unusedOnly {
-            arguments.append("--unused")
-        }
+        var arguments = ["--format", options.format]
         if let output = options.outputPath {
             arguments += ["--output", output]
         }
@@ -191,19 +183,13 @@ struct ZerkCLI: CommandPlugin {
 
     struct GraphOptions {
         var targetNames: Set<String> = []
-        var format: String?
+        var format = "json"
         var outputPath: String?
-        var unusedOnly = false
 
         init(arguments: [String]) throws {
             var index = 0
             while index < arguments.count {
                 let argument = arguments[index]
-                if argument == "--unused" {
-                    unusedOnly = true
-                    index += 1
-                    continue
-                }
                 guard ["--target", "--format", "--output"].contains(argument) else {
                     throw Failure("""
                         unexpected argument '\(argument)'.
@@ -245,13 +231,7 @@ struct ZerkCLI: CommandPlugin {
 
         Options:
           --target <name>    Only this target. Repeat for several; default is all.
-          --format <format>  text, json, dot, or mermaid. Defaults to json, or to
-                             text with --unused.
-          --unused           List only the keys nothing in the package resolves:
-                             no provider depends on them, no @Injected asks for
-                             them. Exported keys are left out, since a public
-                             key is meant to be resolved by consumers this
-                             package cannot see.
+          --format <format>  text, json (default), dot, or mermaid.
           --output <path>    Write to a file instead of stdout. Writing inside the
                              package needs the plugin to be run as
                              'swift package --allow-writing-to-package-directory
@@ -261,8 +241,7 @@ struct ZerkCLI: CommandPlugin {
         Examples:
           swift package zerk graph
           swift package zerk graph --format mermaid
-          swift package zerk graph --unused
-          swift package zerk graph --unused --format json | jq '.modules[].keys[].key'
+          swift package zerk graph --format text
           swift package zerk graph --target AppCore --format dot | dot -Tpng -o graph.png
           swift package zerk graph --format json --output /tmp/graph.json
 
