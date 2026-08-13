@@ -678,7 +678,8 @@ struct GeneratorOutputBuilder {
         // Absent means the key is not declared in this module, so its access is
         // not ours to judge — only a key we can see and that is *not* public
         // blocks the export.
-        guard isExported, declaredAccessRanks[injectableKey].map({ $0 >= .public }) ?? true else {
+        let nominalKey = injectableKey.nominalTypeName
+        guard isExported, declaredAccessRanks[nominalKey].map({ $0 >= .public }) ?? true else {
             return ""
         }
         return "public "
@@ -1560,7 +1561,7 @@ struct GeneratorOutputBuilder {
                 // is out of its reach.
                 if record.requiresVisibleType,
                    let typeName,
-                   let declared = declaredAccessRanks[typeName],
+                   let declared = declaredAccessRanks[typeName.nominalTypeName],
                    declared < .internal {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
@@ -1733,7 +1734,8 @@ struct GeneratorOutputBuilder {
                 // letting it contribute here would compare later records
                 // against a member that is not in the file — one mistake
                 // reported twice.
-                let clash = emittedOverloads[overloadKey]?.contains {
+                let groupedOverloadKey = "\(group.whereClause ?? "")|\(overloadKey)"
+                let clash = emittedOverloads[groupedOverloadKey]?.contains {
                     !CompilationCondition.areExclusive($0, record.condition)
                 } ?? false
                 if clash {
@@ -1745,7 +1747,7 @@ struct GeneratorOutputBuilder {
                     continue
                 }
 
-                emittedOverloads[overloadKey, default: []].append(record.condition)
+                emittedOverloads[groupedOverloadKey, default: []].append(record.condition)
                 memberLines += Self.guarded(declarationLines,
                                             by: record.condition.dropping(prefix: sharedCondition))
                 memberLines.append("")

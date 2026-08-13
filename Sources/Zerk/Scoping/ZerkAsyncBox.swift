@@ -143,14 +143,14 @@ public final class ZerkAsyncBox<Value>: @unchecked Sendable {
     /// Falling back to building directly gives up exactly-once for this one
     /// call, which is the lesser failure.
     public func value(_ build: @Sendable @escaping () async -> Value) async -> Value {
-        for _ in 0..<Self.joinAttempts {
+        for _ in 0..<zerkAsyncBoxJoinAttempts {
             // Checked *inside* the loop, and after the cheap read below, because
             // a cancelled caller still owes its caller a value — and if the box
             // already holds one, that value is free. Skipping straight to the
             // fallback would rebuild an instance that exists, and hand back one
             // the box never published: for a `@Singleton`, a second instance
             // while the shared one sits cached.
-            if case .ready(let value) = entry({ await build() }) {
+            if let value = readyValue() {
                 return value
             }
             if Task.isCancelled {
@@ -165,9 +165,6 @@ public final class ZerkAsyncBox<Value>: @unchecked Sendable {
         // fail to produce one.
         return await build()
     }
-
-    /// See ``zerkAsyncBoxJoinAttempts``.
-    private static var joinAttempts: Int { zerkAsyncBoxJoinAttempts }
 
     /// Reads the state, starting the build if nothing else has.
     ///
@@ -187,6 +184,17 @@ public final class ZerkAsyncBox<Value>: @unchecked Sendable {
             state = .building(task)
             return .awaiting(task)
         }
+    }
+
+    /// Reads an already-published value without starting a build.
+    private func readyValue() -> Value? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if case .ready(let value) = state {
+            return value
+        }
+        return nil
     }
 
     /// Caches the built instance, unless a reset overtook the build.

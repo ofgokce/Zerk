@@ -40,7 +40,7 @@ import Foundation
 struct ZerkGraph: Codable, Equatable {
 
     /// Bumped only for a breaking change. See the type's discussion.
-    static let currentFormatVersion = 1
+    static let currentFormatVersion = 2
 
     var formatVersion: Int = ZerkGraph.currentFormatVersion
     /// The module this graph describes, when the caller named one.

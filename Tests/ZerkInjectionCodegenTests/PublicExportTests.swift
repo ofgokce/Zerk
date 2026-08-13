@@ -73,6 +73,22 @@ struct PublicExportTests {
         #expect(output.contains("public static func inject() -> Store"))
     }
 
+    @Test("public: true on an internal generic key is reported, not emitted")
+    func publicOnInternalGenericKeyIsInert() {
+        let result = CompileFixture.generateWithResolution(source: """
+        @Injectable(public: true)
+        struct Cache<E> {
+            @InjectableProviding init() {}
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .warning && $0.message.contains("has no effect")
+        }, "\(result.diagnostics.map(\.message))")
+        #expect(!result.output.output.contains("public static func cache"))
+        #expect(!result.output.output.contains("public static func inject"))
+    }
+
     @Test("public: combines with primary: on one attribute")
     func publicCombinesWithPrimary() {
         let source = """

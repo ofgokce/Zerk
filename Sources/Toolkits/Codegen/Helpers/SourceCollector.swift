@@ -606,8 +606,9 @@ final class SourceCollector: SyntaxVisitor {
     /// absent here and the check is skipped — the compiler still catches it, at
     /// the generated line rather than the declaration.
     override func visit(_ node: ProtocolDeclSyntax) -> SyntaxVisitorContinueKind {
-        declaredAccessRanks[qualified(node.name.text)] = node.modifiers.accessRank
-        protocolPrimaryAssociatedTypeCounts[node.name.text] =
+        let name = qualified(node.name.text)
+        declaredAccessRanks[name] = node.modifiers.accessRank
+        protocolPrimaryAssociatedTypeCounts[name] =
             node.primaryAssociatedTypeClause?.primaryAssociatedTypes.count ?? 0
         return .skipChildren
     }

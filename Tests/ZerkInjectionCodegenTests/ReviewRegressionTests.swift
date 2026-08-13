@@ -324,6 +324,64 @@ struct ReviewRegressionTests {
     }
 }
 
+/// The fourth review pass: follow-on defects in generic shapes and extension keys.
+@Suite("Review regressions, fourth pass")
+struct ReviewRegressionsFourthPassTests {
+
+    private static let repo = """
+    protocol Repo {}
+
+    @Injectable<Repo>
+    struct RepoImpl: Repo {}
+    """
+
+    @Test("same-signature overloads in different constrained extensions do not collide")
+    func sameSignatureConstrainedExtensionOverloadsDoNotCollide() throws {
+        let source = """
+        \(Self.repo)
+
+        protocol Alpha {}
+        protocol Beta {}
+
+        struct Cache<E> {}
+
+        extension Cache where E: Alpha {
+            func run(@injected repo: Repo, item: E) -> E { item }
+        }
+        extension Cache where E: Beta {
+            func run(@injected repo: Repo, item: E) -> E { item }
+        }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("extension Cache where E: Alpha {"))
+        #expect(result.output.output.contains("extension Cache where E: Beta {"))
+
+        let compiled = try CompileFixture.run(source: source)
+        try #require(!compiled.skipped)
+        #expect(compiled.didCompile, Comment(rawValue: compiled.compilerOutput))
+    }
+
+    @Test("an extension of an invisible specialization is refused")
+    func extensionOfInvisibleSpecializationIsRefused() {
+        let result = CompileFixture.generateWithResolution(source: """
+        \(Self.repo)
+
+        fileprivate struct Hidden<E> {}
+
+        extension Hidden<Int> {
+            func run(@injected repo: Repo, id: Int) -> Int { id }
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("'Hidden<Int>' is fileprivate")
+        }, "\(result.diagnostics.map(\.message))")
+    }
+}
+
 /// The second review pass: defects in the fixes above, plus the extension path
 /// the first pass introduced.
 @Suite("Review regressions, second pass")

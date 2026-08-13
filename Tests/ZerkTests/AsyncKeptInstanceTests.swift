@@ -204,6 +204,26 @@ struct AsyncKeptInstanceTests {
         #expect(await task.value == first)
     }
 
+    @Test("a cancelled cold caller does not start an abandoned build")
+    func cancelledColdCallerDoesNotStartAbandonedBuild() async {
+        let box = ZerkAsyncBox<Int>()
+        AsyncBuildLog.shared.reset()
+
+        let task = Task {
+            await Task.yield()
+            return await box.value {
+                AsyncBuildLog.shared.record("cancelled-cold")
+                try? await Task.sleep(for: .milliseconds(5))
+                return 1
+            }
+        }
+        task.cancel()
+
+        #expect(await task.value == 1)
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(AsyncBuildLog.shared.count("cancelled-cold") == 1)
+    }
+
     @Test("a non-Sendable instance can be kept across an await")
     func nonSendableInstanceIsKept() async {
         let first = await Zerk<NonSendableAsyncClient>.inject()
