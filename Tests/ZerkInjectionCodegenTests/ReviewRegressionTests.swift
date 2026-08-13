@@ -376,8 +376,12 @@ struct ReviewRegressionsFourthPassTests {
         }
         """)
 
+        // Names the component that is actually hidden, and the extension it
+        // was reached through.
         #expect(result.diagnostics.contains {
-            $0.severity == .error && $0.message.contains("'Hidden<Int>' is fileprivate")
+            $0.severity == .error
+                && $0.message.contains("'Hidden' is fileprivate")
+                && $0.message.contains("for 'Hidden<Int>'")
         }, "\(result.diagnostics.map(\.message))")
     }
 
@@ -709,5 +713,146 @@ struct ReviewRegressionsThirdPassTests {
             $0.severity == .warning && $0.message.contains("has no effect")
         }, "\(result.diagnostics.map(\.message))")
         #expect(!result.output.output.contains("public static var impl"))
+    }
+}
+
+/// The fifth pass: what a declaration's *location* means for the code Zerk
+/// writes about it.
+@Suite("Review regressions, fifth pass")
+struct ReviewRegressionsFifthPassTests {
+
+    private static func result(_ source: String) -> (output: GeneratorOutput, diagnostics: [CodegenDiagnostic]) {
+        CompileFixture.generateWithResolution(source: source)
+    }
+
+    // MARK: - Nesting is refused rather than mis-emitted
+
+    /// The key and the construction were both recorded as the declared name, so
+    /// a nested registration emitted `Inner()` at file scope — "cannot find type
+    /// 'Inner' in scope". Refused at the declaration instead.
+    @Test("a nested @Injectable type is refused", arguments: [
+        "struct Outer { @Injectable struct Inner { init() {} } }",
+        "extension Outer { @Injectable struct Inner { init() {} } }",
+    ])
+    func nestedInjectableIsRefused(source: String) {
+        let result = Self.result("""
+        struct Outer {}
+
+        \(source)
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("declared inside 'Outer'")
+        }, "\(result.diagnostics.map(\.message))")
+        #expect(!result.output.output.contains("extension Zerk<Inner>"))
+    }
+
+    @Test("a top-level registration is unaffected")
+    func topLevelRegistrationStillWorks() {
+        let result = Self.result("@Injectable struct Top { init() {} }")
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("extension Zerk<Top>"))
+    }
+
+    // MARK: - An extension member belongs to the type it extends
+
+    /// `typeStack` is empty inside an extension, so the reference was built as
+    /// though the declaration were global: a file-scope thunk calling a bare
+    /// `make()` that exists nowhere.
+    @Test("an @Injectable static func in an extension is reached through its type")
+    func extensionProviderIsQualified() {
+        let result = Self.result("""
+        protocol Foo {}
+
+        struct Service {}
+
+        extension Service {
+            @Injectable<Foo>
+            static func make() -> Foo { fatalError() }
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("return Service.make()"))
+        // No file-scope thunk: the qualified path is already unambiguous.
+        #expect(!result.output.output.contains("_$zerk_provider_make"))
+    }
+
+    @Test("a referenced @InjectableValue in an extension is read through its type")
+    func extensionValueIsQualified() {
+        let result = Self.result("""
+        struct Config {}
+
+        struct Service {}
+
+        extension Service {
+            @InjectableValue(.referenced)
+            static var config: Config { Config() }
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("return Service.config"))
+        #expect(!result.output.output.contains("_$zerk_ref_config"))
+    }
+
+    // MARK: - What a `#if` in an extension may gate
+
+    /// An extension holds no stored properties, so nothing there is inferred and
+    /// a plain initializer is not read at all.
+    @Test("a plain conditional initializer in an extension is allowed")
+    func conditionalExtensionInitializerIsAllowed() {
+        let result = Self.result("""
+        struct Service { init() {} }
+
+        extension Service {
+            #if DEBUG
+            init(debug: Bool) { self.init() }
+            #endif
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+    }
+
+    @Test("a conditional initializer carrying markers is still refused")
+    func conditionalMarkedExtensionInitializerIsRefused() {
+        let result = Self.result("""
+        protocol Repo {}
+
+        @Injectable<Repo>
+        struct RepoImpl: Repo {}
+
+        struct Service { init() {} }
+
+        extension Service {
+            #if DEBUG
+            init(@injected repo: Repo) { self.init() }
+            #endif
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("is read differently per configuration")
+        }, "\(result.diagnostics.map(\.message))")
+    }
+
+    @Test("a conditional initializer in a type is still refused")
+    func conditionalTypeInitializerIsRefused() {
+        let result = Self.result("""
+        @Injectable
+        struct Service {
+            #if DEBUG
+            init(a: Int) {}
+            #else
+            init() {}
+            #endif
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("is read differently per configuration")
+        }, "\(result.diagnostics.map(\.message))")
     }
 }

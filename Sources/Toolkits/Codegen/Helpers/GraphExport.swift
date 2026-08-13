@@ -43,12 +43,20 @@ public struct GraphExport {
         var graphs: [ZerkGraph] = []
         for path in inputPaths {
             do {
-                graphs.append(
-                    try JSONDecoder().decode(
-                        ZerkGraph.self,
-                        from: Data(contentsOf: URL(fileURLWithPath: path))
-                    )
+                let graph = try JSONDecoder().decode(
+                    ZerkGraph.self,
+                    from: Data(contentsOf: URL(fileURLWithPath: path))
                 )
+                // The version is the contract, and a contract nobody checks is
+                // decoration. A graph from a newer toolchain decodes "fine" —
+                // `Codable` ignores unknown fields and defaults missing ones —
+                // so without this the caller silently reads a graph whose
+                // meaning has changed, which is the situation the version
+                // exists to make detectable.
+                guard graph.formatVersion <= ZerkGraph.currentFormatVersion else {
+                    throw Failure(message: "the graph at \(path) is format version \(graph.formatVersion), and this tool reads up to \(ZerkGraph.currentFormatVersion). Update Zerk, or regenerate the graph with the version you are running.")
+                }
+                graphs.append(graph)
             } catch {
                 // Named, because a command plugin hands this several files and
                 // "the data couldn't be read" would not say which.

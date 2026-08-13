@@ -631,19 +631,23 @@ struct GenericEmissionTests {
         #expect(compiled.didCompile, "\(compiled.compilerOutput)")
     }
 
-    @Test("marker names cannot collide the way sanitized ones did")
+    /// The collision this guarded — `sanitizedIdentifier` mapping `Outer.Bar`
+    /// and `OuterBar` onto one marker name — needed a *nested* generic
+    /// registration to reach, and registering a nested type is now refused. The
+    /// marker still uses the type's name verbatim inside a raw identifier, which
+    /// is what kept the two distinct; what changed is that a dotted base can no
+    /// longer become a marker at all.
+    ///
+    /// Kept as a test that two generic families stay separate, which is the
+    /// property that mattered, and that the nested spelling is refused rather
+    /// than silently colliding.
+    @Test("two generic families keep separate markers")
     func markerNamesDoNotCollide() throws {
-        // `sanitizedIdentifier` maps `Outer.Bar` and `OuterBar` onto one name —
-        // the collision the old `Interjecting___` protocols had. The marker uses
-        // the type's name verbatim inside a raw identifier, so the two stay
-        // distinct and neither family's points leak into the other.
-        let source = """
-        enum Outer {
-            @Injectable
-            struct Bar<E> {
-                @InjectableProviding
-                init() {}
-            }
+        let output = CompileFixture.generate(source: """
+        @Injectable
+        struct Bar<E> {
+            @InjectableProviding
+            init() {}
         }
 
         @Injectable
@@ -651,15 +655,31 @@ struct GenericEmissionTests {
             @InjectableProviding
             init() {}
         }
-        """
-
-        let output = CompileFixture.generate(source: source)
+        """)
 
         #expect(output.contains("protocol `_$ZerkInjectable_Bar` {}"))
         #expect(output.contains("protocol `_$ZerkInjectable_OuterBar` {}"))
         // Two families, two markers, two constrained extensions.
         #expect(output.components(separatedBy: "extension Zerk.Interjection where Injectable: `_$ZerkInjectable_")
             .count - 1 == 2)
+    }
+
+    @Test("a nested generic registration is refused, so its marker never exists")
+    func nestedGenericRegistrationIsRefused() {
+        let result = CompileFixture.generateWithResolution(source: """
+        enum Outer {
+            @Injectable
+            struct Bar<E> {
+                @InjectableProviding
+                init() {}
+            }
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("declared inside 'Outer'")
+        }, "\(result.diagnostics.map(\.message))")
+        #expect(!result.output.output.contains("_$ZerkInjectable_Bar"))
     }
 
     @Test("one marker is declared however many members a key has")

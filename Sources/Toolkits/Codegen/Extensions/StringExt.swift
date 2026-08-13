@@ -78,27 +78,4 @@ extension String {
         return first.uppercased() + dropFirst()
     }
 
-    /// The nominal type name behind a generic spelling.
-    ///
-    /// `Cache<String>` and a generic key shape like `Cache<#0>` are both
-    /// declarations of `Cache`; specialized nested spellings keep their nesting.
-    var nominalTypeName: String {
-        var result = ""
-        var depth = 0
-
-        for character in self {
-            switch character {
-            case "<":
-                depth += 1
-            case ">":
-                depth = max(0, depth - 1)
-            default:
-                if depth == 0 {
-                    result.append(character)
-                }
-            }
-        }
-
-        return result
-    }
 }

@@ -46,6 +46,13 @@ final class SourceCollector: SyntaxVisitor {
     /// `any` spelling wins, since it is the one that is correct in both Swift 6
     /// and under `ExistentialAny`.
     private(set) var keyDisplayNames: [String: String] = [:]
+    /// Injectable key -> every nominal type its spelling mentions.
+    ///
+    /// Collected from the syntax tree at the moment the key is recorded, because
+    /// the canonical key cannot be taken apart afterwards — see
+    /// ``TypeSyntax/nominalNames``. Read when deciding whether the generated
+    /// members may be `public`.
+    private(set) var keyNominalNames: [String: Set<String>] = [:]
     /// `@ZerkAlias` / `#ZerkAlias` declarations, which merge keys before
     /// resolution. See ``KeyAliases``.
     private(set) var aliasDeclarations: [AliasDeclaration] = []
@@ -652,8 +659,29 @@ final class SourceCollector: SyntaxVisitor {
         let injectableAttributes = node.attributes.attributes(named: "Injectable")
         guard !injectableAttributes.isEmpty else { return }
 
-        let isSingleton = node.attributes.hasAttribute(named: "Singleton")
         let location = self.location(for: Syntax(node))
+
+        // A nested type's key and its construction are both recorded as the
+        // *declared* name, so `struct Outer { @Injectable struct Inner {} }`
+        // registers `Inner` and emits `Inner()` — neither of which names
+        // anything from the generated file, which sits at file scope:
+        // "cannot find type 'Inner' in scope".
+        //
+        // Refused rather than qualified, for now. Making it work means deciding
+        // what a consumer writes for the key, and carrying that through the
+        // alias and cross-module paths — a feature, not a repair. Refusing turns
+        // an error inside generated code into one at the declaration.
+        let enclosing = extensionStack + typeStack.map(\.name)
+        guard enclosing.isEmpty else {
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "@Injectable cannot be applied to '\(node.declaredName)', which is declared inside '\(enclosing.joined(separator: "."))'. Zerk registers a type under its own name and builds it from the generated file at file scope, where a nested name does not resolve — move it to the top level, or register a top-level factory with @Injectable that returns it.",
+                location: location
+            ))
+            return
+        }
+
+        let isSingleton = node.attributes.hasAttribute(named: "Singleton")
         let typeScope = injectionScope(in: node.attributes,
                                        isSingleton: isSingleton,
                                        at: location)
@@ -741,6 +769,8 @@ final class SourceCollector: SyntaxVisitor {
             // primary" on a declaration that said `primary: true`.
             let keys: [String]
             let displayKeys: [String]
+            // Paired with `keys` by index, like `displayKeys`.
+            let nominalNames: [Set<String>]
             var isParameterized = false
 
             // `parameterized: true` rewrites the written key: the type's own
@@ -755,6 +785,9 @@ final class SourceCollector: SyntaxVisitor {
             case .key(let key, let display):
                 keys = [key]
                 displayKeys = [display]
+                // A parameterized existential names the protocol the attribute
+                // wrote, holed out over the type's own parameters.
+                nominalNames = [attribute.genericArgumentNominalNames.first ?? [node.declaredName]]
                 isParameterized = true
             case .invalid:
                 // Already reported. Falling through to the plain key path would
@@ -770,11 +803,16 @@ final class SourceCollector: SyntaxVisitor {
                 displayKeys = genericKeys.isEmpty
                     ? [ownDisplayKey]
                     : attribute.genericArgumentDisplayKeys
+                nominalNames = genericKeys.isEmpty
+                    ? [[node.declaredName]]
+                    : attribute.genericArgumentNominalNames
             }
 
             for (offset, key) in keys.enumerated() {
                 injectableKeys[key] = location
-                recordKeyDisplayName(displayKeys[offset], for: key)
+                recordKey(display: displayKeys[offset],
+                          nominalNames: nominalNames[offset],
+                          for: key)
                 if isParameterized {
                     parameterizedKeys[key] = location
                 }
@@ -1335,6 +1373,13 @@ final class SourceCollector: SyntaxVisitor {
     /// key, and so what the `extension Zerk<Key>` is written as. A parameter or
     /// an `@Injected` property keeps its own spelling at its own use site, which
     /// reaches the same specialization regardless.
+    /// Records a key's spelling and the types that spelling mentions together,
+    /// so the two can never describe different things.
+    private func recordKey(display: String, nominalNames: Set<String>, for key: String) {
+        recordKeyDisplayName(display, for: key)
+        keyNominalNames[key, default: []].formUnion(nominalNames)
+    }
+
     private func recordKeyDisplayName(_ displayName: String, for key: String) {
         guard let existing = keyDisplayNames[key] else {
             keyDisplayNames[key] = displayName
@@ -1345,9 +1390,13 @@ final class SourceCollector: SyntaxVisitor {
         }
     }
 
-    /// Dot-joined enclosing type names, or `nil` at file scope.
+    /// Dot-joined enclosing declaration names, or `nil` at file scope.
+    ///
+    /// Extensions count: a `static var` in `extension Service` is read as
+    /// `Service.config`, and the generated file has no `config` of its own.
     private var enclosingTypePath: String? {
-        typeStack.isEmpty ? nil : typeStack.map(\.name).joined(separator: ".")
+        let path = extensionStack + typeStack.map(\.name)
+        return path.isEmpty ? nil : path.joined(separator: ".")
     }
 
     /// A referenced value is read from the generated file, which is a different
@@ -1418,7 +1467,9 @@ final class SourceCollector: SyntaxVisitor {
             location: valueLocation
         )
 
-        recordKeyDisplayName(annotation.type.displayTypeKey, for: annotation.type.normalizedTypeKey)
+        recordKey(display: annotation.type.displayTypeKey,
+                  nominalNames: annotation.type.nominalNames,
+                  for: annotation.type.normalizedTypeKey)
 
         values.append(
             InjectableValueRecord(
@@ -1593,7 +1644,7 @@ final class SourceCollector: SyntaxVisitor {
         guard typeStack.isEmpty || modifiers.isStatic else {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "@Injectable on a member needs it to be 'static': the generated file calls '\(typeStack.map(\.name).joined(separator: "."))\(typeStack.isEmpty ? "" : ".")\(declaredName)' directly, and an instance member has no such reference.",
+                message: "@Injectable on a member needs it to be 'static': the generated file calls '\(qualified(declaredName))' directly, and an instance member has no such reference.",
                 location: location
             ))
             return
@@ -1645,9 +1696,10 @@ final class SourceCollector: SyntaxVisitor {
             let written = attribute.genericArgumentKeys
             let keys = written.isEmpty ? [ownKey] : written
             let displays = written.isEmpty ? [ownDisplayKey] : attribute.genericArgumentDisplayKeys
+            let names = written.isEmpty ? [[baseName]] : attribute.genericArgumentNominalNames
             for (offset, key) in keys.enumerated() {
                 injectableKeys[key] = location
-                recordKeyDisplayName(displays[offset], for: key)
+                recordKey(display: displays[offset], nominalNames: names[offset], for: key)
                 if attribute.publicArgument.isTrue { exportedKeys[key] = location }
                 if attribute.primaryArgument.isTrue { primaryKeys[key] = location }
             }
@@ -1670,7 +1722,11 @@ final class SourceCollector: SyntaxVisitor {
         // A static member is reached by its qualified path. A global is not
         // reachable at all from inside the extension — the member being defined
         // shadows it — so it goes through a thunk declared at file scope.
-        let path = typeStack.map(\.name)
+        // Extensions included: a `static func` declared in `extension Service`
+        // is `Service.make`, and calling a bare `make()` from the generated file
+        // names nothing. `extensionStack` comes first because an extension can
+        // only be outermost.
+        let path = extensionStack + typeStack.map(\.name)
         let reference = (path + [declaredName]).joined(separator: ".")
         let thunk = path.isEmpty
             ? "_$zerk_provider_\(declaredName)"
@@ -1961,6 +2017,7 @@ final class SourceCollector: SyntaxVisitor {
                 typeKind: nil,
                 typeWhereClause: node.genericWhereClause?.trimmedDescription,
                 requiresVisibleType: true,
+                extendedTypeNominalNames: node.extendedType.nominalNames,
                 // A `where` clause constrains an already-generic type; it is not
                 // what makes one generic. The generated extension repeats the
                 // header, so the type's parameters stay in scope either way —
@@ -2047,6 +2104,7 @@ final class SourceCollector: SyntaxVisitor {
                                      typeKind: MarkedTypeKind?,
                                      typeWhereClause: String? = nil,
                                      requiresVisibleType: Bool = false,
+                                     extendedTypeNominalNames: Set<String> = [],
                                      typeIsGeneric: Bool,
                                      typeAccess: AccessRank,
                                      isolation: MarkedMemberIsolation,
@@ -2128,6 +2186,7 @@ final class SourceCollector: SyntaxVisitor {
             kind: kind,
             typeWhereClause: typeWhereClause,
             requiresVisibleType: requiresVisibleType,
+            extendedTypeNominalNames: extendedTypeNominalNames,
             condition: currentCondition,
             parameters: collected,
             effects: effects,

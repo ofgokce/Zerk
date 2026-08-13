@@ -70,6 +70,10 @@ struct MarkedMemberRecord {
     /// see it. Checked at emission, because the declaration may be collected
     /// after the extension is.
     var requiresVisibleType: Bool = false
+    /// Every nominal type the extended type's spelling mentions, collected from
+    /// the tree — `Hidden<Int>` reports both. Empty for a member declared on the
+    /// type itself, whose access was known at collection time.
+    var extendedTypeNominalNames: Set<String> = []
     /// The `#if` the marked declaration sits inside. The generated overload
     /// delegates to it, so it cannot outlive it.
     var condition: CompilationCondition = .unconditional

@@ -10,6 +10,7 @@ Most of these are raised twice — once by the macro, against the declaration, s
 
 | What triggers it | The fix |
 |---|---|
+| `@Injectable` on a type nested in another type or in an extension | Zerk builds it from the generated file at file scope, where a nested name does not resolve. Move it to the top level, or register a top-level factory returning it |
 | `@Injectable<Key>` on a type with no `@InjectableProviding` member and no initializer to adopt | Mark an initializer or a static factory with `@InjectableProviding` |
 | Several types are injectable under one key and none is primary | `@Injectable(primary: true)` on the one that should back `inject()` |
 | Several types are marked primary for one key | Only one type can be primary for a key — drop the others |

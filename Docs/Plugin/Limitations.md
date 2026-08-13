@@ -20,6 +20,21 @@ What still needs real type resolution, and stays distinct: any `typealias` you h
 
 `any` is a special case. Zerk cannot tell a protocol from a superclass or a struct, and `any` is only legal on an existential — so keys *match* with `any` stripped, but the generated file emits the spelling you wrote. If one declaration says `P` and another `any P`, they are one key and `any P` is what gets emitted.
 
+### Registrations must be top level
+
+`@Injectable` on a type nested inside another type, or inside an extension, is refused. Zerk records a type under its declared name and builds it from the generated file, which sits at file scope — where `Inner` names nothing:
+
+```swift
+struct Outer {
+    @Injectable            // error: @Injectable cannot be applied to 'Inner',
+    struct Inner {}        // which is declared inside 'Outer'.
+}
+```
+
+Move the type to the top level, or register a top-level factory that returns it. Making nesting work means deciding what a consumer writes for the key and carrying that through the alias and cross-module paths, which is a feature rather than a repair.
+
+**Members are not affected.** An `@Injectable static func`, an `@InjectableValue`, and `@injected` parameters all work inside a type or an extension, and are reached through the qualified path — a provider declared in `extension Service` is called as `Service.make()`.
+
 ### Module-scoped
 
 Auto-resolution only sees the current module. `@Injectable(public: true)` makes a key's generated members public so another module can call them manually, but the consuming module cannot auto-resolve a foreign key: its plugin has no way to know that key's effects or isolation. Forward it explicitly with an `@InjectableValue` if you want it in the graph.

@@ -173,10 +173,13 @@ struct GenericScopeTests {
         #expect(parameters[1].mentionedGenericParameters == ["E"])
     }
 
-    @Test("a nested type inherits the enclosing type's parameters")
-    func nestedTypeInheritsTheScope() throws {
-        // Swift keeps `E` in scope throughout the body of `Outer<E>`, so a
-        // provider in a nested type can name it and Zerk has to agree.
+    /// This used to assert that a nested `@Injectable` inherited `E` from its
+    /// enclosing type. Registering a nested type is now refused outright — Zerk
+    /// records the key and the construction as the *declared* name, which does
+    /// not resolve from the generated file — so the scope question no longer
+    /// arises for one.
+    @Test("a nested type cannot be registered at all")
+    func nestedTypeIsRefused() {
         let collector = Self.collect("""
         struct Outer<E> {
             @Injectable
@@ -187,11 +190,10 @@ struct GenericScopeTests {
         }
         """)
 
-        let inner = try #require(collector.types.first { $0.name == "Inner" })
-        // Inner declares none of its own...
-        #expect(inner.genericParameters.isEmpty)
-        // ...but reads its parameter in the enclosing scope.
-        #expect(inner.initializers.first?.parameters.first?.mentionedGenericParameters == ["E"])
+        #expect(collector.types.isEmpty)
+        #expect(collector.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("declared inside 'Outer'")
+        }, "\(collector.diagnostics.map(\.message))")
     }
 
     @Test("the scope is popped with the type that opened it")

@@ -63,6 +63,12 @@ public extension AttributeSyntax {
         genericArgumentTypes.map(\.displayTypeKey)
     }
 
+    /// Paired with ``genericArgumentKeys`` by index: every nominal type each
+    /// written key mentions. See ``TypeSyntax/nominalNames``.
+    var genericArgumentNominalNames: [Set<String>] {
+        genericArgumentTypes.map(\.nominalNames)
+    }
+
     /// The call-style arguments of `@Attribute(...)`, as used by
     /// `@Injected(Zerk<Key>.custom)`. Empty for attributes written without
     /// parentheses.

@@ -128,8 +128,24 @@ enum ConditionalCompilation {
         override func visit(_ node: EnumDeclSyntax) -> SyntaxVisitorContinueKind { .skipChildren }
         override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind { .skipChildren }
 
+        /// An initializer decides how the *enclosing type* is built — but only
+        /// where Zerk would read it. In an extension it would not: an extension
+        /// cannot hold stored properties, so nothing there is inferred, and an
+        /// extension initializer is collected only when it carries markers,
+        /// which the parameter check below catches on its own.
+        ///
+        /// `consultsInference` says which case this is, and it is already false
+        /// for an extension.
         override func visit(_ node: InitializerDeclSyntax) -> SyntaxVisitorContinueKind {
-            didFind = true
+            let markers = node.signature.parameterClause.parameters.contains { parameter in
+                parameter.attributes.contains { element in
+                    guard case .attribute(let attribute) = element else { return false }
+                    return ConditionalCompilation.markerAttributes.contains(attribute.name)
+                }
+            }
+            if consultsInference || markers {
+                didFind = true
+            }
             return .skipChildren
         }
 

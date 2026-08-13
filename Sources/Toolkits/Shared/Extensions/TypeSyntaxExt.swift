@@ -103,6 +103,38 @@ public extension TypeSyntax {
         return nil
     }
 
+    /// Every nominal type this spelling mentions, at any depth.
+    ///
+    /// `Cache<String>` reports both `Cache` and `String`; `any Alpha & Beta`
+    /// reports both protocols; `(Int) -> Void` reports both; a tuple reports its
+    /// elements. A member type reports the whole path *and* its base, since both
+    /// have to be visible for the spelling to be legal.
+    ///
+    /// A **tree walk**, and deliberately not a second pass over the canonical
+    /// key string. Taking that string apart is what `typeKeyShape` already warns
+    /// against — "a canonical string looks decomposable and is not, once `->`
+    /// and nesting are in play" — and a scanner that counted `<` and `>` did in
+    /// fact mistake the `>` of a `->` for the end of a generic argument list.
+    ///
+    /// Used to decide whether a generated member may be `public`, and whether a
+    /// type is visible to the generated file. Both questions are about *every*
+    /// type in the spelling, not one name extracted from it: a member exposing
+    /// `any Alpha & Beta` is only as public as the less public of the two.
+    var nominalNames: Set<String> {
+        var names: Set<String> = []
+        Self.collectNominalNames(in: Syntax(self), into: &names)
+        return names
+    }
+
+    private static func collectNominalNames(in node: Syntax, into names: inout Set<String>) {
+        if let type = node.as(TypeSyntax.self), let name = type.nominalBaseName {
+            names.insert(name)
+        }
+        for child in node.children(viewMode: .sourceAccurate) {
+            collectNominalNames(in: child, into: &names)
+        }
+    }
+
     /// Which of the generic parameters in `scope` this type mentions, in the
     /// order they appear.
     ///

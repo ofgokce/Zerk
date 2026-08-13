@@ -117,6 +117,7 @@ public struct CodeGenerator {
             resolutions: resolution.resolutions,
             primaryResolutions: KeyIndex(imports.primaries),
             declaredAccessRanks: collector.declaredAccessRanks,
+            keyNominalNames: collector.keyNominalNames,
             injectedUses: injectedUses,
             markedMembers: markedMembers,
             keyDisplayNames: keyDisplayNames,

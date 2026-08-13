@@ -100,7 +100,7 @@ One entry per provider parameter, in declaration order, each saying what satisfi
 
 ## Stability
 
-`formatVersion` is the contract. Fields may be added within a version; removing or repurposing one bumps it. Ignore unknown fields rather than failing on them.
+`formatVersion` is the contract. A graph declaring a version newer than the tool reads is refused rather than decoded — `Codable` ignores unknown fields and defaults missing ones, so it would otherwise load "successfully" with a meaning that has changed. Fields may be added within a version; removing or repurposing one bumps it. Ignore unknown fields rather than failing on them.
 
 **Optional fields are omitted, not written as `null`.** A transient provider has no `scope` key at all. `jq` and `Codable` treat the two alike; if you index a dictionary directly, ask for the key rather than subscript it.
 

@@ -277,3 +277,54 @@ struct GraphArtifactTests {
         #expect(decoded.keys.map(\.key) == ["Thing"])
     }
 }
+
+/// The format version, and what it is for.
+@Suite("Graph format version")
+struct GraphFormatVersionTests {
+
+    private static func export(_ json: String) throws -> Result<String, GraphExport.Failure> {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("zerk-version-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let url = directory.appendingPathComponent("Zerk.graph.json")
+        try Data(json.utf8).write(to: url)
+
+        do {
+            return .success(try GraphExport(inputPaths: [url.path], format: "json").run() ?? "")
+        } catch let failure as GraphExport.Failure {
+            return .failure(failure)
+        }
+    }
+
+    /// A version nobody reads is decoration. `Codable` ignores unknown fields
+    /// and defaults missing ones, so a newer graph decodes "fine" and the caller
+    /// silently reads one whose meaning has changed — the situation the version
+    /// exists to make detectable.
+    @Test("a graph from a newer format is refused, not silently decoded")
+    func newerFormatIsRefused() throws {
+        let result = try Self.export("""
+        {"formatVersion": \(ZerkGraph.currentFormatVersion + 1), "keys": [], "values": []}
+        """)
+
+        guard case .failure(let failure) = result else {
+            Issue.record("a newer graph was accepted: \(result)")
+            return
+        }
+        #expect(failure.message.contains("format version \(ZerkGraph.currentFormatVersion + 1)"))
+        #expect(failure.message.contains("reads up to \(ZerkGraph.currentFormatVersion)"))
+    }
+
+    @Test("the current format is accepted")
+    func currentFormatIsAccepted() throws {
+        let result = try Self.export("""
+        {"formatVersion": \(ZerkGraph.currentFormatVersion), "keys": [], "values": []}
+        """)
+
+        guard case .success = result else {
+            Issue.record("the current format was refused: \(result)")
+            return
+        }
+    }
+}

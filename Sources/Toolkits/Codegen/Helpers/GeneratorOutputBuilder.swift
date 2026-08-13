@@ -34,6 +34,9 @@ struct GeneratorOutputBuilder {
     /// written with, keyed by qualified name. See
     /// ``SourceCollector/declaredAccessRanks``.
     var declaredAccessRanks: [String: AccessRank] = [:]
+    /// Injectable key -> every nominal type its spelling mentions. See
+    /// ``SourceCollector/keyNominalNames``.
+    var keyNominalNames: [String: Set<String>] = [:]
     var injectedUses: [InjectedUseRecord] = []
     var markedMembers: [MarkedMemberRecord] = []
     /// Injectable key -> the spelling to emit for it, from `SourceCollector`.
@@ -313,8 +316,14 @@ struct GeneratorOutputBuilder {
             providerThunks.append(resolution)
         }
 
-        thunkLines += referencedValueThunkDeclarations(for: referencedValueThunks)
-        thunkLines += providerThunkDeclarations(for: providerThunks)
+        thunkLines += thunkDeclarations(
+            Dictionary(grouping: referencedValueThunks.filter { $0.enclosingTypePath == nil },
+                       by: \.name)
+                .mapValues { $0.map { $0 as any ThunkRecord } })
+        thunkLines += thunkDeclarations(
+            Dictionary(grouping: providerThunks.filter { $0.thunkName != nil },
+                       by: { $0.thunkName! })
+                .mapValues { $0.map { $0 as any ThunkRecord } })
 
         if !thunkLines.isEmpty {
             output += thunkLines
@@ -670,14 +679,24 @@ struct GeneratorOutputBuilder {
     /// member's signature, so the rule is identical: the value's own declaration
     /// may stay internal, since a public accessor's *body* may read it.
     private func exportedAccessPrefix(isExported: Bool, injectableKey: String) -> String {
-        // Absent means the key is not declared in this module, so its access is
-        // not ours to judge — only a key we can see and that is *not* public
-        // blocks the export.
-        let nominalKey = injectableKey.nominalTypeName
-        guard isExported, declaredAccessRanks[nominalKey].map({ $0 >= .public }) ?? true else {
+        // *Every* type the spelling mentions has to be public, not one name
+        // taken from it: a member exposing `any Alpha & Beta` is only as public
+        // as the less public of the two, and a specialization is bounded by its
+        // arguments. A name absent from the map is declared in another module,
+        // where its access is not ours to judge.
+        guard isExported, isPublishable(injectableKey) else {
             return ""
         }
         return "public "
+    }
+
+    /// Whether every type this key mentions is public.
+    private func isPublishable(_ injectableKey: String) -> Bool {
+        // Falls back to the key itself for a registration recorded before
+        // nominal names were tracked — a hand-built record in a test, never the
+        // collector.
+        let names = keyNominalNames[injectableKey] ?? [injectableKey]
+        return names.allSatisfy { declaredAccessRanks[$0].map { $0 >= .public } ?? true }
     }
 
     /// The warning raised when `public: true` cannot be honoured, worded for
@@ -687,7 +706,10 @@ struct GeneratorOutputBuilder {
                                        location: AttributeLocation) -> CodegenDiagnostic {
         CodegenDiagnostic(
             severity: .warning,
-            message: "@Injectable(public: true) has no effect: '\(injectableKey)' is not public, so the generated \(plural ? "members cannot be public" : "member cannot be public").",
+            // Spelled as the developer would write it: a generic key's own
+            // notation is a shape (`Cache<#0>`), which appears nowhere in their
+            // source — the same reason `cycleDiagnostics` uses this.
+            message: "@Injectable(public: true) has no effect: '\(displayName(for: injectableKey))' is not public, so the generated \(plural ? "members cannot be public" : "member cannot be public").",
             location: location
         )
     }
@@ -1197,65 +1219,46 @@ struct GeneratorOutputBuilder {
         return "\(path).\(value.name)"
     }
 
-    private func referencedValueThunkDeclarations(for values: [InjectableValueRecord]) -> [String] {
-        let topLevelValues = values.filter { $0.enclosingTypePath == nil }
-        let grouped = Dictionary(grouping: topLevelValues, by: \.name)
+    /// A record that reaches its declaration through a file-scope thunk.
+    ///
+    /// The two kinds differ only in where their location lives and what their
+    /// thunk looks like; everything else about grouping, ordering and deduping
+    /// is the same, which is why they share one emitter.
+    protocol ThunkRecord {
+        var condition: CompilationCondition { get }
+        var thunkLocation: AttributeLocation { get }
+        func thunkLines(_ builder: GeneratorOutputBuilder) -> [String]
+    }
+
+    /// One thunk's worth of declarations, whatever kind of record needs it.
+    ///
+    /// A referenced value and a global `@Injectable` declaration are reached the
+    /// same way — through a file-scope forwarding function, because an
+    /// unqualified name inside the generated member binds to the member itself —
+    /// so they are grouped, deduped and emitted by one function rather than two
+    /// near-identical ones.
+    private func thunkDeclarations(_ groups: [String: [any ThunkRecord]]) -> [String] {
         var lines: [String] = []
 
-        for name in grouped.keys.sorted() {
-            for value in Self.distinctThunkRecords(grouped[name]!, condition: \.condition, location: \.location) {
-                lines += Self.guarded(referenceThunkLines(for: value), by: value.condition)
+        for name in groups.keys.sorted() {
+            // Deduped by (guard, location): one declaration registered under
+            // several keys is still one declaration, and emitting its thunk per
+            // key is `invalid redeclaration`. Sorted first so the file is
+            // byte-identical between builds.
+            var seen = Set<String>()
+            let sorted = groups[name]!.sorted { lhs, rhs in
+                if lhs.condition.sortKey != rhs.condition.sortKey {
+                    return lhs.condition.sortKey < rhs.condition.sortKey
+                }
+                return lhs.thunkLocation < rhs.thunkLocation
+            }
+            for record in sorted
+            where seen.insert("\(record.condition.guardText ?? "")|\(record.thunkLocation)").inserted {
+                lines += Self.guarded(record.thunkLines(self), by: record.condition)
             }
         }
 
         return lines
-    }
-
-    private func providerThunkDeclarations(for resolutions: [ProviderResolution]) -> [String] {
-        var grouped: [String: [ProviderResolution]] = [:]
-        for resolution in resolutions {
-            guard case .explicit(let provider) = resolution.provider,
-                  case .declaration(_, _, let thunk?) = provider.kind else {
-                continue
-            }
-            grouped[thunk, default: []].append(resolution)
-        }
-
-        var lines: [String] = []
-        for thunk in grouped.keys.sorted() {
-            for resolution in Self.distinctThunkRecords(grouped[thunk]!,
-                                                        condition: \.condition,
-                                                        location: { $0.provider.location }) {
-                lines += Self.guarded(declarationThunkLines(for: resolution), by: resolution.condition)
-            }
-        }
-
-        return lines
-    }
-
-    private static func distinctThunkRecords<Record>(
-        _ records: [Record],
-        condition: (Record) -> CompilationCondition,
-        location: (Record) -> AttributeLocation
-    ) -> [Record] {
-        var seen = Set<String>()
-        var result: [Record] = []
-
-        for record in records.sorted(by: { lhs, rhs in
-            let leftCondition = condition(lhs)
-            let rightCondition = condition(rhs)
-            if leftCondition.sortKey != rightCondition.sortKey {
-                return leftCondition.sortKey < rightCondition.sortKey
-            }
-            return location(lhs) < location(rhs)
-        }) {
-            let identity = "\(condition(record).guardText ?? "")|\(location(record))"
-            if seen.insert(identity).inserted {
-                result.append(record)
-            }
-        }
-
-        return result
     }
 
     /// The private forwarding function a **global** `@Injectable` declaration is
@@ -1265,7 +1268,7 @@ struct GeneratorOutputBuilder {
     /// being defined, so a member named after its own declaration would call
     /// itself. Forwarding through a file-scope function that was declared
     /// *outside* the extension is what breaks the cycle.
-    private func declarationThunkLines(for resolution: ProviderResolution) -> [String] {
+    fileprivate func declarationThunkLines(for resolution: ProviderResolution) -> [String] {
         guard case .explicit(let provider) = resolution.provider,
               case .declaration(let reference, let isProperty, let thunk?) = provider.kind else {
             return []
@@ -1309,7 +1312,7 @@ struct GeneratorOutputBuilder {
     /// the thunk into the ambient domain and the nonisolated member that calls
     /// it stops compiling. Everything Zerk writes is pinned; the settings file
     /// governs how Zerk reads source, never what it emits.
-    private func referenceThunkLines(for value: InjectableValueRecord) -> [String] {
+    fileprivate func referenceThunkLines(for value: InjectableValueRecord) -> [String] {
         guard value.enclosingTypePath == nil else {
             return []
         }
@@ -1615,13 +1618,19 @@ struct GeneratorOutputBuilder {
                 // — so this is the first point where both are known. The
                 // generated file is a separate file, so anything below internal
                 // is out of its reach.
-                if record.requiresVisibleType,
-                   let typeName,
-                   let declared = declaredAccessRanks[typeName.nominalTypeName],
-                   declared < .internal {
+                // Every type the spelling mentions, not one name taken from it:
+                // `Hidden<Int>` is only as visible as the less visible of the
+                // two, and a spelling containing `->` cannot be split by hand.
+                let hidden = record.requiresVisibleType
+                    ? record.extendedTypeNominalNames
+                        .compactMap { name in declaredAccessRanks[name].map { (name, $0) } }
+                        .filter { $0.1 < .internal }
+                        .min(by: { $0.0 < $1.0 })
+                    : nil
+                if let hidden, let typeName {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
-                        message: "@injected members must be at least internal: '\(typeName)' is \(declared.rawValue), and the generated overload lives in a separate file that cannot see it.",
+                        message: "@injected members must be at least internal: '\(hidden.0)' is \(hidden.1.rawValue), and the generated overload for '\(typeName)' lives in a separate file that cannot see it.",
                         location: record.location
                     ))
                     continue
@@ -2659,5 +2668,31 @@ struct GeneratorOutputBuilder {
                 return expression
             }
             .joined(separator: ", ")
+    }
+}
+
+extension InjectableValueRecord: GeneratorOutputBuilder.ThunkRecord {
+    var thunkLocation: AttributeLocation { location }
+
+    func thunkLines(_ builder: GeneratorOutputBuilder) -> [String] {
+        builder.referenceThunkLines(for: self)
+    }
+}
+
+extension ProviderResolution: GeneratorOutputBuilder.ThunkRecord {
+    var thunkLocation: AttributeLocation { provider.location }
+
+    /// The thunk's name, and `nil` when this resolution needs none — a member of
+    /// a type is reached by its qualified path, which is already unambiguous.
+    var thunkName: String? {
+        guard case .explicit(let provider) = provider,
+              case .declaration(_, _, let thunk?) = provider.kind else {
+            return nil
+        }
+        return thunk
+    }
+
+    func thunkLines(_ builder: GeneratorOutputBuilder) -> [String] {
+        builder.declarationThunkLines(for: self)
     }
 }
