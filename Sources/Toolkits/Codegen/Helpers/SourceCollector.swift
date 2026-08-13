@@ -23,14 +23,16 @@ final class SourceCollector: SyntaxVisitor {
     private(set) var types: [TypeRecord] = []
     private(set) var values: [InjectableValueRecord] = []
     private(set) var diagnostics: [CodegenDiagnostic] = []
-    /// Declared type names in the module -> the access they were written with.
+    /// Every type and protocol declared in the module -> the access it was
+    /// written with, keyed by **qualified** name.
     ///
-    /// Kept alongside ``moduleAccessLevels`` rather than folded into it: that
-    /// one answers "may this be public", while an extension member needs to know
-    /// whether the type is visible to the generated file *at all*.
+    /// One map rather than two. It used to sit beside a `[String: Bool]` saying
+    /// only whether each was public, and the pair recorded the same fact twice —
+    /// `isPublic` is `>= .public` — filled at different sites with different
+    /// keys. That split is what let the same unqualified-name mistake be made in
+    /// both: an injectable key for a nested type is `Outer.Inner`, so a map keyed
+    /// by `Inner` never matches and every check reading it is silently skipped.
     private(set) var declaredAccessRanks: [String: AccessRank] = [:]
-    /// Declared type/protocol names in the module -> whether they are public.
-    private(set) var moduleAccessLevels: [String: Bool] = [:]
     /// `@Injected` property annotations seen in the module.
     private(set) var injectedUses: [InjectedUseRecord] = []
     /// Initializers/methods carrying `@injected` parameter markers.
@@ -147,12 +149,12 @@ final class SourceCollector: SyntaxVisitor {
         _ = typeStack.popLast()
     }
 
-    /// `@Injectable` on an `extension` is refused. Children are still visited,
-    /// since an `@InjectableValue` inside an extension is collected as usual.
     override func visitPost(_ node: ExtensionDeclSyntax) {
         _ = extensionStack.popLast()
     }
 
+    /// `@Injectable` on an `extension` is refused. Children are still visited,
+    /// since an `@InjectableValue` inside an extension is collected as usual.
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
         extensionStack.append(node.extendedType.trimmedDescription)
         collectMarkedExtensionMembers(node)
@@ -230,6 +232,16 @@ final class SourceCollector: SyntaxVisitor {
         return .skipChildren
     }
 
+    /// A declaration's name qualified by everything it is nested inside.
+    ///
+    /// Extensions come first and can only be outermost — Swift allows them at
+    /// file scope only — so `extension A { struct B { struct C {} } }` gives
+    /// `A.B.C`, which is what the key for a nested type looks like and what an
+    /// `extension A.B` names.
+    private func qualified(_ name: String) -> String {
+        (extensionStack + typeStack.map(\.name) + [name]).joined(separator: ".")
+    }
+
     /// Identity of one `#if`, as file and offset.
     ///
     /// Clause exclusivity compares these, so it has to distinguish two `#if`s
@@ -271,7 +283,6 @@ final class SourceCollector: SyntaxVisitor {
                 nonLiteralPublicDiagnostic(named: "@InjectableValues", at: location(for: Syntax(node))))
         }
 
-        declaredAccessRanks[node.declaredName] = node.modifiers.accessRank
 
         typeStack.append(
             TypeContext(
@@ -595,7 +606,7 @@ final class SourceCollector: SyntaxVisitor {
     /// absent here and the check is skipped — the compiler still catches it, at
     /// the generated line rather than the declaration.
     override func visit(_ node: ProtocolDeclSyntax) -> SyntaxVisitorContinueKind {
-        moduleAccessLevels[node.name.text] = node.modifiers.isPublic
+        declaredAccessRanks[qualified(node.name.text)] = node.modifiers.accessRank
         protocolPrimaryAssociatedTypeCounts[node.name.text] =
             node.primaryAssociatedTypeClause?.primaryAssociatedTypes.count ?? 0
         return .skipChildren
@@ -635,7 +646,7 @@ final class SourceCollector: SyntaxVisitor {
     private func collectType(_ node: some DeclGroupSyntax,
                              isolation typeIsolation: ProviderIsolation,
                              genericParameters: [String]) {
-        moduleAccessLevels[node.declaredName] = node.modifiers.isPublic
+        declaredAccessRanks[qualified(node.declaredName)] = node.modifiers.accessRank
 
         let injectableAttributes = node.attributes.attributes(named: "Injectable")
         guard !injectableAttributes.isEmpty else { return }
@@ -1820,7 +1831,10 @@ final class SourceCollector: SyntaxVisitor {
     private func collectMarkedMembers(_ node: some DeclGroupSyntax,
                                       typeKind: MarkedTypeKind,
                                       typeIsGeneric: Bool) {
-        let qualifiedName = (typeStack.map(\.name) + [node.declaredName]).joined(separator: ".")
+        // Qualified by extensions too: a type declared inside `extension Outer`
+        // is `Outer.Bar`, and generating `extension Bar` for it names something
+        // that does not exist.
+        let qualifiedName = qualified(node.declaredName)
         let typeAccess = node.modifiers.accessRank
         let isActorType = node.is(ActorDeclSyntax.self)
         let typeIsolation = isActorType

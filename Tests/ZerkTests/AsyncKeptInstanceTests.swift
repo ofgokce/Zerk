@@ -186,6 +186,24 @@ struct AsyncKeptInstanceTests {
         #expect(value == 7)
     }
 
+    /// Cancellation must not mean "rebuild": the box may already hold the
+    /// answer, and an instance built here is never published — for a
+    /// `@Singleton` that is a second instance handed out while the shared one
+    /// sits cached.
+    @Test("a cancelled caller reads the kept instance rather than rebuilding")
+    func cancelledCallerReadsTheBox() async {
+        let box = ZerkAsyncBox<Int>()
+        let first = await box.value { AsyncBuildLog.shared.record("cancelled"); return 1 }
+
+        let task = Task {
+            await Task.yield()
+            return await box.value { AsyncBuildLog.shared.record("cancelled"); return 2 }
+        }
+        task.cancel()
+
+        #expect(await task.value == first)
+    }
+
     @Test("a non-Sendable instance can be kept across an await")
     func nonSendableInstanceIsKept() async {
         let first = await Zerk<NonSendableAsyncClient>.inject()

@@ -99,8 +99,9 @@ extension Service {
 // }
 ```
 
-A **constrained** extension keeps its clause, so the overload lands somewhere its
-body is legal:
+Each extension gets **its own** generated block, carrying that extension's `where` clause, so
+the overload lands somewhere its body is legal — two extensions of one type with different
+constraints stay two blocks:
 
 ```swift
 extension Cache where E: Equatable {
@@ -110,6 +111,10 @@ extension Cache where E: Equatable {
 // generated:
 // extension Cache where E: Equatable { ... }
 ```
+
+A **nested** type keeps its qualification: a member of `extension Outer.Inner`, or of a type
+declared inside `extension Outer`, generates `extension Outer.Inner` rather than
+`extension Inner`.
 
 The **extended type must be visible to the generated file**, which is a separate file: an
 extension of a `private` or `fileprivate` type is refused. An extension's own modifiers say

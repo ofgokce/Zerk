@@ -143,7 +143,19 @@ public final class ZerkAsyncBox<Value>: @unchecked Sendable {
     /// Falling back to building directly gives up exactly-once for this one
     /// call, which is the lesser failure.
     public func value(_ build: @Sendable @escaping () async -> Value) async -> Value {
-        for _ in 0..<Self.joinAttempts where !Task.isCancelled {
+        for _ in 0..<Self.joinAttempts {
+            // Checked *inside* the loop, and after the cheap read below, because
+            // a cancelled caller still owes its caller a value — and if the box
+            // already holds one, that value is free. Skipping straight to the
+            // fallback would rebuild an instance that exists, and hand back one
+            // the box never published: for a `@Singleton`, a second instance
+            // while the shared one sits cached.
+            if case .ready(let value) = entry({ await build() }) {
+                return value
+            }
+            if Task.isCancelled {
+                break
+            }
             if let value = try? await value({ () async throws -> Value in await build() }) {
                 return value
             }
@@ -154,10 +166,8 @@ public final class ZerkAsyncBox<Value>: @unchecked Sendable {
         return await build()
     }
 
-    /// How many times a non-throwing call will re-join before building on its
-    /// own. Small on purpose: each attempt means another caller's build failed
-    /// in the window, which is already the unusual case.
-    private static var joinAttempts: Int { 4 }
+    /// See ``zerkAsyncBoxJoinAttempts``.
+    private static var joinAttempts: Int { zerkAsyncBoxJoinAttempts }
 
     /// Reads the state, starting the build if nothing else has.
     ///
@@ -223,3 +233,15 @@ public final class ZerkAsyncBox<Value>: @unchecked Sendable {
 extension ZerkAsyncBox: ZerkScopeResettable {
     var resetScope: InjectionScope? { scope }
 }
+
+/// How many times a non-throwing `value(_:)` re-joins another caller's build
+/// before building on its own.
+///
+/// Small on purpose: each attempt means someone else's build failed in the
+/// window, which is already the unusual case.
+///
+/// A file-scope constant rather than a static on the box, because a generic type
+/// cannot hold a static stored property — and a computed `var` returning a
+/// literal reads as something that might vary per call or per instance, which is
+/// the question a reader tuning a retry bound would ask.
+private let zerkAsyncBoxJoinAttempts = 4

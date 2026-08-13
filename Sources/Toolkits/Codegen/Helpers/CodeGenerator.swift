@@ -116,7 +116,6 @@ public struct CodeGenerator {
             values: values,
             resolutions: resolution.resolutions,
             primaryResolutions: KeyIndex(imports.primaries),
-            moduleAccessLevels: collector.moduleAccessLevels,
             declaredAccessRanks: collector.declaredAccessRanks,
             injectedUses: injectedUses,
             markedMembers: markedMembers,

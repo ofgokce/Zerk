@@ -493,3 +493,125 @@ struct ReviewRegressionsSecondPassTests {
         #expect(result.output.output.contains("extension Cache {"))
     }
 }
+
+/// The third review pass: nested types and extension constraints, where the
+/// same mistake — reading a *simple* name for something that has a qualified one
+/// — had been made in three places at once.
+@Suite("Review regressions, third pass")
+struct ReviewRegressionsThirdPassTests {
+
+    private static let repo = """
+    protocol Repo {}
+
+    @Injectable<Repo>
+    struct RepoImpl: Repo {}
+    """
+
+    private static func generated(_ source: String) -> String {
+        CompileFixture.generate(source: "\(Self.repo)\n\n\(source)")
+    }
+
+    private static func diagnostics(_ source: String) -> [CodegenDiagnostic] {
+        CompileFixture.generateWithResolution(source: "\(Self.repo)\n\n\(source)").diagnostics
+    }
+
+    // MARK: - One extension block per constraint
+
+    /// Grouping by type alone put every extension's members in one block under
+    /// whichever `where` clause was collected first.
+    @Test("two constrained extensions get two blocks")
+    func constrainedExtensionsDoNotMerge() {
+        let generated = Self.generated("""
+        protocol Alpha {}
+        protocol Beta {}
+
+        struct Cache<E> {}
+
+        extension Cache where E: Alpha {
+            func a(@injected repo: Repo, item: E) -> E { item }
+        }
+        extension Cache where E: Beta {
+            func b(@injected repo: Repo, item: E) -> E { item }
+        }
+        """)
+
+        #expect(generated.contains("extension Cache where E: Alpha {"))
+        #expect(generated.contains("extension Cache where E: Beta {"))
+    }
+
+    /// The worse half, because it compiled: an unconstrained member inherited
+    /// the constraint and silently vanished for every other specialization.
+    @Test("an unconstrained extension does not inherit a constraint")
+    func unconstrainedExtensionKeepsItsFreedom() {
+        let generated = Self.generated("""
+        protocol Alpha {}
+
+        struct Cache<E> {}
+
+        extension Cache where E: Alpha {
+            func constrained(@injected repo: Repo, item: E) -> E { item }
+        }
+        extension Cache {
+            func plain(@injected repo: Repo, item: E) -> E { item }
+        }
+        """)
+
+        // `plain` must be reachable for every E, so its block carries no clause.
+        #expect(generated.contains("extension Cache {"))
+        #expect(generated.contains("extension Cache where E: Alpha {"))
+    }
+
+    // MARK: - Qualified names
+
+    /// `extensionStack` was added so a `#if` inside an extension is seen, but
+    /// the qualified name still came from `typeStack` alone.
+    @Test("a type declared inside an extension keeps its outer qualification")
+    func nestedTypeInExtensionIsQualified() {
+        let generated = Self.generated("""
+        struct Outer {}
+
+        extension Outer {
+            struct Bar {
+                func run(@injected repo: Repo, id: Int) -> Int { id }
+            }
+        }
+        """)
+
+        #expect(generated.contains("extension Outer.Bar {"))
+        #expect(!generated.contains("extension Bar {"))
+    }
+
+    /// The visibility guard looked the type up by its simple name, so a nested
+    /// one never matched and the check it was written for was skipped.
+    @Test("a fileprivate nested type is refused")
+    func fileprivateNestedTypeIsRefused() {
+        let diagnostics = Self.diagnostics("""
+        struct Outer { fileprivate struct Inner {} }
+
+        extension Outer.Inner {
+            func run(@injected repo: Repo, id: Int) -> Int { id }
+        }
+        """)
+
+        #expect(diagnostics.contains {
+            $0.severity == .error && $0.message.contains("'Outer.Inner' is fileprivate")
+        }, "\(diagnostics.map(\.message))")
+    }
+
+    /// Same keying flaw, second map: `public: true` on a nested key emitted
+    /// `public` unchecked, and the warning written for the case never fired.
+    @Test("public: true on an internal nested key is reported, not emitted")
+    func publicOnNestedInternalKeyIsInert() {
+        let result = CompileFixture.generateWithResolution(source: """
+        public struct Outer { struct Inner {} }
+
+        @Injectable<Outer.Inner>(public: true)
+        struct Impl {}
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .warning && $0.message.contains("has no effect")
+        }, "\(result.diagnostics.map(\.message))")
+        #expect(!result.output.output.contains("public static var impl"))
+    }
+}

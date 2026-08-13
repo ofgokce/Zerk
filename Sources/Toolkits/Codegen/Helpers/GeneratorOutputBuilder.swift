@@ -29,10 +29,10 @@ struct GeneratorOutputBuilder {
     /// through this rather than through `resolutions`, because those all call
     /// `inject()`.
     var primaryResolutions: KeyIndex<ProviderResolution> = KeyIndex()
-    var moduleAccessLevels: [String: Bool] = [:]
-    /// Declared type names -> the access they were written with, for the check
-    /// an extension member cannot make at collection time. See
-    /// ``MarkedMemberRecord/requiresVisibleType``.
+
+    /// Every type and protocol declared in the module -> the access it was
+    /// written with, keyed by qualified name. See
+    /// ``SourceCollector/declaredAccessRanks``.
     var declaredAccessRanks: [String: AccessRank] = [:]
     var injectedUses: [InjectedUseRecord] = []
     var markedMembers: [MarkedMemberRecord] = []
@@ -675,7 +675,10 @@ struct GeneratorOutputBuilder {
     /// member's signature, so the rule is identical: the value's own declaration
     /// may stay internal, since a public accessor's *body* may read it.
     private func exportedAccessPrefix(isExported: Bool, injectableKey: String) -> String {
-        guard isExported, moduleAccessLevels[injectableKey] != false else {
+        // Absent means the key is not declared in this module, so its access is
+        // not ours to judge — only a key we can see and that is *not* public
+        // blocks the export.
+        guard isExported, declaredAccessRanks[injectableKey].map({ $0 >= .public }) ?? true else {
             return ""
         }
         return "public "
@@ -1510,6 +1513,17 @@ struct GeneratorOutputBuilder {
     /// parameters pass through unchanged. Effects of resolved chains merge
     /// into the overload (an async chain yields an async overload), and a
     /// dependency in another isolation domain merges in as `async` too.
+    /// What one generated `extension` block covers: a type and one constraint.
+    ///
+    /// Two extensions of the same type with different `where` clauses are two
+    /// blocks, because a member written under one is not legal under the other.
+    private struct ExtensionGroup: Hashable {
+        let typeName: String?
+        let whereClause: String?
+
+        var sortKey: String { "\(typeName ?? "")|\(whereClause ?? "")" }
+    }
+
     private func markedMemberLines(diagnostics: inout [CodegenDiagnostic]) -> [String] {
         guard !markedMembers.isEmpty else {
             return []
@@ -1520,16 +1534,25 @@ struct GeneratorOutputBuilder {
         /// under, so a clash is decided by what a single build sees.
         var emittedOverloads: [String: [CompilationCondition]] = [:]
 
+        // Grouped by type *and* constraint, not by type alone. Every extension
+        // of one type would otherwise land in a single generated extension
+        // carrying whichever `where` clause was collected first — which either
+        // does not compile, or silently narrows an unconstrained member to the
+        // first constraint it found.
+        //
         // Globals group under `nil`, which has no ordering of its own — sorted
         // by the empty string so they come first, deterministically.
-        let grouped = Dictionary(grouping: markedMembers, by: \.typeName)
-        for typeName in grouped.keys.sorted(by: { ($0 ?? "") < ($1 ?? "") }) {
+        let grouped = Dictionary(grouping: markedMembers) {
+            ExtensionGroup(typeName: $0.typeName, whereClause: $0.typeWhereClause)
+        }
+        for group in grouped.keys.sorted(by: { $0.sortKey < $1.sortKey }) {
+            let typeName = group.typeName
             var memberLines: [String] = []
             // The extension names the type, so it is guarded by whatever every
             // member of it shares — the type's own `#if` when it has one.
-            let sharedCondition = CompilationCondition.commonPrefix(of: grouped[typeName]!.map(\.condition))
+            let sharedCondition = CompilationCondition.commonPrefix(of: grouped[group]!.map(\.condition))
 
-            for record in grouped[typeName]! {
+            for record in grouped[group]! {
                 // An extension says nothing about the access of the type it
                 // extends, and the declaration may have been collected after it
                 // — so this is the first point where both are known. The
@@ -1731,11 +1754,10 @@ struct GeneratorOutputBuilder {
             if !memberLines.isEmpty {
                 var block: [String] = []
                 if let typeName {
-                    // The `where` clause comes along, or the overload lands in
-                    // an unconstrained extension while its body calls something
-                    // that needs the constraint.
-                    let clause = grouped[typeName]?.compactMap(\.typeWhereClause).first
-                    block.append("extension \(typeName)\(clause.map { " \($0)" } ?? "") {")
+                    // The group's own clause, which every member in it shares
+                    // by construction — the overload must land somewhere its
+                    // body is legal.
+                    block.append("extension \(typeName)\(group.whereClause.map { " \($0)" } ?? "") {")
                     block.append(contentsOf: memberLines.dropLast())
                     block.append("}")
                 } else {

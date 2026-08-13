@@ -667,7 +667,7 @@ struct GeneratorOutputBuilderTests {
         let result = buildOutput(
             values: [],
             resolutions: [service],
-            moduleAccessLevels: ["Service": false]
+            declaredAccessRanks: ["Service": .internal]
         )
 
         #expect(result.diagnostics.contains { $0.severity == .warning && $0.message.contains("@Injectable(public: true) has no effect") })
@@ -984,7 +984,7 @@ struct GeneratorOutputBuilderTests {
         let result = buildOutput(
             values: [],
             resolutions: [sharedService],
-            moduleAccessLevels: ["Service": false]
+            declaredAccessRanks: ["Service": .internal]
         )
 
         #expect(!result.output.contains("public static"))
@@ -1031,7 +1031,7 @@ struct ParameterInjectionTests {
         let output = buildOutput(
             values: collector.values,
             resolutions: resolution.resolutions,
-            moduleAccessLevels: collector.moduleAccessLevels,
+            declaredAccessRanks: collector.declaredAccessRanks,
             injectedUses: collector.injectedUses,
             markedMembers: collector.markedMembers
         )
@@ -1308,14 +1308,14 @@ private func makeResolution(typeName: String,
 /// rules here would let the two drift apart silently.
 private func buildOutput(values: [InjectableValueRecord] = [],
                          resolutions: [ProviderResolution],
-                         moduleAccessLevels: [String: Bool] = [:],
+                         declaredAccessRanks: [String: AccessRank] = [:],
                          injectedUses: [InjectedUseRecord] = [],
                          markedMembers: [MarkedMemberRecord] = []) -> GeneratorOutput {
     GeneratorOutputBuilder(
         values: values,
         resolutions: resolutions,
         primaryResolutions: KeyIndex(ProviderResolver.electPrimaries(among: resolutions).primaries),
-        moduleAccessLevels: moduleAccessLevels,
+        declaredAccessRanks: declaredAccessRanks,
         injectedUses: injectedUses,
         markedMembers: markedMembers
     ).build()
