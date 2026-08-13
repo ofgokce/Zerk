@@ -12,7 +12,8 @@ public extension FunctionDeclSyntax {
     /// The body must be exactly one expression naming a `Zerk` member —
     /// `Zerk<Session>.staging` or `Zerk.session(…)` — because Zerk inlines it at
     /// every use site rather than calling the function. Anything else returns
-    /// `nil` alongside `importedBodyIsMalformed`, which the macro reports.
+    /// `nil`, and the macro reports the malformed body against the
+    /// declaration.
     ///
     /// Only the *callee* is kept: arguments are re-emitted from the declared
     /// parameters, since a bubbled parameter may be renamed on its way into the
@@ -43,13 +44,5 @@ public extension FunctionDeclSyntax {
             return nil
         }
         return text
-    }
-
-    /// Whether a body was written that is not a single `Zerk` expression.
-    ///
-    /// Distinguishes "no body, synthesise one" from "a body Zerk cannot inline",
-    /// which are the same `nil` from ``importedResolutionCallee``.
-    var importedBodyIsMalformed: Bool {
-        body != nil && importedResolutionCallee == nil
     }
 }

@@ -193,11 +193,6 @@ struct ParameterClassifier {
         return elements.filter { seen.insert($0).inserted }
     }
 
-    /// Total effects of building this provider with everything auto-resolved.
-    func totalEffects(for resolution: ProviderResolution) -> ProviderEffects {
-        resolution.provider.effects.merged(with: classify(resolution).dependencyEffects)
-    }
-
     /// An `@InjectableValue` satisfies a parameter when both its key and its
     /// name match — the name match is what keeps two `String` values from
     /// being interchangeable.

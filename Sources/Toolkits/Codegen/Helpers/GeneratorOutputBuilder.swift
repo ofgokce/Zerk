@@ -20,6 +20,10 @@ import SharedToolkit
 /// Output is assembled as strings rather than syntax nodes, so nearly every
 /// helper here returns a line or a fragment of one.
 struct GeneratorOutputBuilder {
+    /// Every `@InjectableValue` in the module.
+    ///
+    /// They join what is emitted but never `primaryResolutions`: a value is
+    /// reached by name, so it never becomes a key's `inject()`.
     let values: [InjectableValueRecord]
     /// Every (key, provider) pair: one generated member each.
     let resolutions: [ProviderResolution]
@@ -53,9 +57,6 @@ struct GeneratorOutputBuilder {
     /// winner per configuration. See ``ProviderResolutionResult/primaryVariants``.
     var primaryVariants: [String: [ProviderResolution]] = [:]
 
-    ///
-    /// They join what is emitted but never `primaryResolutions`: a value is
-    /// reached by name, so it never becomes a key's `inject()`.
     /// How a key is written in the generated file.
     ///
     /// Differs from the key itself only in `any`: keys match with it stripped,
@@ -218,7 +219,11 @@ struct GeneratorOutputBuilder {
         var referencedValueThunks: [InjectableValueRecord] = []
         var providerThunks: [ProviderResolution] = []
 
-        for value in values.sorted(by: { $0.name < $1.name }) {
+        // Keyed as well as named: one value registered under several keys is
+        // several records sharing a name, so sorting on the name alone leaves
+        // their order to `sorted`, which is not stable — and the generated file
+        // is meant to be byte-identical between builds of identical source.
+        for value in values.sorted(by: { ($0.name, $0.typeKey) < ($1.name, $1.typeKey) }) {
             // An import matches parameters but declares nothing: the member, and
             // the interjection requirement that goes with it, belong to the
             // module that owns the value.
@@ -655,7 +660,7 @@ struct GeneratorOutputBuilder {
         .joined(separator: ", ")
 
         lines.append("")
-        lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(generics.parameters)\(resolvingSignature)\(resolvingEffects.declarationSuffix) -> \(returnClause(for: provider, key: keyText, parameters: resolvingParameters, classification: classification))\(generics.whereClause) {")
+        lines.append("    \(isolation.declarationPrefix)\(access)static func \(memberName)\(generics.parameters)\(resolvingSignature)\(resolvingEffects.declarationSuffix) -> \(returnClause(for: keyText))\(generics.whereClause) {")
         lines.append("        \(ownEffects.callPrefix)\(memberName)(\(forwardedArguments))")
         lines.append("    }")
 
@@ -1109,41 +1114,6 @@ struct GeneratorOutputBuilder {
             : ProviderEffects(isAsync: true, isThrowing: building.isThrowing)
     }
 
-    /// Where a `sending` return would go.
-    ///
-    /// `sending` would let a freshly constructed value leave the domain it was
-    /// built in without its type having to be `Sendable`, which is the whole
-    /// "it just works" story for cross-domain injection. It is **not emitted
-    /// yet**, because making it sound requires changes that cannot be validated
-    /// without compiling:
-    ///
-    /// - `sending` is not expressible on a property, so every isolated
-    ///   argument-free provider would have to switch from a `var`-shaped member
-    ///   to a function-shaped one — a visible API change that also reshapes the
-    ///   interjection requirement.
-    /// - the resolving variant delegates to the explicit variant, which takes
-    ///   caller-supplied parameters and therefore cannot return `sending`. The
-    ///   chain only holds if those parameters are themselves `sending`, which
-    ///   constrains callers of the explicit variant.
-    ///
-    /// Emitting it speculatively across every isolated provider risks breaking
-    /// the build everywhere at once, so the eligibility is computed and
-    /// recorded here and the annotation is left off until the compile harness
-    /// can confirm the exact shape. Until then, a value crossing a domain needs
-    /// its key to be `Sendable` — which for `actor` and protocol-keyed
-    /// injectables it usually already is.
-    ///
-    /// Deliberately uncalled today. `returnClause` is where it would be called
-    /// from; keep the two signatures in step.
-    func isSendingEligible(provider: ProviderResolution,
-                           parameters: [ParameterRecord],
-                           classification: ProviderClassification) -> Bool {
-        parameters.isEmpty
-            && !provider.isShared
-            && provider.isolation.isGlobalActor
-            && classification.sharedDependencies.isEmpty
-    }
-
     /// Two values claiming the same key **and name**.
     ///
     /// Values are matched by that pair, so neither can win: the matcher demands
@@ -1332,16 +1302,24 @@ struct GeneratorOutputBuilder {
     /// registered as `@Injectable<Storing>` returns `Storing` rather than its
     /// concrete type.
     ///
-    /// The unused parameters are deliberate. They mirror `isSendingEligible`'s
-    /// signature because this is the seam where a `sending` return would be
-    /// applied — the body becomes a choice between `key` and `sending \(key)`,
-    /// and both call sites already thread through exactly the arguments that
-    /// decision needs. Dropping them would not simplify anything; it would move
-    /// the work to whoever finishes `sending`.
-    private func returnClause(for provider: ProviderResolution,
-                              key: String,
-                              parameters: [ParameterRecord],
-                              classification: ProviderClassification) -> String {
+    /// ## Why there is no `sending` return
+    ///
+    /// This is the seam where one would go — the body would become a choice
+    /// between `key` and `sending \(key)`. It is not taken, and the reasoning is
+    /// worth keeping even though the code implementing it is gone: a member is
+    /// only eligible when it takes no caller-supplied parameters, is not a kept
+    /// instance, is isolated to a global actor, and reaches no shared
+    /// dependency. Emitting it speculatively across every isolated provider
+    /// risks breaking the build everywhere at once, so it waits until the
+    /// compile harness can confirm the exact shape. Until then a value crossing
+    /// a domain needs its key to be `Sendable`, which for `actor` and
+    /// protocol-keyed injectables it usually already is.
+    ///
+    /// The eligibility test used to live here as an uncalled function, with
+    /// this function carrying three parameters purely to mirror its signature.
+    /// The note is the part that was load-bearing; the obligation to keep two
+    /// signatures in step was not.
+    private func returnClause(for key: String) -> String {
         key
     }
 
@@ -1460,12 +1438,7 @@ struct GeneratorOutputBuilder {
             ))
         }
 
-        let returns = returnClause(
-            for: provider,
-            key: displayName(for: injectableKey),
-            parameters: plan.parameters,
-            classification: classification
-        )
+        let returns = returnClause(for: displayName(for: injectableKey))
 
         var lines: [String] = []
         if plan.parameters.isEmpty {
@@ -2202,14 +2175,6 @@ struct GeneratorOutputBuilder {
     /// `Interjecting` plus the key rendered as an identifier, e.g.
     /// `InterjectingStoring`.
 
-    /// Uppercases the first character only, leaving the rest as written.
-    private func upperFirst(_ string: String) -> String {
-        guard let first = string.first else {
-            return string
-        }
-        return first.uppercased() + string.dropFirst()
-    }
-
     /// Reduces a type key to characters legal in an identifier, so keys like
     /// `[String]` or `any Storing` can still name a generated protocol or
     /// function.
@@ -2377,27 +2342,6 @@ struct GeneratorOutputBuilder {
 
     /// What makes two interjection requirements the same requirement: the
     /// mirrored member's name together with its parameters.
-
-    /// Whether the spelling has a space or `&` outside any bracket, which is
-    /// what makes a trailing `?` ambiguous.
-    private func hasTopLevelBreak(_ text: String) -> Bool {
-        var depth = 0
-        for character in text {
-            switch character {
-            case "<", "(", "[":
-                depth += 1
-            case ">", ")", "]":
-                depth = max(0, depth - 1)
-            case " ", "&":
-                if depth == 0 {
-                    return true
-                }
-            default:
-                break
-            }
-        }
-        return false
-    }
 
     /// Like `parameterClause`, minus defaults: a protocol requirement cannot
     /// declare them.

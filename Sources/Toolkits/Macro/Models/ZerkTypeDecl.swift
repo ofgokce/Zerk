@@ -78,19 +78,6 @@ public enum ZerkTypeDecl {
         }
     }
 
-    public var inheritanceClause: InheritanceClauseSyntax? {
-        switch self {
-        case .class(let decl):
-            return decl.inheritanceClause
-        case .struct(let decl):
-            return decl.inheritanceClause
-        case .enum(let decl):
-            return decl.inheritanceClause
-        case .actor(let decl):
-            return decl.inheritanceClause
-        }
-    }
-
     public var members: MemberBlockSyntax {
         switch self {
         case .class(let decl):
@@ -101,19 +88,6 @@ public enum ZerkTypeDecl {
             return decl.memberBlock
         case .actor(let decl):
             return decl.memberBlock
-        }
-    }
-
-    /// Whether `@injected` members may be generated for this type.
-    ///
-    /// Excludes enums: the generated overload of an initializer would have to
-    /// assign to `self` from an extension, which enums do not permit.
-    public var isMemberInjectionSupported: Bool {
-        switch self {
-        case .enum:
-            return false
-        case .class, .struct, .actor:
-            return true
         }
     }
 

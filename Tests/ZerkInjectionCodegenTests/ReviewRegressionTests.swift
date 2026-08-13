@@ -856,3 +856,37 @@ struct ReviewRegressionsFifthPassTests {
         }, "\(result.diagnostics.map(\.message))")
     }
 }
+
+/// Housekeeping the reviews kept flagging: code nothing calls, a doc comment
+/// attached to nothing, and a sort that could tie.
+@Suite("Review housekeeping")
+struct ReviewHousekeepingTests {
+
+    /// A value registered under several keys is several records sharing a name,
+    /// so ordering on the name alone left their order to `sorted`, which is not
+    /// stable. The generated file is meant to be byte-identical between builds
+    /// of identical source.
+    @Test("a value under several keys emits in a deterministic order")
+    func multiKeyValueOrderIsStable() {
+        let source = """
+        protocol Zed {}
+        protocol Alpha {}
+
+        struct Both: Zed, Alpha {}
+
+        @InjectableValue<Zed, Alpha>
+        var shared: Both { Both() }
+        """
+
+        let first = CompileFixture.generate(source: source)
+        #expect(first == CompileFixture.generate(source: source))
+
+        // Keyed after the name, so the two records order by key rather than by
+        // whatever `sorted` happened to do with equal elements.
+        let alpha = try? #require(first.range(of: "extension Zerk<Alpha> {"))
+        let zed = try? #require(first.range(of: "extension Zerk<Zed> {"))
+        if let alpha, let zed {
+            #expect(alpha.lowerBound < zed.lowerBound)
+        }
+    }
+}
