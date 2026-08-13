@@ -132,16 +132,32 @@ public final class ZerkAsyncBox<Value>: @unchecked Sendable {
     ///
     /// Retrying is the answer rather than propagating, because our own build
     /// cannot fail: a failure is never cached, so the next attempt either finds
-    /// a value or starts our build, which will produce one. Only a caller
-    /// supplying a fresh failing build each time could keep this going, and that
-    /// caller has an unresolvable dependency either way.
+    /// a value or starts our build, which will produce one.
+    ///
+    /// It retries a bounded number of times, and stops if the task is cancelled.
+    /// Termination by argument — "someone else's build failed, ours cannot" —
+    /// holds only when this caller then wins the race to the empty state, and a
+    /// caller driving the throwing overload with a failing build in a loop can
+    /// keep taking it. An unbounded wait would then hang a structured-concurrency
+    /// scope with nothing observable, since the joined error is discarded.
+    /// Falling back to building directly gives up exactly-once for this one
+    /// call, which is the lesser failure.
     public func value(_ build: @Sendable @escaping () async -> Value) async -> Value {
-        while true {
+        for _ in 0..<Self.joinAttempts where !Task.isCancelled {
             if let value = try? await value({ () async throws -> Value in await build() }) {
                 return value
             }
         }
+        // Cancelled, or repeatedly overtaken. Either way this call still owes
+        // its caller a value, and its own build is the one thing that cannot
+        // fail to produce one.
+        return await build()
     }
+
+    /// How many times a non-throwing call will re-join before building on its
+    /// own. Small on purpose: each attempt means another caller's build failed
+    /// in the window, which is already the unusual case.
+    private static var joinAttempts: Int { 4 }
 
     /// Reads the state, starting the build if nothing else has.
     ///

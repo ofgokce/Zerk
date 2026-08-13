@@ -90,9 +90,13 @@ public extension AttributeListSyntax {
     /// global-actor annotation changes neither the synthesized initializer's
     /// parameters nor its isolation — a nonisolated initializer may still
     /// initialize an isolated stored property.
+    /// Only names that can actually appear here: `unchecked` belongs to an
+    /// inheritance clause (`@unchecked Sendable`) and `@Sendable` to functions
+    /// and closures, so listing either would read as a considered case when it
+    /// cannot occur.
     static let storageNeutralAttributes: Set<String> = [
         "objc", "nonobjc", "available", "inlinable", "usableFromInline",
-        "preconcurrency", "unchecked", "Sendable", "IBOutlet", "IBInspectable",
+        "preconcurrency", "IBOutlet", "IBInspectable",
         "NSCopying", "NSManaged", "Isolated"
     ]
 

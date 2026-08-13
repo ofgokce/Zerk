@@ -92,6 +92,24 @@ extension DeclGroupSyntax {
             location: location)
     }
     
+    /// Whether this type says how it is built, rather than leaving Zerk to
+    /// infer it.
+    ///
+    /// Either an initializer of its own or an `@InjectableProviding` member. A
+    /// `#if` inside one that only gates a stored property then changes nothing:
+    /// the memberwise initializer is never consulted.
+    var declaresItsOwnProvider: Bool {
+        memberBlock.members.contains { member in
+            if member.decl.is(InitializerDeclSyntax.self) {
+                return true
+            }
+            guard let attributes = member.decl.asProtocol(WithAttributesSyntax.self)?.attributes else {
+                return false
+            }
+            return attributes.hasAttribute(named: "InjectableProviding")
+        }
+    }
+
     /// The first stored property whose attributes Zerk cannot read, as
     /// (attribute, property), or `nil` when there is none.
     ///

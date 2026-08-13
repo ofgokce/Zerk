@@ -104,6 +104,7 @@ One failure Zerk cannot report lands in generated code instead: under `SWIFT_DEF
 | What triggers it | The fix |
 |---|---|
 | `@injected` on an initializer declared in an `extension` | Whether the generated overload needs `convenience` depends on whether the extended type is a class, which Zerk may not be able to see. Declare the initializer on the type itself, or resolve the dependency in its body |
+| `@injected` in an `extension` of a `private` or `fileprivate` type | The generated overload lives in a separate file and cannot see it. Raise the type's access, or move the member onto the type |
 
 | What triggers it | The fix |
 |---|---|

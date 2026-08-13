@@ -99,6 +99,23 @@ extension Service {
 // }
 ```
 
+A **constrained** extension keeps its clause, so the overload lands somewhere its
+body is legal:
+
+```swift
+extension Cache where E: Equatable {
+    func run(@injected repo: Repo, item: E) -> E { ... }
+}
+
+// generated:
+// extension Cache where E: Equatable { ... }
+```
+
+The **extended type must be visible to the generated file**, which is a separate file: an
+extension of a `private` or `fileprivate` type is refused. An extension's own modifiers say
+nothing about the type it extends, so this is checked against the type's declaration rather
+than the extension's.
+
 An **initializer** in an extension is refused. The generated overload has to delegate with
 `self.init(…)`, and that must say `convenience` when the extended type is a class and must not
 when it is a struct — a fact about a type Zerk may never see, since an extension can extend a

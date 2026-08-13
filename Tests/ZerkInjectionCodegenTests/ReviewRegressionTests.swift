@@ -324,3 +324,173 @@ struct ReviewRegressionTests {
         #expect(mermaid.contains("subgraph cluster0[\"My Module\"]"))
     }
 }
+
+/// The second review pass: defects in the fixes above, plus the extension path
+/// the first pass introduced.
+@Suite("Review regressions, second pass")
+struct ReviewRegressionsSecondPassTests {
+
+    private static func diagnostics(_ source: String) -> [CodegenDiagnostic] {
+        CompileFixture.generateWithResolution(source: source).diagnostics
+    }
+
+    private static let repo = """
+    protocol Repo {}
+
+    @Injectable<Repo>
+    struct RepoImpl: Repo {}
+    """
+
+    // MARK: - The refusal reaches extensions
+
+    /// An `extension` pushes no type frame, so the refusal added for type bodies
+    /// never ran there — leaving the very defect it was written for in the path
+    /// the same commit introduced.
+    @Test("a #if inside an extension is refused rather than dropped")
+    func conditionalExtensionMemberIsRefused() {
+        let diagnostics = Self.diagnostics("""
+        \(Self.repo)
+
+        struct Service {}
+
+        extension Service {
+            #if DEBUG
+            func load(@injected repo: Repo, id: Int) -> Int { id }
+            #endif
+            func save(@injected repo: Repo, id: Int) -> Int { id }
+        }
+        """)
+
+        #expect(diagnostics.contains {
+            $0.severity == .error && $0.message.contains("is read differently per configuration")
+        }, "\(diagnostics.map(\.message))")
+    }
+
+    // MARK: - The stored-property rule is only about required parameters
+
+    /// Three shapes that compile and generate correctly, each refused by a check
+    /// that flagged every conditional stored binding. The rule it protects —
+    /// stated in Limitations.md — is about properties that would become
+    /// *required* parameters.
+    @Test("a conditional property that changes no parameter is allowed", arguments: [
+        // Satisfied by its own macro, so not a parameter anywhere else either.
+        """
+        @Injectable
+        final class Screen {
+            #if DEBUG
+            @Injected var dep: Dep
+            #endif
+            @InjectableProviding init() {}
+        }
+        """,
+        // Defaulted, so the memberwise initializer does not ask for it.
+        """
+        @Injectable
+        struct Config {
+            let host: String
+            #if DEBUG
+            var verbose: Bool = false
+            #endif
+        }
+        """,
+        // An explicit provider means inference is never consulted at all.
+        """
+        @Injectable
+        struct Config {
+            let host: String
+            #if DEBUG
+            let verbose: Bool
+            #endif
+            @InjectableProviding init(host: String) { self.host = host }
+        }
+        """
+    ])
+    func harmlessConditionalPropertiesAreAllowed(source: String) {
+        let diagnostics = Self.diagnostics("""
+        protocol Dep {}
+
+        @Injectable<Dep>
+        struct DepImpl: Dep {}
+
+        \(source)
+        """)
+
+        #expect(diagnostics.isEmpty, "\(diagnostics.map(\.message))")
+    }
+
+    @Test("a conditional property that *would* be a required parameter is refused")
+    func requiredConditionalPropertyIsStillRefused() {
+        let diagnostics = Self.diagnostics("""
+        @Injectable
+        struct Config {
+            let host: String
+            #if DEBUG
+            let verbose: Bool
+            #endif
+        }
+        """)
+
+        #expect(diagnostics.contains {
+            $0.severity == .error && $0.message.contains("is read differently per configuration")
+        }, "\(diagnostics.map(\.message))")
+    }
+
+    // MARK: - What an extension knows about the type it extends
+
+    /// An extension's own modifiers say nothing about the type it extends, so an
+    /// unannotated extension of a `fileprivate` type read as `internal` and the
+    /// generated overload could not see it.
+    @Test("an extension of a type the generated file cannot see is refused")
+    func extensionOfInvisibleTypeIsRefused() {
+        let diagnostics = Self.diagnostics("""
+        \(Self.repo)
+
+        fileprivate struct Hidden {}
+
+        extension Hidden {
+            func run(@injected repo: Repo, id: Int) -> Int { id }
+        }
+        """)
+
+        #expect(diagnostics.contains {
+            $0.severity == .error && $0.message.contains("'Hidden' is fileprivate")
+        }, "\(diagnostics.map(\.message))")
+    }
+
+    /// A `where` clause constrains an already-generic type; it is not what makes
+    /// one generic. Reading it as genericness refused the *more* constrained
+    /// extension while accepting the unconstrained one.
+    @Test("a constrained extension of a generic type carries its where clause")
+    func constrainedExtensionKeepsItsClause() {
+        let result = CompileFixture.generateWithResolution(source: """
+        \(Self.repo)
+
+        struct Cache<E> {}
+
+        extension Cache where E: Equatable {
+            func run(@injected repo: Repo, item: E) -> E { item }
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        // Without the clause the overload lands in an unconstrained extension
+        // while its body calls a method that needs the constraint.
+        #expect(result.output.output.contains("extension Cache where E: Equatable {"))
+    }
+
+    @Test("an unconstrained extension of a generic type still works")
+    func unconstrainedGenericExtensionWorks() {
+        let result = CompileFixture.generateWithResolution(source: """
+        \(Self.repo)
+
+        struct Cache<E> {}
+
+        extension Cache {
+            func run(@injected repo: Repo, item: E) -> E { item }
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("extension Cache {"))
+    }
+}

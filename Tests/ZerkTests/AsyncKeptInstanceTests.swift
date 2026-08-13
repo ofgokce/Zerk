@@ -145,6 +145,47 @@ struct AsyncKeptInstanceTests {
         #expect(value == 7)
     }
 
+    /// The retry is bounded and honours cancellation, so a caller repeatedly
+    /// failing the *throwing* overload cannot keep this one joining its failures
+    /// forever — an unbounded wait would hang the surrounding scope with nothing
+    /// observable, since the joined error is discarded.
+    @Test("the non-throwing overload returns even while another caller keeps failing")
+    func nonThrowingOverloadOutlastsAFailingCaller() async {
+        struct Failure: Error {}
+        let box = ZerkAsyncBox<Int>()
+
+        // Structured, so the failing caller is guaranteed finished before this
+        // test returns. An unstructured `Task` would outlive it and perturb the
+        // timing of a suite whose other tests race fifty callers at once.
+        let value = await withTaskGroup(of: Int?.self) { group in
+            group.addTask {
+                while !Task.isCancelled {
+                    _ = try? await box.value { () async throws -> Int in
+                        try await Task.sleep(for: .milliseconds(2))
+                        throw Failure()
+                    }
+                }
+                return nil
+            }
+            group.addTask {
+                await box.value { 7 }
+            }
+
+            // The first completion is the non-throwing caller: the other only
+            // returns once cancelled.
+            var resolved: Int?
+            while let next = await group.next() {
+                if let next {
+                    resolved = next
+                    group.cancelAll()
+                }
+            }
+            return resolved
+        }
+
+        #expect(value == 7)
+    }
+
     @Test("a non-Sendable instance can be kept across an await")
     func nonSendableInstanceIsKept() async {
         let first = await Zerk<NonSendableAsyncClient>.inject()

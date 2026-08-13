@@ -39,8 +39,14 @@ enum ConditionalCompilation {
     /// Anything with no Zerk meaning at all — a conditional method with no
     /// markers, a computed property, a `#if` around an import — is none of
     /// Zerk's business and passes through untouched.
-    static func gatesConstruction(_ node: IfConfigDeclSyntax, in kind: MarkedTypeKind?) -> Bool {
-        Finder.found(in: Syntax(node), typeKind: kind)
+    /// - Parameter consultsInference: whether the enclosing declaration's
+    ///   initializer is *inferred*. A type that declares its own initializer or
+    ///   an `@InjectableProviding` member is built from what it wrote, so a
+    ///   conditional stored property changes nothing Zerk reads — and an
+    ///   extension cannot hold stored properties at all.
+    static func gatesConstruction(_ node: IfConfigDeclSyntax,
+                                  consultsInference: Bool) -> Bool {
+        Finder.found(in: Syntax(node), consultsInference: consultsInference)
     }
 
     /// Attributes that make a member a provider of its enclosing type, or that
@@ -54,36 +60,38 @@ enum ConditionalCompilation {
 
     private final class Finder: SyntaxVisitor {
         private var didFind = false
-        private let typeKind: MarkedTypeKind?
+        private let consultsInference: Bool
 
-        init(viewMode: SyntaxTreeViewMode, typeKind: MarkedTypeKind?) {
-            self.typeKind = typeKind
+        init(viewMode: SyntaxTreeViewMode, consultsInference: Bool) {
+            self.consultsInference = consultsInference
             super.init(viewMode: viewMode)
         }
 
-        static func found(in node: Syntax, typeKind: MarkedTypeKind?) -> Bool {
-            let finder = Finder(viewMode: .sourceAccurate, typeKind: typeKind)
+        static func found(in node: Syntax, consultsInference: Bool) -> Bool {
+            let finder = Finder(viewMode: .sourceAccurate, consultsInference: consultsInference)
             finder.walk(node)
             return finder.didFind
         }
 
-        /// A stored property shapes a struct's memberwise initializer, and a
-        /// class's `init()` when it has no value of its own. A computed one —
-        /// an accessor block — shapes neither.
+        /// A stored property matters only when it would be a *required*
+        /// parameter — which is the same test `unreadableStoredProperty` makes,
+        /// and deliberately so: this check exists to protect the inference, so
+        /// it must not refuse what the inference would have handled.
+        ///
+        /// Skipped, therefore: a property with a value of its own (a struct's
+        /// memberwise initializer defaults it, and a class still synthesizes
+        /// `init()`), a computed one, a static one, and one whose macro
+        /// satisfies its own storage — `@Injected` and `@InjectedDynamically`
+        /// are not parameters anywhere else either.
         override func visit(_ node: VariableDeclSyntax) -> SyntaxVisitorContinueKind {
-            guard !node.modifiers.isStatic else {
+            guard consultsInference,
+                  !node.modifiers.isStatic,
+                  !node.attributes.satisfiesItsOwnStorage else {
                 return .skipChildren
             }
-            for binding in node.bindings where binding.accessorBlock == nil {
-                switch typeKind {
-                case .structKind:
-                    didFind = true
-                default:
-                    // A class synthesizes `init()` only when every stored
-                    // property already holds a value, so a defaulted one
-                    // changes nothing.
-                    if binding.initializer == nil { didFind = true }
-                }
+            for binding in node.bindings
+            where binding.initializer == nil && binding.accessorBlock == nil {
+                didFind = true
             }
             return .skipChildren
         }

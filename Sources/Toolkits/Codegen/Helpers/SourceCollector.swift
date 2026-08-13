@@ -23,6 +23,12 @@ final class SourceCollector: SyntaxVisitor {
     private(set) var types: [TypeRecord] = []
     private(set) var values: [InjectableValueRecord] = []
     private(set) var diagnostics: [CodegenDiagnostic] = []
+    /// Declared type names in the module -> the access they were written with.
+    ///
+    /// Kept alongside ``moduleAccessLevels`` rather than folded into it: that
+    /// one answers "may this be public", while an extension member needs to know
+    /// whether the type is visible to the generated file *at all*.
+    private(set) var declaredAccessRanks: [String: AccessRank] = [:]
     /// Declared type/protocol names in the module -> whether they are public.
     private(set) var moduleAccessLevels: [String: Bool] = [:]
     /// `@Injected` property annotations seen in the module.
@@ -64,6 +70,10 @@ final class SourceCollector: SyntaxVisitor {
     private var typeStack: [TypeContext] = []
     /// The `#if` clauses enclosing whatever is being visited, outermost first.
     private var conditionStack: [ConditionClause] = []
+    /// Extended type names, for the same reason ``typeStack`` exists — an
+    /// `extension` is not a declaration Zerk registers, so it pushes no type
+    /// frame, but its members are still read.
+    private var extensionStack: [String] = []
 
     /// Where the walk currently is, in `#if` terms.
     private var currentCondition: CompilationCondition {
@@ -139,7 +149,12 @@ final class SourceCollector: SyntaxVisitor {
 
     /// `@Injectable` on an `extension` is refused. Children are still visited,
     /// since an `@InjectableValue` inside an extension is collected as usual.
+    override func visitPost(_ node: ExtensionDeclSyntax) {
+        _ = extensionStack.popLast()
+    }
+
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
+        extensionStack.append(node.extendedType.trimmedDescription)
         collectMarkedExtensionMembers(node)
         if node.attributes.hasAttribute(named: "Injectable") {
             diagnostics.append(CodegenDiagnostic(
@@ -173,11 +188,20 @@ final class SourceCollector: SyntaxVisitor {
         // that type two shapes and the generated member only has one. Refused
         // here rather than in the resolver: this is the only place that still
         // knows the `#if` existed.
-        if let enclosing = typeStack.last,
-           ConditionalCompilation.gatesConstruction(node, in: enclosing.kind) {
+        // An `extension` pushes no type frame, so it is tracked separately —
+        // without this the refusal never fired inside one, and a conditional
+        // `@injected` member there was dropped exactly as it used to be inside
+        // a type body.
+        let enclosing = typeStack.last.map { ($0.name, $0.consultsInference) }
+            // An extension cannot declare stored properties, so nothing there
+            // can change an inferred initializer.
+            ?? extensionStack.last.map { ($0, false) }
+
+        if let enclosing,
+           ConditionalCompilation.gatesConstruction(node, consultsInference: enclosing.1) {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
-                message: "'\(enclosing.name)' is read differently per configuration: this #if gates an initializer, an @InjectableProviding provider, a stored property, or a member with @injected parameters. Zerk reads a type's members without expanding conditions, so what is inside would be missed — put the #if around the whole type instead, so each configuration declares its own, or move the condition inside the member's body where it changes no signature.",
+                message: "'\(enclosing.0)' is read differently per configuration: this #if gates an initializer, an @InjectableProviding provider, a stored property, or a member with @injected parameters. Zerk reads a type's members without expanding conditions, so what is inside would be missed — put the #if around the whole type instead, so each configuration declares its own, or move the condition inside the member's body where it changes no signature.",
                 location: location(for: Syntax(node))
             ))
         }
@@ -247,10 +271,12 @@ final class SourceCollector: SyntaxVisitor {
                 nonLiteralPublicDiagnostic(named: "@InjectableValues", at: location(for: Syntax(node))))
         }
 
+        declaredAccessRanks[node.declaredName] = node.modifiers.accessRank
+
         typeStack.append(
             TypeContext(
                 name: node.declaredName,
-                kind: typeKind,
+                consultsInference: !node.declaresItsOwnProvider,
                 isolation: isolation,
                 sweptValueMethod: sweep.map { statedValueMethod($0) ?? settings.valueInjectionMethod },
                 sweptValuesArePublic: sweep?.publicArgument.isTrue ?? false,
@@ -1918,7 +1944,14 @@ final class SourceCollector: SyntaxVisitor {
                 modifiers: function.modifiers,
                 typeName: extendedType,
                 typeKind: nil,
-                typeIsGeneric: node.genericWhereClause != nil,
+                typeWhereClause: node.genericWhereClause?.trimmedDescription,
+                requiresVisibleType: true,
+                // A `where` clause constrains an already-generic type; it is not
+                // what makes one generic. The generated extension repeats the
+                // header, so the type's parameters stay in scope either way —
+                // reading the clause as genericness refused constrained
+                // extensions while accepting unconstrained ones.
+                typeIsGeneric: false,
                 typeAccess: node.modifiers.accessRank,
                 isolation: .explicit(statedIsolation(
                     modifiers: function.modifiers,
@@ -1997,6 +2030,8 @@ final class SourceCollector: SyntaxVisitor {
                                      modifiers: DeclModifierListSyntax?,
                                      typeName: String?,
                                      typeKind: MarkedTypeKind?,
+                                     typeWhereClause: String? = nil,
+                                     requiresVisibleType: Bool = false,
                                      typeIsGeneric: Bool,
                                      typeAccess: AccessRank,
                                      isolation: MarkedMemberIsolation,
@@ -2076,6 +2111,8 @@ final class SourceCollector: SyntaxVisitor {
             typeName: typeName,
             typeKind: typeKind,
             kind: kind,
+            typeWhereClause: typeWhereClause,
+            requiresVisibleType: requiresVisibleType,
             condition: currentCondition,
             parameters: collected,
             effects: effects,

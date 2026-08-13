@@ -206,8 +206,10 @@ Zerk reads a type's members without expanding conditions, so four things trigger
 |---|---|
 | an initializer | two provider shapes, one member signature |
 | an `@InjectableProviding` member | the same |
-| a **stored property** | a struct's memberwise initializer is shaped by them, so a conditional one silently vanishes from the parameters Zerk thinks exist — and it emits a call missing an argument. In a class, only a property *without* a default counts, since that is when `init()` stops being synthesized |
+| a **stored property that would be a required parameter** | a struct's memberwise initializer is shaped by them, so a conditional one silently vanishes from the parameters Zerk thinks exist — and it emits a call missing an argument. Only *required* ones count: a property with a value of its own, a computed one, or one carrying `@Injected`/`@InjectedDynamically` is not asked for either way. Nor does any of this apply once the type declares its own initializer or an `@InjectableProviding` member, since inference is then never consulted |
 | a member with **`@injected` parameters** | its generated overload is assembled from the member list too, so the member was being dropped without a word |
+
+It applies inside an `extension` too, where the same members are read the same way.
 
 The refusal stays narrow. A `#if` gating something Zerk does not read — a conditional method with no markers, a computed property, a debug-only helper, a `#if` around an import — is none of Zerk's business and passes through untouched.
 

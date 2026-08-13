@@ -56,6 +56,20 @@ struct MarkedMemberRecord {
     /// never one.
     let typeKind: MarkedTypeKind?
     let kind: MemberKind
+    /// The `where` clause of the extension this member was declared in, kept
+    /// verbatim so the generated extension repeats it.
+    ///
+    /// Without it the overload lands in an *unconstrained* extension while its
+    /// body calls a method that needs the constraint.
+    var typeWhereClause: String? = nil
+    /// Whether the enclosing type's visibility still has to be checked.
+    ///
+    /// Set for a member declared in an `extension`, whose own modifiers say
+    /// nothing about the type it extends — a `fileprivate` type extended by an
+    /// unannotated extension reads as `internal` and the generated file cannot
+    /// see it. Checked at emission, because the declaration may be collected
+    /// after the extension is.
+    var requiresVisibleType: Bool = false
     /// The `#if` the marked declaration sits inside. The generated overload
     /// delegates to it, so it cannot outlive it.
     var condition: CompilationCondition = .unconditional

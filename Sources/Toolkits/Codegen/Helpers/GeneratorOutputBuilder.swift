@@ -30,6 +30,10 @@ struct GeneratorOutputBuilder {
     /// `inject()`.
     var primaryResolutions: KeyIndex<ProviderResolution> = KeyIndex()
     var moduleAccessLevels: [String: Bool] = [:]
+    /// Declared type names -> the access they were written with, for the check
+    /// an extension member cannot make at collection time. See
+    /// ``MarkedMemberRecord/requiresVisibleType``.
+    var declaredAccessRanks: [String: AccessRank] = [:]
     var injectedUses: [InjectedUseRecord] = []
     var markedMembers: [MarkedMemberRecord] = []
     /// Injectable key -> the spelling to emit for it, from `SourceCollector`.
@@ -1526,6 +1530,23 @@ struct GeneratorOutputBuilder {
             let sharedCondition = CompilationCondition.commonPrefix(of: grouped[typeName]!.map(\.condition))
 
             for record in grouped[typeName]! {
+                // An extension says nothing about the access of the type it
+                // extends, and the declaration may have been collected after it
+                // — so this is the first point where both are known. The
+                // generated file is a separate file, so anything below internal
+                // is out of its reach.
+                if record.requiresVisibleType,
+                   let typeName,
+                   let declared = declaredAccessRanks[typeName],
+                   declared < .internal {
+                    diagnostics.append(CodegenDiagnostic(
+                        severity: .error,
+                        message: "@injected members must be at least internal: '\(typeName)' is \(declared.rawValue), and the generated overload lives in a separate file that cannot see it.",
+                        location: record.location
+                    ))
+                    continue
+                }
+
                 var argumentExpressions: [String] = []
                 var overloadParameterParts: [String] = []
                 var requests: [BubbleResolver.Request] = []
@@ -1684,10 +1705,14 @@ struct GeneratorOutputBuilder {
                 // are both compiled on a macOS debug build, so comparing text
                 // would let a real redeclaration through — and replace a clear
                 // Zerk error with the compiler's.
+                // Recorded *after* the check, alongside the emission it tracks:
+                // a record that was diagnosed and skipped emits nothing, so
+                // letting it contribute here would compare later records
+                // against a member that is not in the file — one mistake
+                // reported twice.
                 let clash = emittedOverloads[overloadKey]?.contains {
                     !CompilationCondition.areExclusive($0, record.condition)
                 } ?? false
-                emittedOverloads[overloadKey, default: []].append(record.condition)
                 if clash {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
@@ -1697,6 +1722,7 @@ struct GeneratorOutputBuilder {
                     continue
                 }
 
+                emittedOverloads[overloadKey, default: []].append(record.condition)
                 memberLines += Self.guarded(declarationLines,
                                             by: record.condition.dropping(prefix: sharedCondition))
                 memberLines.append("")
@@ -1705,7 +1731,11 @@ struct GeneratorOutputBuilder {
             if !memberLines.isEmpty {
                 var block: [String] = []
                 if let typeName {
-                    block.append("extension \(typeName) {")
+                    // The `where` clause comes along, or the overload lands in
+                    // an unconstrained extension while its body calls something
+                    // that needs the constraint.
+                    let clause = grouped[typeName]?.compactMap(\.typeWhereClause).first
+                    block.append("extension \(typeName)\(clause.map { " \($0)" } ?? "") {")
                     block.append(contentsOf: memberLines.dropLast())
                     block.append("}")
                 } else {
@@ -1738,7 +1768,12 @@ struct GeneratorOutputBuilder {
     /// Only uses inside a type participate: a property at file scope, or in a
     /// view that nothing injects, is not a node in this graph and cannot be
     /// part of a cycle in it.
-    private var eagerInjectedUses: [String: [InjectedUseRecord]] {
+    ///
+    /// Built once by ``cycleDiagnostics()`` and passed down, rather than
+    /// computed per lookup: it is read once per key and once per node of every
+    /// reported cycle, and a computed property would refilter and regroup the
+    /// whole array each time.
+    private func eagerInjectedUses() -> [String: [InjectedUseRecord]] {
         Dictionary(
             grouping: injectedUses.filter {
                 $0.macroName == "@Injected" && $0.enclosingTypeName != nil
@@ -1749,15 +1784,17 @@ struct GeneratorOutputBuilder {
 
     /// Whether this key's provider reaches its dependencies through an
     /// `@Injected` property, which is what makes the lazy remedy applicable.
-    private func hasEagerInjectedProperty(_ key: String) -> Bool {
+    private func hasEagerInjectedProperty(_ key: String,
+                                          in uses: [String: [InjectedUseRecord]]) -> Bool {
         guard let typeName = primaryResolutions[key]?.typeName else {
             return false
         }
-        return eagerInjectedUses[typeName]?.isEmpty == false
+        return uses[typeName]?.isEmpty == false
     }
 
     private func cycleDiagnostics() -> [CodegenDiagnostic] {
         let classifier = self.classifier
+        let eagerUses = eagerInjectedUses()
 
         var edges: [String: [String]] = [:]
         for (key, resolution) in primaryResolutions.entries {
@@ -1782,7 +1819,7 @@ struct GeneratorOutputBuilder {
             // `@InjectedDynamically` is deliberately absent. Its accessor
             // resolves per read rather than at construction, so it does not
             // close a cycle — it is the remedy this diagnostic points at.
-            for use in eagerInjectedUses[resolution.typeName] ?? [] {
+            for use in eagerUses[resolution.typeName] ?? [] {
                 if let dependency = primaryResolutions[use.typeKey, shape: use.typeKeyShape] {
                     edges[key, default: []].append(dependency.injectableKey)
                 }
@@ -1805,7 +1842,7 @@ struct GeneratorOutputBuilder {
                         // key's node is a shape (`Cache<#0>`), which is Zerk's
                         // own notation and appears nowhere in their source.
                         message: "Circular dependency detected: \(cycle.map { displayName(for: $0) }.joined(separator: " -> ")). Break the cycle by removing one dependency."
-                            + (cycle.contains(where: hasEagerInjectedProperty)
+                            + (cycle.contains { hasEagerInjectedProperty($0, in: eagerUses) }
                                ? " One of these resolves the next through an @Injected property, which is read while the instance is being built — @InjectedDynamically resolves on each access instead, which breaks the cycle."
                                : ""),
                         location: location
