@@ -140,6 +140,67 @@ struct KeySpellingAccessTests {
         #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
         #expect(result.output.output.contains("extension Shown<Int> {"))
     }
+
+    @Test("an inferred factory key checks every nominal in the return type")
+    func inferredFactoryKeyChecksEveryReturnNominal() {
+        let result = CompileFixture.generateWithResolution(source: """
+        struct Hidden {}
+        public struct Box<E> {}
+
+        @Injectable(public: true)
+        public func makeBox() -> Box<Hidden> { fatalError() }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .warning && $0.message.contains("has no effect")
+        }, "\(result.diagnostics.map(\.message))")
+        #expect(!result.output.output.contains("public static func makeBox"))
+    }
+
+    @Test("an alias-rewritten key checks the nominal types behind the alias")
+    func aliasRewrittenKeyChecksUnderlyingNominals() {
+        let result = CompileFixture.generateWithResolution(source: """
+        struct Hidden {}
+        public struct Box<E> {}
+
+        @ZerkAlias
+        typealias AliasBox = Box<Hidden>
+
+        @Injectable<AliasBox>(public: true)
+        public func makeAlias() -> AliasBox { fatalError() }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .warning && $0.message.contains("has no effect")
+        }, "\(result.diagnostics.map(\.message))")
+        #expect(!result.output.output.contains("public static func makeAlias"))
+    }
+
+    @Test("declared access is judged inside the matching #if branch")
+    func declaredAccessIsBranchAware() {
+        let result = CompileFixture.generateWithResolution(source: """
+        #if DEBUG
+        public protocol Serving {}
+        #else
+        protocol Serving {}
+        #endif
+
+        #if DEBUG
+        @Injectable<Serving>(public: true)
+        public struct DebugService: Serving {}
+        #else
+        @Injectable<Serving>(public: true)
+        struct ReleaseService: Serving {}
+        #endif
+        """)
+
+        let warnings = result.diagnostics.filter {
+            $0.severity == .warning && $0.message.contains("has no effect")
+        }
+        #expect(warnings.count == 1, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("public static var debugService"))
+        #expect(!result.output.output.contains("public static var releaseService"))
+    }
 }
 
 extension KeySpellingAccessTests.Spelling: CustomTestStringConvertible {

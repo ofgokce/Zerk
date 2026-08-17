@@ -102,21 +102,19 @@ struct CompilationCondition: Hashable {
 
     /// Whether no build configuration can see both of these at once.
     ///
-    /// Answered structurally, never by evaluating anything: two positions are
-    /// exclusive when they sit in *different clauses of the same `#if`*, which
-    /// is the one case where mutual exclusion is a fact about the source rather
-    /// than about the build settings. `#if DEBUG` versus a separate `#if !DEBUG`
-    /// is *not* recognised — the conditions are opposites to a reader, but
-    /// proving it would mean evaluating `DEBUG`, which is exactly what Zerk
-    /// cannot do.
+    /// Answered structurally, never by evaluating anything — see
+    /// ``ConditionClause/contradicts(_:)`` for the two facts that qualify.
+    /// `#if DEBUG` versus a separate `#if !DEBUG` is still *not* recognised: the
+    /// conditions are opposites to a reader, but proving it would mean
+    /// evaluating `DEBUG`, which is exactly what Zerk cannot do.
     ///
-    /// The asymmetry is deliberate. A false "these are exclusive" would silence
-    /// a real ambiguity and pick a provider arbitrarily; a false "these can
-    /// coexist" only asks the developer to write `#else`, and says so.
+    /// The remaining asymmetry is deliberate. A false "these are exclusive"
+    /// would silence a real ambiguity and pick a provider arbitrarily; a false
+    /// "these can coexist" only asks the developer to write `#else`, and says
+    /// so.
     static func areExclusive(_ lhs: CompilationCondition, _ rhs: CompilationCondition) -> Bool {
         for left in lhs.clauses {
-            for right in rhs.clauses
-            where left.branch == right.branch && left.index != right.index {
+            for right in rhs.clauses where left.contradicts(right) {
                 return true
             }
         }
@@ -128,9 +126,9 @@ struct CompilationCondition: Hashable {
 struct ConditionClause: Hashable {
     /// Identity of the `#if` this clause belongs to — its file and offset.
     ///
-    /// Clause exclusivity is decided by comparing these, so it has to name the
-    /// `#if` itself rather than its condition: two separate `#if DEBUG` blocks
-    /// are different branches whose clauses can both be active.
+    /// Names the `#if` itself rather than its condition, so that two separate
+    /// `#if DEBUG` blocks are different branches: their clauses line up one to
+    /// one, and every pair of them can be active together.
     let branch: String
     /// Position within that `#if`: 0 is the `#if` clause, then each `#elseif`,
     /// then `#else`.
@@ -157,5 +155,43 @@ struct ConditionClause: Hashable {
             parts.append("(\(condition))")
         }
         return parts.joined(separator: " && ")
+    }
+
+    /// Whether no build can have both this clause and `other` active.
+    ///
+    /// Two facts qualify, and neither is an evaluation:
+    ///
+    /// - **Different clauses of one `#if`.** The compiler picks exactly one,
+    ///   whatever the conditions say.
+    /// - **One clause asserts what the other requires to have failed.** A
+    ///   clause is active when its own condition holds *and* every condition
+    ///   before it in its `#if` did not; so a clause stating `DEBUG` and a
+    ///   clause reached only because `DEBUG` failed cannot both be live —
+    ///   across separate `#if`s as much as within one.
+    ///
+    /// The second rests on identical condition *text* meaning an identical
+    /// answer, which holds because every condition Swift accepts here is a
+    /// property of the compilation: `-D` flags, `os`, `arch`, `swift`,
+    /// `compiler`, `canImport`. None of them varies between two points in one
+    /// module, so `#if DEBUG` in one file and `#if DEBUG` in another are live
+    /// together or not at all. Text that differs at all is simply not matched,
+    /// which falls back to "these can coexist".
+    ///
+    /// Without it, a conditional protocol near the top of a file and its
+    /// conditional implementations further down — two `#if` blocks, the natural
+    /// way to write the pair — made the `#else` declaration count against the
+    /// `#if` branch, which demoted a legitimately public export and warned about
+    /// it.
+    func contradicts(_ other: ConditionClause) -> Bool {
+        guard branch != other.branch else {
+            return index != other.index
+        }
+        if let condition, other.precedingConditions.contains(condition) {
+            return true
+        }
+        if let otherCondition = other.condition, precedingConditions.contains(otherCondition) {
+            return true
+        }
+        return false
     }
 }

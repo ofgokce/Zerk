@@ -32,7 +32,7 @@ final class SourceCollector: SyntaxVisitor {
     /// keys. That split is what let the same unqualified-name mistake be made in
     /// both: an injectable key for a nested type is `Outer.Inner`, so a map keyed
     /// by `Inner` never matches and every check reading it is silently skipped.
-    private(set) var declaredAccessRanks: [String: AccessRank] = [:]
+    private(set) var declaredAccessRanks: [String: [DeclaredAccessRecord]] = [:]
     /// `@Injected` property annotations seen in the module.
     private(set) var injectedUses: [InjectedUseRecord] = []
     /// Initializers/methods carrying `@injected` parameter markers.
@@ -466,9 +466,12 @@ final class SourceCollector: SyntaxVisitor {
         }
 
         let aliasKey = node.name.text
+        let initializer = node.initializer.value
+        keyNominalNames[aliasKey, default: []].formUnion(initializer.nominalNames)
+        keyNominalNames[initializer.normalizedTypeKey, default: []].formUnion(initializer.nominalNames)
         aliasDeclarations.append(
             AliasDeclaration(
-                keys: [aliasKey, node.initializer.value.normalizedTypeKey],
+                keys: [aliasKey, initializer.normalizedTypeKey],
                 aliasKey: aliasKey,
                 location: location(for: Syntax(node))
             )
@@ -539,14 +542,18 @@ final class SourceCollector: SyntaxVisitor {
         }
         // A generic argument may be a value rather than a type (SE-0453); only
         // types can be alias keys.
-        let keys = (arguments?.arguments ?? []).compactMap { argument -> String? in
+        let types = (arguments?.arguments ?? []).compactMap { argument -> TypeSyntax? in
             guard case .type(let type) = argument.argument else {
                 return nil
             }
-            return type.normalizedTypeKey
+            return type
         }
+        let keys = types.map(\.normalizedTypeKey)
         guard keys.count >= 2 else {
             return
+        }
+        for type in types {
+            keyNominalNames[type.normalizedTypeKey, default: []].formUnion(type.nominalNames)
         }
         aliasDeclarations.append(
             AliasDeclaration(
@@ -614,7 +621,9 @@ final class SourceCollector: SyntaxVisitor {
     /// the generated line rather than the declaration.
     override func visit(_ node: ProtocolDeclSyntax) -> SyntaxVisitorContinueKind {
         let name = qualified(node.name.text)
-        declaredAccessRanks[name] = node.modifiers.accessRank
+        declaredAccessRanks[name, default: []].append(
+            DeclaredAccessRecord(access: node.modifiers.accessRank, condition: currentCondition)
+        )
         protocolPrimaryAssociatedTypeCounts[name] =
             node.primaryAssociatedTypeClause?.primaryAssociatedTypes.count ?? 0
         return .skipChildren
@@ -654,7 +663,9 @@ final class SourceCollector: SyntaxVisitor {
     private func collectType(_ node: some DeclGroupSyntax,
                              isolation typeIsolation: ProviderIsolation,
                              genericParameters: [String]) {
-        declaredAccessRanks[qualified(node.declaredName)] = node.modifiers.accessRank
+        declaredAccessRanks[qualified(node.declaredName), default: []].append(
+            DeclaredAccessRecord(access: node.modifiers.accessRank, condition: currentCondition)
+        )
 
         let injectableAttributes = node.attributes.attributes(named: "Injectable")
         guard !injectableAttributes.isEmpty else { return }
@@ -1537,7 +1548,7 @@ final class SourceCollector: SyntaxVisitor {
                 // actually wrote.
                 macroName: "@\(attribute.name)",
                 namesMemberDirectly: namesMemberDirectly,
-                enclosingTypeName: typeStack.last?.name,
+                enclosingTypeName: enclosingTypePath,
                 location: location(for: Syntax(node))
             ))
         }
@@ -1641,7 +1652,8 @@ final class SourceCollector: SyntaxVisitor {
         // Global, or a type's static member. An instance member has no stable
         // reference the generated file could call, and a local one is not
         // visible to it at all.
-        guard typeStack.isEmpty || modifiers.isStatic else {
+        let enclosingPath = extensionStack + typeStack.map(\.name)
+        guard enclosingPath.isEmpty || modifiers.isStatic else {
             diagnostics.append(CodegenDiagnostic(
                 severity: .error,
                 message: "@Injectable on a member needs it to be 'static': the generated file calls '\(qualified(declaredName))' directly, and an instance member has no such reference.",
@@ -1696,7 +1708,7 @@ final class SourceCollector: SyntaxVisitor {
             let written = attribute.genericArgumentKeys
             let keys = written.isEmpty ? [ownKey] : written
             let displays = written.isEmpty ? [ownDisplayKey] : attribute.genericArgumentDisplayKeys
-            let names = written.isEmpty ? [[baseName]] : attribute.genericArgumentNominalNames
+            let names = written.isEmpty ? [producedType.nominalNames] : attribute.genericArgumentNominalNames
             for (offset, key) in keys.enumerated() {
                 injectableKeys[key] = location
                 recordKey(display: displays[offset], nominalNames: names[offset], for: key)

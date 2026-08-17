@@ -469,7 +469,7 @@ struct GeneratorOutputBuilderTests {
 
         let result = buildOutput(values: [], resolutions: [resolution])
 
-        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map { $0.message })")
         // No `nonisolated(unsafe)`: the box is Sendable, unlike the instance a
         // plain `static let` would hold.
         #expect(result.output.contains(
@@ -516,7 +516,7 @@ struct GeneratorOutputBuilderTests {
         // Once the instance lives in an async box, the crossing is just an
         // `await` inside the construction closure — which is a place an `await`
         // is legal, unlike a `static let` initializer.
-        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map { $0.message })")
         // The construction is awaited too: `Cache` is @MainActor and the box's
         // closure is @Sendable, so it hops rather than inheriting.
         #expect(result.output.contains(
@@ -667,7 +667,9 @@ struct GeneratorOutputBuilderTests {
         let result = buildOutput(
             values: [],
             resolutions: [service],
-            declaredAccessRanks: ["Service": .internal]
+            declaredAccessRanks: [
+                "Service": [DeclaredAccessRecord(access: .internal, condition: .unconditional)]
+            ]
         )
 
         #expect(result.diagnostics.contains { $0.severity == .warning && $0.message.contains("@Injectable(public: true) has no effect") })
@@ -984,7 +986,9 @@ struct GeneratorOutputBuilderTests {
         let result = buildOutput(
             values: [],
             resolutions: [sharedService],
-            declaredAccessRanks: ["Service": .internal]
+            declaredAccessRanks: [
+                "Service": [DeclaredAccessRecord(access: .internal, condition: .unconditional)]
+            ]
         )
 
         #expect(!result.output.contains("public static"))
@@ -1308,7 +1312,7 @@ private func makeResolution(typeName: String,
 /// rules here would let the two drift apart silently.
 private func buildOutput(values: [InjectableValueRecord] = [],
                          resolutions: [ProviderResolution],
-                         declaredAccessRanks: [String: AccessRank] = [:],
+                         declaredAccessRanks: [String: [DeclaredAccessRecord]] = [:],
                          injectedUses: [InjectedUseRecord] = [],
                          markedMembers: [MarkedMemberRecord] = []) -> GeneratorOutput {
     GeneratorOutputBuilder(

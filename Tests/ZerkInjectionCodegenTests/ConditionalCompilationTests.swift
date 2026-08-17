@@ -404,6 +404,36 @@ struct ConditionalCompilationTests {
         }, "\(result.diagnostics.map(\.message))")
     }
 
+    /// The election is the one place that does *not* read
+    /// ``CompilationCondition/areExclusive(_:_:)``: it partitions candidates by
+    /// `#if` block, so a swap split across two blocks is reported as competing
+    /// even though emission would treat the two halves as exclusive. Pinned so
+    /// the difference is a decision rather than a surprise — see `coexisting`.
+    @Test("the election still partitions by block, not by condition")
+    func separateBlocksOfOneSwapStillCompete() {
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol Service {}
+
+        #if DEBUG
+        @Injectable<Service>(primary: true)
+        struct DebugService: Service {}
+        #else
+        struct ReleaseOnlyHelper {}
+        #endif
+
+        #if DEBUG
+        struct DebugOnlyHelper {}
+        #else
+        @Injectable<Service>(primary: true)
+        struct ReleaseService: Service {}
+        #endif
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("Multiple primary injectables")
+        }, "\(result.diagnostics.map(\.message))")
+    }
+
     // MARK: - Refusals
 
     @Test("branches that resolve in different domains are refused")

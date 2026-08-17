@@ -37,7 +37,7 @@ struct GeneratorOutputBuilder {
     /// Every type and protocol declared in the module -> the access it was
     /// written with, keyed by qualified name. See
     /// ``SourceCollector/declaredAccessRanks``.
-    var declaredAccessRanks: [String: AccessRank] = [:]
+    var declaredAccessRanks: [String: [DeclaredAccessRecord]] = [:]
     /// Injectable key -> every nominal type its spelling mentions. See
     /// ``SourceCollector/keyNominalNames``.
     var keyNominalNames: [String: Set<String>] = [:]
@@ -261,7 +261,9 @@ struct GeneratorOutputBuilder {
                 self.interjectionGuardLines(point: "`\(point)`", indent: indent)
             }
 
-            let access = exportedAccessPrefix(isExported: value.isExported, injectableKey: value.typeKey)
+            let access = exportedAccessPrefix(isExported: value.isExported,
+                                              injectableKey: value.typeKey,
+                                              condition: value.condition)
             if value.isExported, access.isEmpty {
                 diagnostics.append(inertPublicDiagnostic(
                     injectableKey: value.typeKey,
@@ -676,32 +678,44 @@ struct GeneratorOutputBuilder {
     /// be public, since a public member cannot expose an internal type.
     private func exportedAccessPrefix(for provider: ProviderResolution,
                                       injectableKey: String) -> String {
-        exportedAccessPrefix(isExported: provider.isExported, injectableKey: injectableKey)
+        exportedAccessPrefix(isExported: provider.isExported,
+                             injectableKey: injectableKey,
+                             condition: provider.condition)
     }
 
     /// The same decision for an injectable *value*, which has no
     /// `ProviderResolution` behind it. The key is all that appears in the
     /// member's signature, so the rule is identical: the value's own declaration
     /// may stay internal, since a public accessor's *body* may read it.
-    private func exportedAccessPrefix(isExported: Bool, injectableKey: String) -> String {
+    private func exportedAccessPrefix(isExported: Bool,
+                                      injectableKey: String,
+                                      condition: CompilationCondition) -> String {
         // *Every* type the spelling mentions has to be public, not one name
         // taken from it: a member exposing `any Alpha & Beta` is only as public
         // as the less public of the two, and a specialization is bounded by its
         // arguments. A name absent from the map is declared in another module,
         // where its access is not ours to judge.
-        guard isExported, isPublishable(injectableKey) else {
+        guard isExported, isPublishable(injectableKey, in: condition) else {
             return ""
         }
         return "public "
     }
 
     /// Whether every type this key mentions is public.
-    private func isPublishable(_ injectableKey: String) -> Bool {
+    private func isPublishable(_ injectableKey: String, in condition: CompilationCondition) -> Bool {
         // Falls back to the key itself for a registration recorded before
         // nominal names were tracked — a hand-built record in a test, never the
         // collector.
         let names = keyNominalNames[injectableKey] ?? [injectableKey]
-        return names.allSatisfy { declaredAccessRanks[$0].map { $0 >= .public } ?? true }
+        return names.allSatisfy { declaredAccess(of: $0, in: condition).map { $0 >= .public } ?? true }
+    }
+
+    /// The access of a declaration in the configuration that sees `condition`.
+    private func declaredAccess(of name: String, in condition: CompilationCondition) -> AccessRank? {
+        let visible = declaredAccessRanks[name]?.filter {
+            !CompilationCondition.areExclusive($0.condition, condition)
+        } ?? []
+        return visible.map { $0.access }.min()
     }
 
     /// The warning raised when `public: true` cannot be honoured, worded for
@@ -1583,7 +1597,7 @@ struct GeneratorOutputBuilder {
                 // two, and a spelling containing `->` cannot be split by hand.
                 let hidden = record.requiresVisibleType
                     ? record.extendedTypeNominalNames
-                        .compactMap { name in declaredAccessRanks[name].map { (name, $0) } }
+                        .compactMap { name in declaredAccess(of: name, in: record.condition).map { (name, $0) } }
                         .filter { $0.1 < .internal }
                         .min(by: { $0.0 < $1.0 })
                     : nil

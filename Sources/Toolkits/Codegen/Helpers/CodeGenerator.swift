@@ -76,6 +76,7 @@ public struct CodeGenerator {
                                   knownModules: collector.importedModules)
         let rewriter = AliasRewriter(aliases: aliases)
         let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
+        let keyNominalNames = rewriter.rewrite(keyNominalNames: collector.keyNominalNames)
         let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
         let types = gate.types
         let localValues = rewriter.rewrite(values: collector.values)
@@ -117,7 +118,7 @@ public struct CodeGenerator {
             resolutions: resolution.resolutions,
             primaryResolutions: KeyIndex(imports.primaries),
             declaredAccessRanks: collector.declaredAccessRanks,
-            keyNominalNames: collector.keyNominalNames,
+            keyNominalNames: keyNominalNames,
             injectedUses: injectedUses,
             markedMembers: markedMembers,
             keyDisplayNames: keyDisplayNames,

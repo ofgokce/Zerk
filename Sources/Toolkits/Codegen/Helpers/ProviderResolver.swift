@@ -218,12 +218,19 @@ extension ProviderResolver {
     /// containing both branches, a configuration no build ever has. A fallback
     /// registration plus a per-configuration override then collided with itself.
     ///
-    /// Split by branch rather than by enumerating cliques. Exclusivity only ever
-    /// comes from two positions choosing different clauses of one `#if`, so
-    /// finding a branch the candidates disagree on and partitioning by clause
-    /// removes exactly one disagreement — and a candidate that does not mention
-    /// that `#if` belongs to every part. Recursion terminates because each level
-    /// settles one branch.
+    /// Split by branch rather than by enumerating cliques: finding a branch the
+    /// candidates disagree on and partitioning by clause removes exactly one
+    /// disagreement — and a candidate that does not mention that `#if` belongs
+    /// to every part. Recursion terminates because each level settles one
+    /// branch.
+    ///
+    /// Narrower than ``CompilationCondition/areExclusive(_:_:)``, which also
+    /// recognises a clause stating what another clause needs to have failed,
+    /// across separate `#if`s. That is not read here, so a swap split over two
+    /// blocks is reported as competing rather than resolved per configuration.
+    /// Erring this way is the safe direction — the developer is asked to write
+    /// one `#if`, and told why — but the two answers are not the same answer,
+    /// which is worth knowing before adding a third caller.
     static func coexisting(among candidates: [ProviderResolution]) -> [[ProviderResolution]] {
         guard let branch = disputedBranch(among: candidates) else {
             return [candidates]

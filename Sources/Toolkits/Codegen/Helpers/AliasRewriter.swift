@@ -124,6 +124,16 @@ struct AliasRewriter {
 
         return rewritten
     }
+
+    func rewrite(keyNominalNames: [String: Set<String>]) -> [String: Set<String>] {
+        var rewritten: [String: Set<String>] = [:]
+        for (key, names) in keyNominalNames {
+            let representative = aliases.representative(for: key)
+            rewritten[representative, default: []].formUnion(names)
+            rewritten[representative, default: []].insert(representative)
+        }
+        return rewritten
+    }
 }
 
 private extension AliasRewriter {

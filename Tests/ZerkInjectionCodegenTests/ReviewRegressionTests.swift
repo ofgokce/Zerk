@@ -251,6 +251,25 @@ struct ReviewRegressionTests {
         #expect(!generated.contains("\nnonisolated func run(id: Int)"))
     }
 
+    /// An `@Injectable` function in an extension must be static too. Otherwise
+    /// generation emits a static call to an instance member.
+    @Test("an instance @Injectable function in an extension is refused")
+    func instanceExtensionInjectableFunctionIsRefused() {
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol Repo {}
+        struct Service {}
+
+        extension Service {
+            @Injectable<Repo>
+            func makeRepo() -> Repo { fatalError() }
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("needs it to be 'static'")
+        }, "\(result.diagnostics.map(\.message))")
+    }
+
     /// Whether the generated overload needs `convenience` depends on whether the
     /// extended type is a class, which Zerk may never see.
     @Test("an @injected initializer in an extension is refused")
