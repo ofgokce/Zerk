@@ -128,6 +128,29 @@ struct ProviderEffects: Equatable {
         )
     }
 
+    /// What *reading* a kept instance costs, given what *building* it costs.
+    ///
+    /// Not the same thing, and the difference is the box. A construction that
+    /// merely throws still goes through ``ZerkAsyncBox``, because a `static let`
+    /// cannot hold a failure and re-attempt it — so reading it is `async throws`
+    /// where building it was only `throws`. A construction with no effects at
+    /// all keeps its synchronous storage and reads for free.
+    ///
+    /// `rethrows` widens to `throws` on the way through: the box is handed a
+    /// closure and has no throwing parameter of its own to rethrow from.
+    ///
+    /// Lives on the effects, and is reached through
+    /// ``ProviderResolution/readEffects(building:)``, because three places ask
+    /// the question — the shared member, the wrapper plan, and the classifier
+    /// deciding whether a dependency can be a default argument. While one of
+    /// them answered it alone, a throwing-only `@Singleton` gave the other two a
+    /// `throws` member calling an `async` `inject()` with no `await`.
+    var keptRead: ProviderEffects {
+        self == .none
+            ? .none
+            : ProviderEffects(isAsync: true, isThrowing: isThrowing)
+    }
+
     /// `rethrows` narrowed to what the emitted signature can actually carry.
     ///
     /// Swift requires a `rethrows` function to have a throwing function

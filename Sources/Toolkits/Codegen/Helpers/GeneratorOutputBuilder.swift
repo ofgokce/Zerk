@@ -1063,7 +1063,7 @@ struct GeneratorOutputBuilder {
             // Reading an effectful kept instance is `async` even when only the
             // construction throws: the box coordinates concurrent callers onto
             // one build, and joining that build is what suspends.
-            let read = Self.keptReadEffects(storage.effects)
+            let read = storage.effects.keptRead
             var lines = [
                 "    \(provider.isolation.declarationPrefix)\(access)static func \(memberName)()\(read.declarationSuffix) -> \(displayName(for: injectableKey)) {"
             ]
@@ -1099,19 +1099,6 @@ struct GeneratorOutputBuilder {
         }
         lines.append("    }")
         return lines
-    }
-
-    /// What *reading* a kept instance costs, given what *building* it costs.
-    ///
-    /// Not the same thing, and the difference is the box. A construction that
-    /// merely throws still goes through ``ZerkAsyncBox``, because a `static let`
-    /// cannot hold a failure and re-attempt it — so reading it is `async throws`
-    /// where building it was only `throws`. A construction with no effects at
-    /// all keeps its synchronous storage and reads for free.
-    static func keptReadEffects(_ building: ProviderEffects) -> ProviderEffects {
-        building == .none
-            ? .none
-            : ProviderEffects(isAsync: true, isThrowing: building.isThrowing)
     }
 
     /// Two values claiming the same key **and name**.
@@ -2573,7 +2560,7 @@ struct GeneratorOutputBuilder {
             // charges rather than what the construction did. Applied here so
             // every consumer of the plan agrees — `inject()`, a default
             // argument, an `@injected` overload, and the `@Injected` refusal.
-            effects: resolution.isShared ? Self.keptReadEffects(effects) : effects,
+            effects: resolution.readEffects(building: effects),
             collisions: bubble.collisions
         )
     }

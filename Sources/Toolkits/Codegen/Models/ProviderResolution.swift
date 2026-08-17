@@ -40,6 +40,18 @@ struct ProviderResolution {
         isSingleton || scope != nil
     }
 
+    /// What *reading* this resolution's result costs, given what *building* it
+    /// costs.
+    ///
+    /// A kept instance is read through its box and charged
+    /// ``ProviderEffects/keptRead``; anything else is built where it is needed
+    /// and costs what the construction did. Everything that writes a call to
+    /// this resolution asks here, so the member Zerk emits and the call another
+    /// member makes to it cannot disagree about `try` and `await`.
+    func readEffects(building: ProviderEffects) -> ProviderEffects {
+        isShared ? building.keptRead : building
+    }
+
     /// Which attribute a diagnostic about the sharing should name.
     var sharingAttributeName: String {
         isSingleton ? "@Singleton" : "@Scoped"

@@ -138,8 +138,15 @@ struct ParameterClassifier {
             }
 
             let hops = dependency.isolation.requiresHop(callingFrom: memberIsolation)
-            let effects = dependency.provider.effects
-                .merged(with: dependencyClassification.dependencyEffects)
+            // What the dependency's *member* costs to call, which for a kept
+            // instance is not what building it cost — see
+            // ``ProviderResolution/readEffects(building:)``. Asked here as well
+            // as in `wrapperPlan` because this is where a parameter is judged
+            // defaultable: a throwing-only `@Singleton` reads `async throws`,
+            // and calling it from a default argument is not possible at all.
+            let effects = dependency
+                .readEffects(building: dependency.provider.effects
+                    .merged(with: dependencyClassification.dependencyEffects))
                 .merged(with: ProviderEffects(isAsync: hops, isThrowing: false))
 
             hasCrossing = hasCrossing || hops || dependencyClassification.hasIsolationCrossing
