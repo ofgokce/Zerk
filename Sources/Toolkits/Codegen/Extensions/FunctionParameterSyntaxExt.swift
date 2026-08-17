@@ -39,6 +39,7 @@ extension FunctionParameterSyntax {
             location: locator.map { $0(Syntax(self)) },
             typeKeyShape: type.typeKeyShape,
             mentionedGenericParameters: type.mentionedGenericParameters(in: genericScope),
-            isBareGenericParameter: type.isBareGenericParameter(in: genericScope))
+            isBareGenericParameter: type.isBareGenericParameter(in: genericScope),
+            typeNominalNames: type.nominalNames)
     }
 }

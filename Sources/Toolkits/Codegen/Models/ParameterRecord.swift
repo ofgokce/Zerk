@@ -59,6 +59,17 @@ struct ParameterRecord: Equatable {
     /// be spelled the same.
     var isBareGenericParameter: Bool = false
 
+    /// Every nominal type this parameter's spelling mentions — `Box` and
+    /// `Hidden` for `Box<Hidden>`. Read off the syntax tree; see
+    /// ``TypeSyntax/nominalNames``.
+    ///
+    /// Consulted only where Zerk *adds* the parameter to a signature it did not
+    /// write. A parameter the developer wrote needs no visibility check — it is
+    /// already on a declaration the compiler accepted at that access — but a
+    /// bubbled requirement comes from the dependency's provider, which can be
+    /// less visible than the member resolving it.
+    var typeNominalNames: Set<String> = []
+
     /// Identity for matching a bubbled requirement to a parameter that can feed
     /// it: name and type, ignoring the label. The requirement's label comes from
     /// the *dependency's* declaration and need not match the member's.

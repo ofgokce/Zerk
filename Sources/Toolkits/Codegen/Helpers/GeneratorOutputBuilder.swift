@@ -718,6 +718,31 @@ struct GeneratorOutputBuilder {
         return visible.map { $0.access }.min()
     }
 
+    /// The least visible type among parameters Zerk would add to a public
+    /// signature, or `nil` when every one of them may appear there.
+    ///
+    /// Reported on the *name*, not on the parameter's spelling: `Box<Hidden>` is
+    /// as visible as `Hidden`, and naming the whole spelling would leave the
+    /// developer to work out which half is the problem. Ties break on the name
+    /// so two runs report the same one.
+    private func hiddenBubbledType(
+        among parameters: [ParameterRecord],
+        in condition: CompilationCondition
+    ) -> (parameter: ParameterRecord, name: String, access: AccessRank)? {
+        parameters
+            .flatMap { parameter in
+                parameter.typeNominalNames.compactMap { name -> (ParameterRecord, String, AccessRank)? in
+                    guard let access = declaredAccess(of: name, in: condition),
+                          access < .public else {
+                        return nil
+                    }
+                    return (parameter, name, access)
+                }
+            }
+            .min { $0.1 < $1.1 }
+            .map { (parameter: $0.0, name: $0.1, access: $0.2) }
+    }
+
     /// The warning raised when `public: true` cannot be honoured, worded for
     /// whichever declaration asked.
     private func inertPublicDiagnostic(injectableKey: String,
@@ -1698,6 +1723,22 @@ struct GeneratorOutputBuilder {
                     ))
                 }
                 if !bubble.collisions.isEmpty {
+                    continue
+                }
+
+                // The same question the extended type is asked above, on the
+                // other half of the signature. Bubbling *adds* parameters to a
+                // declaration the developer wrote, so their visibility is Zerk's
+                // to answer: a public member's overload cannot take an internal
+                // type, and the compiler says so inside `Zerk.generated.swift` —
+                // a file nobody wrote and nothing points back from.
+                if record.isPublic,
+                   let hidden = hiddenBubbledType(among: bubble.parameters, in: record.condition) {
+                    diagnostics.append(CodegenDiagnostic(
+                        severity: .error,
+                        message: "A public @injected member cannot expose '\(hidden.name)', which is \(hidden.access.rawValue): resolving the marked parameter needs '\(hidden.parameter.name): \(hidden.parameter.typeName)', which the generated overload has to ask its caller for. Make '\(hidden.name)' public, register a provider for '\(hidden.parameter.typeName)', or drop 'public' from the member.",
+                        location: record.location
+                    ))
                     continue
                 }
 

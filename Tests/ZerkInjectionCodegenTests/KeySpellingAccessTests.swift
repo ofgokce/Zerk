@@ -201,6 +201,97 @@ struct KeySpellingAccessTests {
         #expect(result.output.output.contains("public static var debugService"))
         #expect(!result.output.output.contains("public static var releaseService"))
     }
+
+    // MARK: - The third guard: what bubbling adds to a public signature
+
+    /// The extended type is not the only thing in an `@injected` overload's
+    /// signature. Resolving the marked parameter can need arguments of its own,
+    /// and those are *appended* — so a public member ends up exposing whatever
+    /// its dependency's provider asks for, which nothing had checked.
+    ///
+    /// Spelled every way for the same reason as the two guards above: the names
+    /// come from one tree walk, so a spelling that hides a name hides it from
+    /// all three.
+    @Test("a bubbled parameter hiding a type is refused, however it is spelled",
+          arguments: [
+            "Hidden",
+            "Box<Hidden>",
+            "[Hidden]",
+            "(Hidden) -> Void",
+            "(Shown, Hidden)",
+            "Hidden?",
+          ])
+    func publicOverloadRefusesHiddenBubbledType(spelling: String) {
+        let result = CompileFixture.generateWithResolution(source: """
+        struct Hidden {}
+        public struct Shown {}
+        public struct Box<E> {}
+        public protocol Serving {}
+
+        @Injectable<Serving>
+        public struct Service: Serving {
+            @InjectableProviding
+            public init(secret: \(spelling)) {}
+        }
+
+        public final class Screen {
+            public init(@injected service: Serving, title: String) {}
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("cannot expose 'Hidden'")
+        }, "\(spelling): \(result.diagnostics.map(\.message))")
+    }
+
+    /// And allowed when the bubbled parameter is public throughout, so the guard
+    /// is not simply refusing every overload that bubbles.
+    @Test("a bubbled parameter of public types is emitted")
+    func publicOverloadAllowsVisibleBubbledType() {
+        let result = CompileFixture.generateWithResolution(source: """
+        public struct Shown {}
+        public struct Box<E> {}
+        public protocol Serving {}
+
+        @Injectable<Serving>
+        public struct Service: Serving {
+            @InjectableProviding
+            public init(setting: Box<Shown>) {}
+        }
+
+        public final class Screen {
+            public init(@injected service: Serving, title: String) {}
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains(
+            "nonisolated public convenience init(title: String, setting: Box<Shown>)"))
+    }
+
+    /// An internal member may expose an internal type — the overload is only as
+    /// public as the member it stands in for, and the guard must not widen into
+    /// refusing that.
+    @Test("an internal member may bubble an internal parameter")
+    func internalOverloadAllowsHiddenBubbledType() {
+        let result = CompileFixture.generateWithResolution(source: """
+        struct Hidden {}
+        public protocol Serving {}
+
+        @Injectable<Serving>
+        public struct Service: Serving {
+            @InjectableProviding
+            public init(secret: Hidden) {}
+        }
+
+        final class Screen {
+            init(@injected service: Serving, title: String) {}
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("init(title: String, secret: Hidden)"))
+    }
 }
 
 extension KeySpellingAccessTests.Spelling: CustomTestStringConvertible {

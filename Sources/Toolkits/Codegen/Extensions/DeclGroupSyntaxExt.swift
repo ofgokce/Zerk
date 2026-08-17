@@ -82,7 +82,8 @@ extension DeclGroupSyntax {
                     typeName: annotation.type.trimmedDescription,
                     typeKeyShape: annotation.type.typeKeyShape,
                     mentionedGenericParameters: annotation.type.mentionedGenericParameters(in: genericScope),
-                    isBareGenericParameter: annotation.type.isBareGenericParameter(in: genericScope)))
+                    isBareGenericParameter: annotation.type.isBareGenericParameter(in: genericScope),
+                    typeNominalNames: annotation.type.nominalNames))
             }
         }
 
