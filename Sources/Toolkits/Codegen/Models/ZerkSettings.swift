@@ -133,11 +133,21 @@ extension ZerkSettings {
             throw LoadFailure(message: "\(fileName) must contain a JSON object.", path: path)
         }
 
-        if let version = dictionary["version"] as? Int, version > currentVersion {
-            throw LoadFailure(
-                message: "\(fileName) declares version \(version); this version of Zerk understands up to \(currentVersion).",
-                path: path
-            )
+        // Typed like every other key below, and for a stronger reason than any
+        // of them: this is the key that decides whether the rest can be trusted
+        // to mean what they say. Written as `"version": "2"` it failed the cast
+        // and skipped the guard, so a settings file from a newer Zerk was read
+        // as if it were current.
+        if let version = dictionary["version"] {
+            guard let number = version as? Int else {
+                throw LoadFailure(message: "'version' must be a number.", path: path)
+            }
+            guard number <= currentVersion else {
+                throw LoadFailure(
+                    message: "\(fileName) declares version \(number); this version of Zerk understands up to \(currentVersion).",
+                    path: path
+                )
+            }
         }
 
         var settings = ZerkSettings.default

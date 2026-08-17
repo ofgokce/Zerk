@@ -76,6 +76,26 @@ struct ZerkSettingsTests {
         }
     }
 
+    /// The guard has to reject the *type* too, not only a number that is too
+    /// high. A quoted version failed the `as? Int` cast and slipped past it
+    /// entirely — on the one key that decides whether the rest of the file can
+    /// be read as written.
+    ///
+    /// `true` is not among these: `JSONSerialization` gives it as an `NSNumber`
+    /// that bridges to `1`, which is a version this Zerk does understand, so
+    /// reading it as one permits nothing that was not already permitted.
+    @Test("a version that is not a number is rejected", arguments: [
+        #"{"version": "2"}"#,
+        #"{"version": [2]}"#,
+        #"{"version": {"major": 2}}"#,
+    ])
+    func nonNumericVersionRejected(json: String) {
+        let path = write(json)
+        #expect(throws: ZerkSettings.LoadFailure.self) {
+            try ZerkSettings.load(contentsOfFile: path)
+        }
+    }
+
     @Test("swift 5 is recognised as pre-6")
     func swift5IsRecognised() {
         var settings = ZerkSettings.default

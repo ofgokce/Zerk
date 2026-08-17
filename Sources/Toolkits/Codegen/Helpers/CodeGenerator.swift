@@ -17,9 +17,16 @@ import SwiftParser
 /// together, so one build surfaces every problem rather than the first.
 public struct CodeGenerator {
 
-    /// Thrown after diagnostics have been emitted, to exit non-zero. Carries no
-    /// payload: the diagnostics are the error report.
-    struct Failure: Error {}
+    /// Thrown to exit non-zero.
+    ///
+    /// `message` is `nil` when diagnostics have already been emitted and *are*
+    /// the error report. It is filled in for the failures that have no source
+    /// position to hang a diagnostic on — a file that vanished mid-build, a
+    /// non-UTF8 input, a work directory that cannot be written — because
+    /// otherwise nothing at all is written and the build fails silently.
+    public struct Failure: Error {
+        public var message: String? = nil
+    }
 
     let inputPaths: [String]
     let outputPath: String
@@ -65,7 +72,15 @@ public struct CodeGenerator {
         let collector = SourceCollector(settings: settings)
 
         for path in inputPaths {
-            let source = try String(contentsOfFile: path, encoding: .utf8)
+            let source: String
+            do {
+                source = try String(contentsOfFile: path, encoding: .utf8)
+            } catch {
+                // Named, because the build system hands this every source file
+                // in the target and "the file couldn't be opened" would not say
+                // which one — nor that it is a *Zerk* step reporting it.
+                throw Failure(message: "could not read \(path): \(error.localizedDescription)")
+            }
             let tree = Parser.parse(source: source)
             collector.walk(tree, path: path)
         }
@@ -155,11 +170,15 @@ public struct CodeGenerator {
         }
 
         let url = URL(fileURLWithPath: outputPath)
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try output.output.write(to: url, atomically: true, encoding: String.Encoding.utf8)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try output.output.write(to: url, atomically: true, encoding: String.Encoding.utf8)
+        } catch {
+            throw Failure(message: "could not write \(outputPath): \(error.localizedDescription)")
+        }
 
         // After the Swift, and only once it is written: the graph describes what
         // was emitted, so a run that produced no code should leave no graph
@@ -174,11 +193,15 @@ public struct CodeGenerator {
             graph.module = moduleName
 
             let graphURL = URL(fileURLWithPath: graphPath)
-            try FileManager.default.createDirectory(
-                at: graphURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try graph.encoded().write(to: graphURL, options: .atomic)
+            do {
+                try FileManager.default.createDirectory(
+                    at: graphURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try graph.encoded().write(to: graphURL, options: .atomic)
+            } catch {
+                throw Failure(message: "could not write \(graphPath): \(error.localizedDescription)")
+            }
         }
     }
     

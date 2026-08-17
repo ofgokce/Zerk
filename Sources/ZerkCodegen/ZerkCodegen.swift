@@ -41,13 +41,26 @@ struct ZerkCodegen {
                 // consume the next input path silently.
                 if let flag = ["--settings", "--graph", "--module"].first(where: { $0 == arguments[index] }) {
                     guard index + 1 < arguments.count else {
+                        emit("error: \(flag) expects a value.")
+                        emitUsage()
+                        exit(1)
+                    }
+                    let value = arguments[index + 1]
+                    // A flag where a value belongs is a *missing* value, not a
+                    // value that happens to start with dashes. Taking it swallows
+                    // the real flag, leaves that flag's own value to become an
+                    // input path, and pushes the eventual complaint onto whatever
+                    // innocent argument came next — so the message would name the
+                    // wrong one.
+                    guard !value.hasPrefix("--") else {
+                        emit("error: \(flag) expects a value, but the next argument is '\(value)'.")
                         emitUsage()
                         exit(1)
                     }
                     switch flag {
-                    case "--settings": settingsPath = arguments[index + 1]
-                    case "--graph": graphPath = arguments[index + 1]
-                    default: moduleName = arguments[index + 1]
+                    case "--settings": settingsPath = value
+                    case "--graph": graphPath = value
+                    default: moduleName = value
                     }
                     index += 2
                     continue
@@ -69,14 +82,28 @@ struct ZerkCodegen {
                 moduleName: moduleName)
 
             try codeGenerator.run()
+        } catch let failure as CodeGenerator.Failure {
+            // A message means nothing else has spoken: the diagnostics carry
+            // their own explanation and leave it `nil`, while an I/O failure has
+            // no source position to hang one on and would otherwise fail the
+            // build with an empty stderr and "Command failed with a nonzero
+            // exit code" as the only clue.
+            if let message = failure.message {
+                emit("error: \(message)")
+            }
+            exit(1)
         } catch {
+            emit("error: \(error.localizedDescription)")
             exit(1)
         }
     }
 
     private static func emitUsage() {
-        let message = "Usage: ZerkCodegen <output.swift> [--settings <ZerkSettings.json>] [--graph <Zerk.graph.json>] [--module <name>] <input.swift> [input.swift...]\n"
-        if let data = message.data(using: .utf8) {
+        emit("Usage: ZerkCodegen <output.swift> [--settings <ZerkSettings.json>] [--graph <Zerk.graph.json>] [--module <name>] <input.swift> [input.swift...]")
+    }
+
+    private static func emit(_ message: String) {
+        if let data = (message + "\n").data(using: .utf8) {
             FileHandle.standardError.write(data)
         }
     }

@@ -200,6 +200,15 @@ struct ZerkCLI: CommandPlugin {
                     throw Failure("\(argument) expects a value")
                 }
                 let value = arguments[index + 1]
+                // A flag where a value belongs is a missing value. Without this,
+                // `--format --output /tmp/x.json` reads as format `--output` and
+                // the complaint lands on `/tmp/x.json`, which is the one
+                // argument that was written correctly. Duplicated from the two
+                // executables rather than shared, because a plugin target cannot
+                // import a library target.
+                guard !value.hasPrefix("--") else {
+                    throw Failure("\(argument) expects a value, but the next argument is '\(value)'")
+                }
                 switch argument {
                 case "--target": targetNames.insert(value)
                 case "--format": format = value

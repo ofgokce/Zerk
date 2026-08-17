@@ -33,10 +33,17 @@ struct ZerkGraphTool {
                 guard index + 1 < arguments.count else {
                     fail("\(arguments[index]) expects a value")
                 }
+                let value = arguments[index + 1]
+                // A flag where a value belongs is a missing value. Reported as
+                // one, rather than accepted and then explained as whatever it
+                // breaks further along.
+                guard !value.hasPrefix("--") else {
+                    fail("\(arguments[index]) expects a value, but the next argument is '\(value)'")
+                }
                 if arguments[index] == "--format" {
-                    format = arguments[index + 1]
+                    format = value
                 } else {
-                    outputPath = arguments[index + 1]
+                    outputPath = value
                 }
                 index += 2
             default:
