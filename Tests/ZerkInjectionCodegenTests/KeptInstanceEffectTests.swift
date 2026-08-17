@@ -10,14 +10,15 @@ import Testing
 /// construction effects and consumer shapes.
 ///
 /// Reading a kept instance is not what building one cost — the box turns a
-/// throwing construction into an `async throws` read — and three places write a
-/// call to it: the member that resolves a dependency into its body, `inject()`,
-/// and the generated `@injected` overload. Two of them asked the shared rule and
-/// one recomputed it, which nothing noticed while *async* constructions were the
-/// only ones covered: there the two answers agree. Throwing-only construction
-/// was enough to emit `static func consumer() throws` whose body called an
-/// `async` `inject()`, with no diagnostic and a generated file that did not
-/// compile.
+/// throwing construction into an `async throws` read — and four places write a
+/// call to it: the member that resolves a dependency into its body, `inject()`
+/// when it calls the member bare, `inject()` again when a sibling provider
+/// shares the member's name and the call has to spell its arguments, and the
+/// generated `@injected` overload. Each one that asked the question for itself
+/// got it wrong, and nothing noticed while *async* constructions were the only
+/// ones covered: there the two answers agree. Throwing-only construction was
+/// enough to emit a `throws` member whose body called an `async` one, with no
+/// diagnostic and a generated file that did not compile.
 ///
 /// So this is written as a cross product rather than one test per shape: what
 /// was missing was a *combination*, not a spelling, and a suite pinned to the
@@ -73,10 +74,18 @@ struct KeptInstanceEffectTests {
         protocol Connecting: Sendable {}
 
         \(sharing.attribute)
-        @Injectable<Connecting>
+        @Injectable<Connecting>(primary: true)
         final class Client: Connecting, @unchecked Sendable {
             init() \(construction.built) {}
         }
+
+        // A sibling provider under the same key, generating a member of the
+        // same name. That is what sends `inject()` down its overload-
+        // disambiguating branch, where the call spells its arguments out — the
+        // fourth emitter, and the one that wrote the *construction's* prefix
+        // onto a call to the *read*.
+        @Injectable<Connecting>
+        func client(seed: Int) -> Connecting { fatalError() }
 
         // Resolved into a member's body, and again through `inject()`.
         @Injectable

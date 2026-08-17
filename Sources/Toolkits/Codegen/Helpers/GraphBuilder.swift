@@ -71,7 +71,17 @@ struct GraphBuilder {
     private func provider(for resolution: ProviderResolution,
                           classifier: ParameterClassifier) -> ZerkGraph.Provider {
         let classification = classifier.classify(resolution)
-        let effects = resolution.provider.effects
+        // What *calling the generated member* costs, which is the graph's whole
+        // subject — not what the construction was written as. The two differ
+        // twice over: a dependency resolved into the member's body lends it its
+        // effects, and a kept instance is read back through its box, so a
+        // throwing construction reads `async throws`. Asked through
+        // ``ProviderResolution/readEffects(building:)``, the same rule the
+        // emitter uses, so the graph cannot describe a member the generated file
+        // does not contain.
+        let effects = resolution.readEffects(
+            building: resolution.provider.effects
+                .merged(with: classification.dependencyEffects))
 
         return ZerkGraph.Provider(
             typeName: resolution.typeName,

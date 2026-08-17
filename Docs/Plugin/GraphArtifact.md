@@ -32,7 +32,7 @@ One entry per key, one per value, and the edges between them.
 
 ```json
 {
-  "formatVersion" : 2,
+  "formatVersion" : 3,
   "keys" : [
     {
       "key" : "Caching",
@@ -83,6 +83,8 @@ One entry per key, one per value, and the edges between them.
 ### Providers
 
 `lifetime` is `transient`, `scoped` or `singleton`, and `scope` names the scope for a scoped one. `isolation` names the global actor a provider constructs on, and is absent when nonisolated. `memberName` is what the generated member is called — which is also what its [interjection point](../Testing/Interjection.md) is named after, so it is the string you would reach for in a test.
+
+`isAsync` and `isThrowing` describe the **emitted member**, not the declaration it was written from. That is the artifact's contract everywhere, but these two are where it is easiest to assume otherwise, because a member picks up effects the source never wrote: a dependency resolved into the body lends the member its `async`, and a kept instance is read back through its box, so a `@Singleton` with an `init() throws` is emitted `async throws` and reported as both. If you are asking the graph whether a call site needs `await`, these are the fields to ask, and they answer for the code that exists.
 
 `isPrimary` marks the one provider backing `inject()`. A key with several providers has exactly one — unless `#if` clauses gave it one per configuration, in which case each is primary in its own.
 

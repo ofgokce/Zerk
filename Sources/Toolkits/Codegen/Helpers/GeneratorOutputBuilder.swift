@@ -86,6 +86,20 @@ struct GeneratorOutputBuilder {
         let parameters: [ParameterRecord]
         let argumentExpressions: [String]
         let effects: ProviderEffects
+        /// What a *call to the generated member* costs when that call spells its
+        /// arguments out, rather than letting the member's defaults resolve
+        /// them.
+        ///
+        /// Neither ``effects`` nor the provider's own. An argument written at
+        /// the call site carries its own `try`/`await`, so only what the member
+        /// itself charges is left for the outside — but a kept instance's member
+        /// takes no arguments at all, its dependencies being paid inside the
+        /// box, so there the whole read belongs to the caller.
+        ///
+        /// A field rather than a judgement made at each use, because making it
+        /// twice is how `inject()` came to call an `async throws` member with a
+        /// bare `try`.
+        let memberCallEffects: ProviderEffects
         /// Bubbled requirements that clash with a parameter the provider already
         /// declares. Carried out rather than reported in place, because
         /// `wrapperPlan` runs many times per provider.
@@ -98,10 +112,12 @@ struct GeneratorOutputBuilder {
         init(parameters: [ParameterRecord],
              argumentExpressions: [String],
              effects: ProviderEffects,
+             memberCallEffects: ProviderEffects,
              collisions: [BubbleResolver.Collision] = []) {
             self.parameters = parameters
             self.argumentExpressions = argumentExpressions
             self.effects = effects.resolved(forParameters: parameters)
+            self.memberCallEffects = memberCallEffects
             self.collisions = collisions
         }
     }
@@ -1482,7 +1498,7 @@ struct GeneratorOutputBuilder {
                     // defaulted, so a bare call matches every overload at once.
                     // Naming the arguments is what makes the call resolve; they
                     // are the same expressions the defaults hold.
-                    lines.append("        \(provider.provider.effects.callPrefix)\(memberName)(\(memberCallArguments(for: provider, using: plan.argumentExpressions)))")
+                    lines.append("        \(plan.memberCallEffects.callPrefix)\(memberName)(\(memberCallArguments(for: provider, using: plan.argumentExpressions)))")
                 } else {
                     lines.append("        \(plan.effects.callPrefix)\(memberName)()")
                 }
@@ -1492,7 +1508,13 @@ struct GeneratorOutputBuilder {
             lines.append("    }")
         } else {
             lines.append("    \(isolation.declarationPrefix)\(accessPrefix)static func inject\(generics.parameters)\(parameterClause(parameters: plan.parameters, defaults: [:]))\(plan.effects.declarationSuffix) -> \(returns)\(generics.whereClause) {")
-            lines.append("        \(provider.provider.effects.callPrefix)\(memberName)(\(memberCallArguments(for: provider, using: plan.argumentExpressions)))")
+            // Same prefix as the branch above, though today it can only ever be
+            // the provider's own effects here: a kept instance that needed
+            // caller arguments was refused before it got this far, so
+            // `plan.parameters` is empty for every one of them. Read from the
+            // plan anyway, so the two branches cannot drift apart if that
+            // refusal is ever relaxed.
+            lines.append("        \(plan.memberCallEffects.callPrefix)\(memberName)(\(memberCallArguments(for: provider, using: plan.argumentExpressions)))")
             lines.append("    }")
         }
         return lines
@@ -2484,7 +2506,10 @@ struct GeneratorOutputBuilder {
             return WrapperPlan(
                 parameters: resolution.provider.parameters,
                 argumentExpressions: resolution.provider.parameters.map(callArgument),
-                effects: resolution.provider.effects
+                effects: resolution.provider.effects,
+                // Every parameter is passed straight through on this path, so
+                // nothing is resolved and there is nothing extra to pay.
+                memberCallEffects: resolution.provider.effects
             )
         }
 
@@ -2594,6 +2619,9 @@ struct GeneratorOutputBuilder {
             // every consumer of the plan agrees — `inject()`, a default
             // argument, an `@injected` overload, and the `@Injected` refusal.
             effects: resolution.readEffects(building: effects),
+            memberCallEffects: resolution.isShared
+                ? resolution.readEffects(building: effects)
+                : resolution.provider.effects,
             collisions: bubble.collisions
         )
     }

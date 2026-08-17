@@ -81,7 +81,10 @@ struct PackageGraphTests {
         let merged = GraphMerger(graphs: Self.twoModules).merge()
 
         #expect(merged.formatVersion == ZerkPackageGraph.currentFormatVersion)
-        #expect(merged.formatVersion == 2)
+        // Written out as well as compared to the constant, so bumping the
+        // constant is a deliberate act rather than something a test follows
+        // along with.
+        #expect(merged.formatVersion == 3)
     }
 
     @Test("an import is matched to the module that exports it")

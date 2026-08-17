@@ -215,6 +215,49 @@ struct GraphArtifactTests {
         #expect(provider?.isThrowing == true)
     }
 
+    /// Effects are a claim about the *emitted member*, so they are checked
+    /// against it rather than against the source.
+    ///
+    /// A kept instance is where the two part company: `@Singleton` with an
+    /// `init() throws` is emitted `async throws`, because joining the box's one
+    /// build is what suspends — and the graph reported `throws` alone. That is
+    /// the wrong answer to the question a consumer brings to these two fields,
+    /// which is whether a call site needs `await`.
+    ///
+    /// Written over the effect axis rather than for the one reported case: the
+    /// same rule has four readers, and this is the graph's.
+    @Test("effects match the emitted inject()", arguments: ["", "throws", "async", "async throws"])
+    func effectsAgreeWithTheGeneratedCode(effect: String) {
+        let source = """
+        protocol Connecting {}
+
+        @Singleton
+        @Injectable<Connecting>
+        final class Client: Connecting, @unchecked Sendable {
+            init() \(effect) {}
+        }
+
+        @Injectable
+        struct Consumer {
+            let connecting: Connecting
+        }
+        """
+
+        let graph = CompileFixture.graph(source: source)
+        let generated = CompileFixture.generate(source: source)
+
+        for graphKey in graph.keys {
+            guard let primary = graphKey.providers.first(where: \.isPrimary) else {
+                continue
+            }
+            let effects = ProviderEffects(isAsync: primary.isAsync,
+                                          isThrowing: primary.isThrowing)
+            #expect(generated.contains(
+                "static func inject()\(effects.declarationSuffix) -> \(graphKey.displayName) {"),
+                    "\(graphKey.key) reports '\(effects.declarationSuffix)':\n\(generated)")
+        }
+    }
+
     // MARK: - The file itself
 
     @Test("encoding is deterministic")

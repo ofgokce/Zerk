@@ -40,7 +40,13 @@ import Foundation
 struct ZerkGraph: Codable, Equatable {
 
     /// Bumped only for a breaking change. See the type's discussion.
-    static let currentFormatVersion = 2
+    ///
+    /// 3 repurposed `Provider.isAsync` and `Provider.isThrowing`: they had
+    /// reported how the *construction* was written, while the artifact claims
+    /// to describe what is emitted. They now report what calling the generated
+    /// member costs, which for an effectful kept instance is not the same
+    /// answer.
+    static let currentFormatVersion = 3
 
     var formatVersion: Int = ZerkGraph.currentFormatVersion
     /// The module this graph describes, when the caller named one.
@@ -94,7 +100,18 @@ struct ZerkGraph: Codable, Equatable {
         /// The global actor this provider constructs on, or `nil` when
         /// nonisolated.
         let isolation: String?
+        /// Whether calling this provider's generated member requires `await`.
+        ///
+        /// A property of the *emitted member*, not of the declaration it was
+        /// written from, and the two part company in both directions a member
+        /// gains effects: a dependency resolved into the body lends the member
+        /// its `async`, and a kept instance is read back through
+        /// `ZerkAsyncBox`, which suspends however the construction was written.
+        /// A `@Singleton` whose initializer only `throws` is emitted as
+        /// `async throws` and reported here as both.
         let isAsync: Bool
+        /// Whether calling this provider's generated member requires `try`. Read
+        /// off the emitted member, as ``isAsync`` is.
         let isThrowing: Bool
         /// Whether this provider backs the key's `inject()`.
         let isPrimary: Bool
