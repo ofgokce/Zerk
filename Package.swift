@@ -9,7 +9,11 @@ let package = Package(
     
     platforms: [
         .iOS(.v13),
-        .macOS(.v14),
+        // 13, not 14: the highest platform-gated API anywhere in the sources is
+        // `URL.appending(path:)`, used by the two plugin targets. A higher floor
+        // would exclude macOS 13 consumers for nothing, and the gap against
+        // `.iOS(.v13)` reads as though there were a reason.
+        .macOS(.v13),
         .macCatalyst(.v13),
         .watchOS(.v6),
         .tvOS(.v13),

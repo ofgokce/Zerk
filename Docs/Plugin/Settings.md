@@ -6,7 +6,7 @@
 
 `ZerkSettings.json`, in your target's directory or at the package root (the target wins). The plugin declares it as a build input, so edits trigger regeneration. `//` and `/* */` comments are supported. Every key is optional; the defaults below describe a stock Swift 6 target.
 
-An Xcode target has no directory of its own, so under the Xcode plugin the file is looked for next to the project first, then alongside the input files.
+An Xcode target has no directory of its own, so under the Xcode plugin the file is looked for alongside the target's sources first and at the project root last — the same precedence, the target's own file winning. Where the sources span several directories, the shallowest wins, and two at the same depth are ordered by path; a file meant for a whole target sits at the root of its sources, and the sort is what keeps the answer from depending on the order Xcode happened to enumerate the files in.
 
 No file at all is not an error — Zerk falls back to the defaults.
 

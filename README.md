@@ -162,9 +162,9 @@ See [How it works](Docs/Plugin/HowItWorks.md) and [Limitations](Docs/Plugin/Limi
 
 ## Requirements
 
-- Swift 6.2 **toolchain** (`swift-tools-version: 6.1`); Zerk's own targets build in `.v6` language mode
+- Swift 6.2 **toolchain** (`swift-tools-version: 6.1`); the runtime, the macros and the macro toolkit build in `.v6` language mode, the codegen half in `.v5`
 - swift-syntax 602.x
-- Platforms: iOS 13+, macOS 14+, watchOS 6+, tvOS 13+, visionOS 1+, Mac Catalyst 13+
+- Platforms: iOS 13+, macOS 13+, watchOS 6+, tvOS 13+, visionOS 1+, Mac Catalyst 13+
 
 6.2 is the floor because interjection points are named with raw identifiers (SE-0451). Your *language mode* is a separate question — a target with `SWIFT_VERSION = 5` under a Swift 6 toolchain is fully supported, with one construct needing an opt-in. See [Installation](Docs/Getting%20Started/Installation.md#consuming-targets-in-swift-5-language-mode).
 

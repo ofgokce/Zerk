@@ -4,9 +4,9 @@ What Zerk needs from your toolchain, how to add the package with Swift Package M
 
 ## Requirements
 
-- Swift 6.2 **toolchain** (`swift-tools-version: 6.1`); Zerk's own targets build in `.v6` language mode
+- Swift 6.2 **toolchain** (`swift-tools-version: 6.1`); the runtime, the macros and the macro toolkit build in `.v6` language mode, the codegen half in `.v5`
 - swift-syntax 602.x
-- Platforms: iOS 13+, macOS 14+, watchOS 6+, tvOS 13+, visionOS 1+, Mac Catalyst 13+
+- Platforms: iOS 13+, macOS 13+, watchOS 6+, tvOS 13+, visionOS 1+, Mac Catalyst 13+
 
 6.2 is the floor because interjection points are named with raw identifiers (SE-0451) — they appear in the generated file your toolchain compiles, and in the key paths `#Interject` expands. Your *language mode* is a separate question, answered below.
 

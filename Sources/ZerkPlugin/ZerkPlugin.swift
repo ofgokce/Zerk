@@ -64,6 +64,37 @@ struct ZerkPlugin: BuildToolPlugin {
         return nil
     }
 
+    /// Where to look for `ZerkSettings.json` for an *Xcode* target, most
+    /// specific first.
+    ///
+    /// An Xcode target has no directory of its own, so the nearest thing is
+    /// where its sources sit — and that can be several directories.
+    /// `inputFiles` arrives in whatever order Xcode enumerated it, which would
+    /// have made the winner depend on that order; sorting settles it.
+    ///
+    /// Shallowest first, then by path: a file meant for the whole target sits at
+    /// the root of its sources, and anything deeper would be a per-folder
+    /// setting, which Zerk has no notion of. The project directory goes last, so
+    /// a target's own file beats the project's — the same precedence the SwiftPM
+    /// path gets from `[target, package]`.
+    static func settingsSearchDirectories(forSources sources: [URL],
+                                          projectRoot: URL) -> [URL] {
+        var directories: [URL] = []
+        var seen = Set<String>()
+        for file in sources {
+            let directory = file.deletingLastPathComponent()
+            if seen.insert(directory.path).inserted {
+                directories.append(directory)
+            }
+        }
+        directories.sort {
+            $0.pathComponents.count == $1.pathComponents.count
+                ? $0.path < $1.path
+                : $0.pathComponents.count < $1.pathComponents.count
+        }
+        return directories + [projectRoot]
+    }
+
     /// Builds the single codegen command shared by the SwiftPM and Xcode
     /// entry points.
     ///
@@ -122,20 +153,9 @@ extension ZerkPlugin: XcodeBuildToolPlugin {
             .filter { $0.url.pathExtension == "swift" }
             .map(\.url)
 
-        // Xcode targets expose no directory of their own, so the nearest thing
-        // to "the target's directory" is where its sources sit. Those come
-        // first and the project root last, so the most specific file wins —
-        // the same precedence the SwiftPM path gives `[target, package]`, and
-        // the one the documentation states.
-        var searchDirectories: [URL] = []
-        var seen = Set<String>()
-        for file in inputFiles {
-            let directory = file.deletingLastPathComponent()
-            if seen.insert(directory.path).inserted {
-                searchDirectories.append(directory)
-            }
-        }
-        searchDirectories.append(context.xcodeProject.directoryURL)
+        let searchDirectories = ZerkPlugin.settingsSearchDirectories(
+            forSources: inputFiles,
+            projectRoot: context.xcodeProject.directoryURL)
 
         return try buildCommands(
             tool: context.tool(named: "ZerkCodegen"),

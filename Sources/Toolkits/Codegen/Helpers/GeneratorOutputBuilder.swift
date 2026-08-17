@@ -14,8 +14,8 @@ import SharedToolkit
 /// `extension Zerk<Key>` holding one factory per provider — named after the
 /// provider, so a key with several providers gets several members — plus a
 /// single `inject()` entry point backed by the primary one. Alongside those go
-/// the `@injected` overloads, the `Interjecting<Key>` protocols tests conform
-/// to, and the `Sendable` checks singletons need.
+/// the `@injected` overloads, the ``InterjectionPoint`` declarations a test
+/// names with a key path, and the `Sendable` checks singletons need.
 ///
 /// Output is assembled as strings rather than syntax nodes, so nearly every
 /// helper here returns a line or a fragment of one.
@@ -1077,8 +1077,9 @@ struct GeneratorOutputBuilder {
     /// Emits one key's view onto a kept instance.
     ///
     /// The interjection guard lives here rather than in the storage, which it
-    /// cannot: the guard is per key — `InterjectingA` and `InterjectingB` are
-    /// different protocols — while the storage is per type. Consulting it on each
+    /// cannot: the guard is per key — `Zerk<A>.Interjection` and
+    /// `Zerk<B>.Interjection` declare separate points — while the storage is per
+    /// type, one instance serving every key it claims. Consulting it on each
     /// read is the better semantics anyway: a test double installed after the
     /// first resolution now takes effect, and interjecting a kept instance never
     /// builds the real one at all.
@@ -2054,11 +2055,6 @@ struct GeneratorOutputBuilder {
 
     // MARK: - Interjection
 
-    /// Emits the interjection guard that opens every generated member body:
-    /// if `Zerk<Key>` conforms to the matching `Interjecting<Key>` protocol and
-    /// the mirrored member returns a value, that value is used instead of the
-    /// real provider. `callArguments` is `nil` for property-shaped members and
-    /// the (possibly empty) argument list for function-shaped members.
     /// The lookup at the top of every generated member.
     ///
     /// No type annotation: `_$interjected(for:)` returns `T?` concretely, so
@@ -2208,15 +2204,6 @@ struct GeneratorOutputBuilder {
         .joined(separator: ", ")
     }
 
-    /// Labeled arguments forwarded to the mirrored interjection member, using
-    /// the enclosing member's parameter names.
-
-    /// The interjection requirement mirroring a generated member: `live`
-    /// becomes `interjectedLive`.
-
-    /// `Interjecting` plus the key rendered as an identifier, e.g.
-    /// `InterjectingStoring`.
-
     /// Reduces a type key to characters legal in an identifier, so keys like
     /// `[String]` or `any Storing` can still name a generated protocol or
     /// function.
@@ -2227,12 +2214,6 @@ struct GeneratorOutputBuilder {
         return String(String.UnicodeScalarView(scalars))
     }
 
-    /// Emits one `Interjecting<Key>` protocol per injectable key, gathering the
-    /// requirements contributed by that key's members. Developers conform
-    /// `Zerk<Key>` to these protocols in their test suites to override members.
-    ///
-    /// Requirements mirror the isolation of the member they stand in for: a
-    /// generated member cannot call a requirement that lives in another domain.
     /// What identifies a provider while naming points: its member name and full
     /// parameter shape, which the collision check has already proved unique
     /// within the key.
@@ -2381,9 +2362,6 @@ struct GeneratorOutputBuilder {
             return "1\(protocolName)"
         }
     }
-
-    /// What makes two interjection requirements the same requirement: the
-    /// mirrored member's name together with its parameters.
 
     /// Like `parameterClause`, minus defaults: a protocol requirement cannot
     /// declare them.

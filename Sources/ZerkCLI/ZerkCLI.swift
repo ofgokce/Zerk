@@ -284,6 +284,29 @@ struct ZerkCLI: CommandPlugin {
         }
         return nil
     }
+
+    /// The Xcode search order, mirroring `ZerkPlugin.settingsSearchDirectories`
+    /// — shallowest source directory first, project root last — so `zerk graph`
+    /// resolves under the same file a build would use. An Xcode target has no
+    /// directory of its own, and `inputFiles` has no order worth trusting, so
+    /// the sort is what makes the answer the same on every run.
+    static func settingsSearchDirectories(forSources sources: [URL],
+                                          projectRoot: URL) -> [URL] {
+        var directories: [URL] = []
+        var seen = Set<String>()
+        for file in sources {
+            let directory = file.deletingLastPathComponent()
+            if seen.insert(directory.path).inserted {
+                directories.append(directory)
+            }
+        }
+        directories.sort {
+            $0.pathComponents.count == $1.pathComponents.count
+                ? $0.path < $1.path
+                : $0.pathComponents.count < $1.pathComponents.count
+        }
+        return directories + [projectRoot]
+    }
 }
 
 #if canImport(XcodeProjectPlugin)
@@ -303,6 +326,17 @@ extension ZerkCLI: XcodeCommandPlugin {
                 .filter { options.targetNames.isEmpty || options.targetNames.contains($0.displayName) }
                 .sorted { $0.displayName < $1.displayName }
 
+            // The same check the SwiftPM path makes above. Without it a typo in
+            // `--target` filtered everything away and fell through to "no Swift
+            // sources found in the selected target(s)", which describes a
+            // different problem and sends the reader looking at their sources.
+            if !options.targetNames.isEmpty {
+                let found = Set(targets.map(\.displayName))
+                for missing in options.targetNames.subtracting(found).sorted() {
+                    throw Failure("no target named '\(missing)' in this project")
+                }
+            }
+
             var graphPaths: [String] = []
             for target in targets {
                 let sources = target.inputFiles
@@ -312,15 +346,9 @@ extension ZerkCLI: XcodeCommandPlugin {
                     continue
                 }
 
-                var searchDirectories: [URL] = []
-                var seen = Set<String>()
-                for file in sources {
-                    let directory = file.deletingLastPathComponent()
-                    if seen.insert(directory.path).inserted {
-                        searchDirectories.append(directory)
-                    }
-                }
-                searchDirectories.append(context.xcodeProject.directoryURL)
+                let searchDirectories = Self.settingsSearchDirectories(
+                    forSources: sources,
+                    projectRoot: context.xcodeProject.directoryURL)
 
                 graphPaths.append(
                     try runCodegen(
