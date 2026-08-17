@@ -294,9 +294,25 @@ The macro reports these at the declaration, before the plugin ever runs:
 - accessors other than `willSet`/`didSet`; a computed property has no storage to initialize
 - a missing type annotation
 - more than one generic argument
+- a `static` property, or one at file scope
 
-`@InjectedDynamically` rejects the same list, and two more: any accessor at all — including
-`willSet`/`didSet`, since the property it generates is computed — and a `let` binding.
+The last one is worth a sentence. `@Injected` resolves *while the enclosing value is being
+initialized* — that is what lets a value passed to the initializer win over the injected one —
+and a type-level or global property is never part of anyone's initialization. Write the
+resolution out instead, which is the same thing without the storage hook:
+
+```swift
+enum Services {
+    static let repository = Zerk<Repository>.inject()
+}
+```
+
+Or reach for [`@InjectedDynamically`](#injecteddynamically), which generates a getter and so
+works anywhere a computed property does.
+
+`@InjectedDynamically` rejects the list above except that last entry, and adds two of its own:
+any accessor at all — including `willSet`/`didSet`, since the property it generates is
+computed — and a `let` binding. Being a getter, it is at home on a `static` and at file scope.
 
 ---
 

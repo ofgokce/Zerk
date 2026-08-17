@@ -42,17 +42,42 @@ public struct InjectedPropertyInfo {
         self.expression = expression
     }
 
+    /// - Parameter requiresInstanceStorage: whether the macro initializes the
+    ///   property's storage rather than replacing it with a getter. Only the
+    ///   storage-initializing form needs an instance to initialize; see the
+    ///   check itself for what goes wrong without one.
     public init?(from declaration: some DeclSyntaxProtocol,
                  attribute: AttributeSyntax,
                  macroName: String,
                  allowObservers: Bool,
                  allowLazyModifier: Bool,
                  requiresVar: Bool,
+                 requiresInstanceStorage: Bool = false,
                  context: some MacroExpansionContext) {
-        
+
         guard let variableDecl = declaration.as(VariableDeclSyntax.self) else {
             context.zerkError(attribute, "\(macroName) can only be applied to a variable declaration.")
             return nil
+        }
+
+        // `@storageRestrictions(initializes:)` hooks the moment an *instance*
+        // initializes its stored properties. A `static` or file-scope property
+        // has no such moment, so the peer never initializes anything and the
+        // declaration is left as written — with no initializer. The compiler
+        // then reports "requires an initializer expression or an explicitly
+        // stated getter", which names neither Zerk nor the fix, on a
+        // declaration that looks exactly like the supported one.
+        if requiresInstanceStorage {
+            if variableDecl.modifiers.isStatic {
+                context.zerkError(attribute, "\(macroName) resolves while its enclosing value is being initialized, and a type-level property has no such moment. Write 'static let \(Self.name(of: variableDecl) ?? "property") = Zerk<Key>.inject()', or use @InjectedDynamically to resolve on each access.")
+                return nil
+            }
+            // Empty means nothing encloses the declaration: it is at file scope,
+            // where there is likewise no initialization to hook.
+            if context.lexicalContext.isEmpty {
+                context.zerkError(attribute, "\(macroName) resolves while its enclosing value is being initialized, and a global has no such moment. Write 'let \(Self.name(of: variableDecl) ?? "property") = Zerk<Key>.inject()', or use @InjectedDynamically to resolve on each access.")
+                return nil
+            }
         }
 
         guard variableDecl.bindings.count == 1,
@@ -127,6 +152,15 @@ public struct InjectedPropertyInfo {
             declaredType: declaredType,
             injectedType: injectedType,
             expression: expression)
+    }
+
+    /// The declared name, for a message that can name it. `nil` for the shapes
+    /// rejected further down, which have no single identifier to quote.
+    private static func name(of variable: VariableDeclSyntax) -> String? {
+        guard variable.bindings.count == 1 else { return nil }
+        return variable.bindings.first?
+            .pattern.as(IdentifierPatternSyntax.self)?
+            .identifier.text
     }
 
     /// A property with a getter is computed: there is no storage to initialize,

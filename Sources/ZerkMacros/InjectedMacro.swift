@@ -30,6 +30,7 @@ public struct InjectedMacro: PeerMacro {
             allowObservers: true,
             allowLazyModifier: false,
             requiresVar: false,
+            requiresInstanceStorage: true,
             context: context
         ) else {
             return []

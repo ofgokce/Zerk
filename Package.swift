@@ -151,7 +151,12 @@ let package = Package(
             dependencies: [
                 "Zerk",
                 "ZerkTesting",
-                "MacroToolkit"
+                "MacroToolkit",
+                .product(name: "SwiftDiagnostics", package: "swift-syntax"),
+                .product(name: "SwiftParser", package: "swift-syntax"),
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacroExpansion", package: "swift-syntax")
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6)
