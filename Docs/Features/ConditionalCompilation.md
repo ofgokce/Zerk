@@ -150,7 +150,30 @@ The [graph artifact](../Plugin/GraphArtifact.md) records the guard too: each pro
 
 ## What Zerk will not infer
 
-**Two separate `#if`s are never treated as exclusive.**
+Zerk decides exclusivity from what the clauses themselves say, never by evaluating a condition. Two facts qualify, and both hold across separate `#if` blocks as readily as within one:
+
+- different clauses of the same `#if`, since the compiler takes exactly one;
+- one clause stating what another needs to have failed — an `#else` is reached *only* because the `#if` condition did not hold, so it cannot be live beside a clause asserting it.
+
+So a swap may be written over two blocks, with each half beside the code it belongs with:
+
+```swift
+#if DEBUG
+@Injectable<Service>
+struct DebugService: Service {}
+#else
+enum ReleaseOnlyKeys { … }
+#endif
+
+#if DEBUG
+enum DebugOnlyKeys { … }
+#else
+@Injectable<Service>
+struct ReleaseService: Service {}
+#endif
+```
+
+**What Zerk will not do is read a negation.**
 
 ```swift
 #if DEBUG
@@ -158,13 +181,13 @@ The [graph artifact](../Plugin/GraphArtifact.md) records the guard too: each pro
 struct DebugService: Service {}
 #endif
 
-#if !DEBUG                          // ← a different #if
+#if !DEBUG                          // ← written as its own condition, not as #else
 @Injectable<Service>(primary: true)
 struct ReleaseService: Service {}
 #endif
 ```
 
-To a reader these are opposites. Proving it means evaluating `DEBUG`, which Zerk cannot do — so this is `Multiple primary injectables found for 'Service'`, and the fix is to write it as one `#if` / `#else`.
+To a reader these are opposites. Telling so means evaluating `DEBUG`, which Zerk cannot — so this is `Multiple primary injectables found for 'Service'`, and the fix is to write the second one as an `#else`.
 
 The asymmetry is deliberate. Wrongly deciding two registrations are exclusive would silence a real ambiguity and pick a provider arbitrarily; wrongly deciding they can coexist only asks you to write `#else`, and says so.
 

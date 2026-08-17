@@ -218,38 +218,43 @@ extension ProviderResolver {
     /// containing both branches, a configuration no build ever has. A fallback
     /// registration plus a per-configuration override then collided with itself.
     ///
-    /// Split by branch rather than by enumerating cliques: finding a branch the
-    /// candidates disagree on and partitioning by clause removes exactly one
-    /// disagreement — and a candidate that does not mention that `#if` belongs
-    /// to every part. Recursion terminates because each level settles one
-    /// branch.
+    /// Split on a *condition* the candidates disagree about rather than by
+    /// enumerating cliques: taking one that somebody asserts and somebody else
+    /// requires to have failed, and splitting on whether it holds, removes
+    /// exactly one disagreement — and a candidate indifferent to it belongs to
+    /// both halves. Recursion terminates because neither half can dispute that
+    /// condition again, and there are finitely many.
     ///
-    /// Narrower than ``CompilationCondition/areExclusive(_:_:)``, which also
-    /// recognises a clause stating what another clause needs to have failed,
-    /// across separate `#if`s. That is not read here, so a swap split over two
-    /// blocks is reported as competing rather than resolved per configuration.
-    /// Erring this way is the safe direction — the developer is asked to write
-    /// one `#if`, and told why — but the two answers are not the same answer,
-    /// which is worth knowing before adding a third caller.
+    /// Splitting on the *condition* rather than on the `#if` block is what makes
+    /// this the same question ``CompilationCondition/areExclusive(_:_:)``
+    /// answers. Partitioning by block was narrower, and the gap was not
+    /// academic: a DEBUG/Release swap written over two blocks was reported as
+    /// two rival providers, and marking one of them primary — which is what the
+    /// diagnostic asks for — produced a file with an `inject()` in the Debug
+    /// configuration and none in the Release one, called unconditionally from
+    /// every consumer.
+    ///
+    /// Clauses of one `#if` are covered by the same rule rather than by a second
+    /// one: an `#elseif` denies every condition before it and an `#else` denies
+    /// all of them, so the clauses of a block disagree textually about the
+    /// block's own conditions.
     static func coexisting(among candidates: [ProviderResolution]) -> [[ProviderResolution]] {
-        guard let branch = disputedBranch(among: candidates) else {
+        guard let condition = disputedCondition(among: candidates) else {
             return [candidates]
         }
 
         var groups: [[ProviderResolution]] = []
         var seen = Set<String>()
 
-        for index in clauseIndices(of: branch, among: candidates) {
-            let part = candidates.filter { candidate in
-                guard let clause = candidate.condition.clauses.first(where: { $0.branch == branch }) else {
-                    // Outside this `#if` entirely, so present whichever clause
-                    // the configuration takes.
-                    return true
-                }
-                return clause.index == index
-            }
+        // Where it holds, then where it fails. A candidate that neither asserts
+        // nor denies it is in both, being present whichever way the build goes.
+        let halves = [
+            candidates.filter { !$0.condition.denies(condition) },
+            candidates.filter { !$0.condition.asserts(condition) }
+        ]
 
-            for group in coexisting(among: part) {
+        for half in halves {
+            for group in coexisting(among: half) {
                 let identity = group.map { String(describing: $0.provider.location) }.joined(separator: "|")
                 if seen.insert(identity).inserted {
                     groups.append(group)
@@ -260,28 +265,21 @@ extension ProviderResolver {
         return groups
     }
 
-    /// A `#if` whose clauses these candidates do not agree on, or `nil` when
-    /// every candidate can coexist with every other.
-    static func disputedBranch(among candidates: [ProviderResolution]) -> String? {
-        var seen: [String: Int] = [:]
+    /// A condition one candidate asserts and another requires to have failed, or
+    /// `nil` when every candidate can coexist with every other.
+    ///
+    /// Sorted, so which one is settled first — and therefore the order the
+    /// groups come out in — does not depend on how the candidates were
+    /// enumerated.
+    static func disputedCondition(among candidates: [ProviderResolution]) -> String? {
+        var asserted: Set<String> = []
+        var denied: Set<String> = []
         for candidate in candidates {
-            for clause in candidate.condition.clauses {
-                if let existing = seen[clause.branch], existing != clause.index {
-                    return clause.branch
-                }
-                seen[clause.branch] = clause.index
-            }
+            let mentioned = candidate.condition.mentionedConditions
+            asserted.formUnion(mentioned.asserted)
+            denied.formUnion(mentioned.denied)
         }
-        return nil
-    }
-
-    /// The clauses of `branch` these candidates actually occupy, in source
-    /// order, so the groups come out deterministically.
-    static func clauseIndices(of branch: String,
-                              among candidates: [ProviderResolution]) -> [Int] {
-        Set(candidates.compactMap { candidate in
-            candidate.condition.clauses.first(where: { $0.branch == branch })?.index
-        }).sorted()
+        return asserted.intersection(denied).sorted().first
     }
 
     /// Drops repeats, since one mistake reachable from two configurations is

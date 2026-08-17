@@ -100,6 +100,37 @@ struct CompilationCondition: Hashable {
         return CompilationCondition(clauses: Array(clauses.dropFirst(prefix.clauses.count)))
     }
 
+    /// Whether some clause of this position requires `condition` to hold.
+    ///
+    /// This and ``denies(_:)`` are the two halves every question about
+    /// coexistence is asked in: ``areExclusive(_:_:)`` compares them pairwise,
+    /// and `ProviderResolver.coexisting` splits candidates on a condition one
+    /// asserts and another denies. Keeping both readers on the same pair is
+    /// what stops the two from drifting into different notions of "exclusive" —
+    /// which they had, and it cost a Release build its `inject()`.
+    func asserts(_ condition: String) -> Bool {
+        clauses.contains { $0.condition == condition }
+    }
+
+    /// Whether some clause of this position is reached only because `condition`
+    /// failed — the `#else` and `#elseif` side of ``asserts(_:)``.
+    func denies(_ condition: String) -> Bool {
+        clauses.contains { $0.precedingConditions.contains(condition) }
+    }
+
+    /// Every condition named anywhere in this position, asserted or denied.
+    var mentionedConditions: (asserted: Set<String>, denied: Set<String>) {
+        var asserted: Set<String> = []
+        var denied: Set<String> = []
+        for clause in clauses {
+            if let condition = clause.condition {
+                asserted.insert(condition)
+            }
+            denied.formUnion(clause.precedingConditions)
+        }
+        return (asserted, denied)
+    }
+
     /// Whether no build configuration can see both of these at once.
     ///
     /// Answered structurally, never by evaluating anything — see

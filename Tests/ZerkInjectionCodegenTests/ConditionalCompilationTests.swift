@@ -449,18 +449,22 @@ struct ConditionalCompilationTests {
         }, "\(result.diagnostics.map(\.message))")
     }
 
-    /// The election is the one place that does *not* read
-    /// ``CompilationCondition/areExclusive(_:_:)``: it partitions candidates by
-    /// `#if` block, so a swap split across two blocks is reported as competing
-    /// even though emission would treat the two halves as exclusive. Pinned so
-    /// the difference is a decision rather than a surprise — see `coexisting`.
-    @Test("the election still partitions by block, not by condition")
-    func separateBlocksOfOneSwapStillCompete() {
-        let result = CompileFixture.generateWithResolution(source: """
+    /// The election reads the same fact emission does, so a swap does not have
+    /// to be written as one `#if` block.
+    ///
+    /// It used to partition candidates by block, which made these two rivals:
+    /// the ambiguity was reported, and marking one of them primary — the fix the
+    /// diagnostic asks for — was *accepted*, emitting an `inject()` guarded to
+    /// the Debug configuration and called unconditionally from every consumer.
+    /// That built in Debug and failed in Release, which is the worst place for a
+    /// build to fail.
+    @Test("a swap split over two blocks is elected per configuration")
+    func separateBlocksOfOneSwapAreElectedApart() throws {
+        let source = """
         protocol Service {}
 
         #if DEBUG
-        @Injectable<Service>(primary: true)
+        @Injectable<Service>
         struct DebugService: Service {}
         #else
         struct ReleaseOnlyHelper {}
@@ -469,14 +473,34 @@ struct ConditionalCompilationTests {
         #if DEBUG
         struct DebugOnlyHelper {}
         #else
-        @Injectable<Service>(primary: true)
+        @Injectable<Service>
         struct ReleaseService: Service {}
         #endif
-        """)
 
-        #expect(result.diagnostics.contains {
-            $0.severity == .error && $0.message.contains("Multiple primary injectables")
-        }, "\(result.diagnostics.map(\.message))")
+        @Injectable
+        struct Consumer {
+            let service: Service
+        }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+
+        // No primary asked for: neither branch has a rival to be primary over.
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+
+        // One `inject()` per configuration, so no build is left without one.
+        let generated = result.output.output
+        #expect(generated.contains("#if (DEBUG)\n    nonisolated static func inject() -> Service {"))
+        #expect(generated.contains("#if !(DEBUG)\n    nonisolated static func inject() -> Service {"))
+
+        // And the pair actually holds up, in both configurations.
+        for options in [CompileFixture.Options.swift6(defining: "DEBUG"),
+                        CompileFixture.Options.swift6] {
+            let compiled = try CompileFixture.run(source: source, options: options)
+            try #require(!compiled.skipped)
+            #expect(compiled.didCompile,
+                    Comment(rawValue: "\(compiled.compilerOutput)\n\(compiled.generated)"))
+        }
     }
 
     // MARK: - Refusals
