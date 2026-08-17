@@ -140,7 +140,11 @@ Everything Zerk generates for a conditional declaration:
 | `@InjectableValue` | Its member's extension and its interjection point |
 | `@Singleton` / `@Scoped` | Its slot in the generated storage namespace |
 | `@injected` parameter markers | The generated overload, and its `extension YourType` |
-| `#ZerkImport(module:)` | The `import` line. Asked for under two *different* conditions, it is emitted unconditionally: the wider ask wins, because an unnecessary import is a warning at worst while a missing one does not compile |
+| `#ZerkImport(module:)` | The `import` line, once per distinct guard. See below |
+
+A module may be asked for from several files, and every ask keeps its guard. Identical guards collapse to one `import`; different ones each get their own, so a module asked for under both `#if DEBUG` and `#if os(iOS)` is imported in either build. An *unconditional* ask subsumes the rest — it is already correct wherever they are — and collapses to a single bare `import`.
+
+Guards are not merged away, because the module people guard an import for is usually one that is not there in the other configuration: naming it is an error, not an unnecessary import.
 
 The [graph artifact](../Plugin/GraphArtifact.md) records the guard too: each provider carries a `condition` field with the expression its member is emitted under, absent when unconditional. A graph that omitted it would claim a key is resolvable in builds where nothing resolves it.
 

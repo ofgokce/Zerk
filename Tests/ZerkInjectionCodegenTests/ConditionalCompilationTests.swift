@@ -325,6 +325,51 @@ struct ConditionalCompilationTests {
         #expect(!generated.contains("#if (DEBUG)\nimport Foundation"))
     }
 
+    /// Asking twice under the same guard must keep the guard.
+    ///
+    /// Two `#if DEBUG` blocks are two conditions — clause identity is file and
+    /// offset — and the second ask used to widen the import to unconditional
+    /// because it was not *equal* to the first. Writing the same guarded
+    /// `#ZerkImport` in each file that needs the module is an ordinary way to
+    /// work, and it silently produced a Release build importing a module that is
+    /// not in it.
+    @Test("a module asked for twice under the same guard keeps it")
+    func repeatedImportKeepsItsGuard() {
+        let generated = CompileFixture.generate(source: """
+        #if DEBUG
+        #ZerkImport(module: "Foundation")
+        #endif
+
+        #if DEBUG
+        #ZerkImport(module: "Foundation")
+        #endif
+        """)
+
+        #expect(generated.contains("#if (DEBUG)\nimport Foundation\n#endif"))
+        // Once, not twice: one guard, however many asks wrote it.
+        #expect(generated.components(separatedBy: "import Foundation").count == 2,
+                Comment(rawValue: generated))
+    }
+
+    /// Genuinely different guards each keep their own, rather than collapsing to
+    /// no guard at all. Swift accepts a module imported twice, so a build where
+    /// both hold costs nothing — and a build where only one holds still gets it.
+    @Test("a module asked for under two guards is imported under each")
+    func differingImportsKeepBothGuards() {
+        let generated = CompileFixture.generate(source: """
+        #if DEBUG
+        #ZerkImport(module: "Foundation")
+        #endif
+
+        #if os(iOS)
+        #ZerkImport(module: "Foundation")
+        #endif
+        """)
+
+        #expect(generated.contains("#if (DEBUG)\nimport Foundation\n#endif"))
+        #expect(generated.contains("#if (os(iOS))\nimport Foundation\n#endif"))
+    }
+
     // MARK: - What stops being a collision
 
     @Test("one member name in exclusive branches is not a redeclaration")

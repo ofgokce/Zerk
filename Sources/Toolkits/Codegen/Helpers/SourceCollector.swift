@@ -70,8 +70,13 @@ final class SourceCollector: SyntaxVisitor {
     /// `visit(_: ProtocolDeclSyntax)`.
     private(set) var protocolPrimaryAssociatedTypeCounts: [String: Int] = [:]
 
-    /// Module -> the `#if` it was asked for under. See ``importedModules``.
-    private(set) var moduleImportConditions: [String: CompilationCondition] = [:]
+    /// Module -> every `#if` it was asked for under. See ``importedModules``.
+    ///
+    /// A set rather than one condition, because the same module may be asked for
+    /// from several files under several guards, and none of those asks may be
+    /// dropped: the guard is what keeps a Release build from naming a module
+    /// that is not there.
+    private(set) var moduleImportConditions: [String: Set<CompilationCondition>] = [:]
 
     private let settings: ZerkSettings
     private var sourceFile: String = ""
@@ -513,24 +518,21 @@ final class SourceCollector: SyntaxVisitor {
                 continue
             }
             importedModules.insert(module)
-            // Asked for twice, the wider ask wins: an import that is correct in
-            // more configurations is correct in all the narrower ones too, and
-            // guarding it would drop the module from a configuration that was
-            // promised it.
+            // Every ask is kept, and the emitter writes one guarded import per
+            // distinct guard. Collapsing them here is what a previous version
+            // did — two asks that were not *equal* widened the import to
+            // unconditional — and its defence was that "an unnecessary import is
+            // a warning at worst". That is false for exactly the module people
+            // guard an import for: a debug-only or platform-only module is not
+            // merely unnecessary in a Release build, it is absent, and naming it
+            // does not compile.
             //
-            // Two *different* conditions widen to unconditional rather than to
-            // their disjunction. The disjunction would be exact, but it is only
-            // reachable when the same module is asked for under conditions that
-            // do not match — and an unnecessary import is a warning at worst,
-            // while a missing one does not compile. Keeping the first was also
-            // order-dependent, so which ask survived depended on which file the
-            // collector reached first.
-            let condition = currentCondition
-            if let existing = moduleImportConditions[module], existing != condition {
-                moduleImportConditions[module] = .unconditional
-            } else {
-                moduleImportConditions[module] = condition
-            }
+            // It was also reachable by accident. `CompilationCondition` equality
+            // is structural over clauses whose identity is file-and-offset, so
+            // two files each writing `#if DEBUG` around the same `#ZerkImport`
+            // were unequal — and the second file silently dropped the guard the
+            // first had earned.
+            moduleImportConditions[module, default: []].insert(currentCondition)
         }
     }
 

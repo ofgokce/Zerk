@@ -51,8 +51,8 @@ struct GeneratorOutputBuilder {
     /// came from.
     var importedModules: Set<String> = []
     /// Modules asked for inside a `#if`, so the emitted `import` can carry the
-    /// same guard. Absent means unconditional.
-    var moduleImportConditions: [String: CompilationCondition] = [:]
+    /// same guard. Absent means unconditional. See ``importLines(for:)``.
+    var moduleImportConditions: [String: Set<CompilationCondition>] = [:]
     /// Every primary elected for a key, when `#if` clauses gave it a different
     /// winner per configuration. See ``ProviderResolutionResult/primaryVariants``.
     var primaryVariants: [String: [ProviderResolution]] = [:]
@@ -171,6 +171,35 @@ struct GeneratorOutputBuilder {
         ParameterClassifier(values: values, primaryResolutions: primaryResolutions)
     }
 
+    /// The `import` lines for one module: one per distinct guard.
+    ///
+    /// An unconditional ask subsumes every conditional one — it is already
+    /// correct wherever they are — so it collapses to a single bare import.
+    /// Otherwise each guard gets its own line, and a module asked for under both
+    /// `#if DEBUG` and `#if BETA` is imported in either build rather than in
+    /// neither or in all. Swift accepts a module imported twice, so a build
+    /// where two guards both hold costs nothing.
+    ///
+    /// Deduplicated and ordered by *guard text*, not by where the ask was
+    /// written. Two files each writing `#if DEBUG` are two conditions and one
+    /// guard, and the file must not change because the build system handed the
+    /// collector its inputs in a different order.
+    private func importLines(for module: String) -> [String] {
+        let conditions = moduleImportConditions[module] ?? []
+        guard !conditions.isEmpty,
+              !conditions.contains(where: \.isUnconditional) else {
+            return ["import \(module)"]
+        }
+
+        var seen = Set<String>()
+        var lines: [String] = []
+        for condition in conditions.sorted(by: { ($0.guardText ?? "") < ($1.guardText ?? "") })
+        where seen.insert(condition.guardText ?? "").inserted {
+            lines += Self.guarded(["import \(module)"], by: condition)
+        }
+        return lines
+    }
+
     /// Emits the complete file.
     ///
     /// Diagnostics accumulate rather than short-circuit, so one run reports
@@ -185,8 +214,7 @@ struct GeneratorOutputBuilder {
         // Sorted so the file is byte-identical between builds; `Zerk` stays
         // first because it is the one import that is never optional.
         for module in importedModules.sorted() {
-            output += Self.guarded(["import \(module)"],
-                                   by: moduleImportConditions[module] ?? .unconditional)
+            output += importLines(for: module)
         }
         output.append("")
         var diagnostics: [CodegenDiagnostic] = []

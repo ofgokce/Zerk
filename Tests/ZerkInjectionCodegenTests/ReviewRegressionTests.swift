@@ -190,11 +190,17 @@ struct ReviewRegressionTests {
     // MARK: - Imports
 
     /// Keeping the first condition meant the surviving one depended on which
-    /// file the collector reached first, and a configuration that asked for the
-    /// module did not get it.
-    @Test("a module asked for under two conditions is imported unconditionally",
-          arguments: [false, true])
-    func differingImportConditionsWiden(reversed: Bool) {
+    /// file the collector reached first. Widening to unconditional settled the
+    /// order and cost the guard, which is worse — see
+    /// `ConditionalCompilationTests.repeatedImportKeepsItsGuard`. Each guard now
+    /// gets its own import, which is correct in every configuration *and* has no
+    /// order to depend on.
+    ///
+    /// So the order axis stays, since that is what this test was written for,
+    /// and is asserted directly: the two orderings must produce the same file,
+    /// not merely the same claim about it.
+    @Test("two guarded asks for one module are order-independent")
+    func differingImportConditionsAreOrderIndependent() {
         let debug = """
         #if DEBUG
         #ZerkImport(module: "Mocks")
@@ -205,12 +211,12 @@ struct ReviewRegressionTests {
         #ZerkImport(module: "Mocks")
         #endif
         """
-        let generated = CompileFixture.generate(
-            source: reversed ? "\(ios)\n\(debug)" : "\(debug)\n\(ios)")
+        let generated = CompileFixture.generate(source: "\(debug)\n\(ios)")
+        let reversed = CompileFixture.generate(source: "\(ios)\n\(debug)")
 
-        #expect(generated.contains("import Mocks"))
-        #expect(!generated.contains("#if (DEBUG)\nimport Mocks"))
-        #expect(!generated.contains("#if (os(iOS))\nimport Mocks"))
+        #expect(generated == reversed)
+        #expect(generated.contains("#if (DEBUG)\nimport Mocks\n#endif"))
+        #expect(generated.contains("#if (os(iOS))\nimport Mocks\n#endif"))
     }
 
     @Test("a module asked for under one condition keeps its guard")
