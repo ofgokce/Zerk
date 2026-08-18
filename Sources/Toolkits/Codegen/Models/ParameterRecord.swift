@@ -70,6 +70,39 @@ struct ParameterRecord: Equatable {
     /// less visible than the member resolving it.
     var typeNominalNames: Set<String> = []
 
+    /// Whether the parameter is declared `inout`.
+    ///
+    /// The specifier survives in ``typeName`` and so reaches the emitted
+    /// *signature* on its own. What it cannot reach is the forwarding *call*,
+    /// which needs `&` — and every generated member forwards. One `inout`
+    /// parameter on any provider was enough to emit a file that did not
+    /// compile, with the error landing inside `Zerk.generated.swift`.
+    ///
+    /// `inout` is the only specifier that changes a call site. `borrowing`,
+    /// `consuming`, `sending` and `@escaping` all forward by name, verified by
+    /// type-checking each emitted shape.
+    var isInout: Bool = false
+    /// Whether the parameter is declared variadic.
+    ///
+    /// Carried in order to *refuse* it, not to reproduce it: the `...` lives on
+    /// the parameter rather than on its type, so it was silently dropped and the
+    /// member narrowed to a single element. Reproducing it does not work either
+    /// — inside the member the parameter is an array, and Swift has no way to
+    /// pass one on to a variadic — so a provider that declares one cannot be
+    /// forwarded to at all, and saying so is the only honest answer.
+    var isVariadic: Bool = false
+    /// The parameter's own default value as written, when it has one and that
+    /// text means the same thing anywhere.
+    ///
+    /// Without it a parameter Zerk cannot resolve became *mandatory* through
+    /// Zerk while remaining optional on the declaration itself. The `@injected`
+    /// overload path carried it all along, on ``MarkedParameter/defaultText`` —
+    /// two models of a parameter, one of them complete.
+    ///
+    /// A default naming a magic literal is deliberately not carried; see
+    /// ``FunctionParameterSyntax/portableDefaultText``.
+    var defaultText: String? = nil
+
     /// Identity for matching a bubbled requirement to a parameter that can feed
     /// it: name and type, ignoring the label. The requirement's label comes from
     /// the *dependency's* declaration and need not match the member's.

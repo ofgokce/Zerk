@@ -228,6 +228,7 @@ struct GeneratorOutputBuilder {
         diagnostics += duplicateValueDiagnostics()
         diagnostics += valueVariantDiagnostics()
         diagnostics += configurationCoverageDiagnostics()
+        diagnostics += variadicParameterDiagnostics()
 
         // Built up front: the storage is per type while the members reading it
         // are per key, so it cannot be assembled from inside the per-key loop.
@@ -1229,6 +1230,51 @@ struct GeneratorOutputBuilder {
         return diagnostics
     }
 
+    /// Reports a variadic parameter Zerk would have to forward.
+    ///
+    /// Every generated member calls the declaration it stands for, passing its
+    /// own parameters on — and a variadic cannot be passed on. Inside the member
+    /// the parameter is an array, and Swift has no way to spread one back into a
+    /// variadic, so there is no member Zerk could emit that keeps the contract.
+    ///
+    /// What it did instead was drop the `...`: the `ellipsis` lives on the
+    /// parameter rather than on its type, so nothing carried it, and the member
+    /// came out taking exactly one element. That compiles — one argument is a
+    /// legal variadic call — and narrows the declaration to something it never
+    /// said, with nothing anywhere recording that it had.
+    private func variadicParameterDiagnostics() -> [CodegenDiagnostic] {
+        var seen = Set<String>()
+        var diagnostics: [CodegenDiagnostic] = []
+
+        func report(_ parameter: ParameterRecord, on subject: String, at fallback: AttributeLocation) {
+            let location = parameter.location ?? fallback
+            guard parameter.isVariadic, seen.insert("\(location)|\(parameter.name)").inserted else {
+                return
+            }
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "'\(parameter.name)' is variadic, and the member Zerk generates for \(subject) has to pass it on — which Swift cannot do: inside that member the parameter is an array, and there is no way to spread one back into a variadic. Declare it as an array parameter, or resolve it some other way.",
+                location: location
+            ))
+        }
+
+        for resolution in resolutions {
+            for parameter in resolution.provider.parameters {
+                report(parameter,
+                       on: "'\(resolution.typeName)'",
+                       at: resolution.provider.location)
+            }
+        }
+        for record in markedMembers {
+            for marked in record.parameters where !marked.isMarked {
+                report(marked.parameter,
+                       on: record.typeName.map { "'\($0)'" } ?? "this function",
+                       at: record.location)
+            }
+        }
+        return diagnostics
+    }
+
     /// Reports a key resolved somewhere its providers are not.
     ///
     /// Everything that injects a key writes one `Zerk<Key>.inject()`, and that
@@ -1951,7 +1997,8 @@ struct GeneratorOutputBuilder {
                             part += " = \(defaultText)"
                         }
                         overloadParameterParts.append(part)
-                        argumentExpressions.append(overloadArgument(label: core.label, expression: core.name))
+                        argumentExpressions.append(
+                            overloadArgument(label: core.label, expression: Self.forwarded(core)))
                         continue
                     }
 
@@ -2306,19 +2353,23 @@ struct GeneratorOutputBuilder {
 
     /// Renders a parameter list, attaching a default value to each parameter
     /// the classifier put in the **S** partition.
+    ///
+    /// A parameter the classifier resolved nothing for keeps the default it was
+    /// *written* with, when it had one. Dropping it made a parameter that was
+    /// optional on the declaration mandatory through Zerk — an argument the
+    /// caller had to supply in order to reach a member that exists to save them
+    /// supplying arguments. Zerk's own resolution wins where there is one, which
+    /// is the right way round: it resolves the dependency the default was
+    /// standing in for.
     private func parameterClause(parameters: [ParameterRecord], defaults: [String: String]) -> String {
         let parts = parameters.map { parameter in
             let label = renderedLabel(for: parameter)
-            if let defaultValue = defaults[parameter.name] {
-                if label == parameter.name {
-                    return "\(label): \(parameter.typeName) = \(defaultValue)"
-                }
-                return "\(label) \(parameter.name): \(parameter.typeName) = \(defaultValue)"
-            }
+            let written = (defaults[parameter.name] ?? parameter.defaultText)
+                .map { " = \($0)" } ?? ""
             if label == parameter.name {
-                return "\(label): \(parameter.typeName)"
+                return "\(label): \(parameter.typeName)\(written)"
             }
-            return "\(label) \(parameter.name): \(parameter.typeName)"
+            return "\(label) \(parameter.name): \(parameter.typeName)\(written)"
         }
         // The empty case handled directly. Building "( )" and rewriting " )"
         // globally would also rewrite it anywhere inside a parameter's type or
@@ -2328,10 +2379,21 @@ struct GeneratorOutputBuilder {
 
     /// Forwards a parameter to an inner call by name, keeping its label.
     private func callArgument(for parameter: ParameterRecord) -> String {
+        let value = Self.forwarded(parameter)
         if let label = parameter.label {
-            return "\(label): \(parameter.name)"
+            return "\(label): \(value)"
         }
-        return parameter.name
+        return value
+    }
+
+    /// How a parameter is written when it is passed straight on.
+    ///
+    /// By name, with one exception: an `inout` argument needs `&` at every call
+    /// site, and every generated member is a call site. The specifier reaches
+    /// the emitted *signature* on its own — it is part of the type as written —
+    /// so the declaration looked right while its own body did not compile.
+    private static func forwarded(_ parameter: ParameterRecord) -> String {
+        parameter.isInout ? "&\(parameter.name)" : parameter.name
     }
 
     /// The label as written, or `_` for a parameter declared without one.
@@ -2481,7 +2543,9 @@ struct GeneratorOutputBuilder {
                                   useParameterNames: Bool,
                                   defaults: [String: String]) -> String {
         parameters.map { parameter in
-            let value = useParameterNames ? parameter.name : (defaults[parameter.name] ?? parameter.name)
+            let value = useParameterNames
+                ? Self.forwarded(parameter)
+                : (defaults[parameter.name] ?? Self.forwarded(parameter))
             if let label = parameter.label {
                 return "\(label): \(value)"
             }
@@ -2817,7 +2881,7 @@ struct GeneratorOutputBuilder {
         for parameter in resolution.provider.parameters {
             if isExplicit ? !parameter.isAutoInjected : parameter.isNonInjected {
                 ownParameters = mergeParameters(ownParameters, with: [parameter])
-                argumentExpressions.append(parameter.name)
+                argumentExpressions.append(Self.forwarded(parameter))
                 continue
             }
 
@@ -2856,7 +2920,7 @@ struct GeneratorOutputBuilder {
             }
 
             ownParameters = mergeParameters(ownParameters, with: [parameter])
-            argumentExpressions.append(parameter.name)
+            argumentExpressions.append(Self.forwarded(parameter))
         }
 
         let bubble = BubbleResolver.resolve(requests, ownExternals: ownExternals)

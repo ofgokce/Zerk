@@ -156,7 +156,11 @@ because nothing outside the file could call an overload of it.
 - The marked parameter's type must be resolvable in the module — `@Injectable`, with
   whatever arguments its provider needs bubbling onto the overload.
 - No default values on marked parameters.
-- No variadic or `inout` parameters.
+- No variadic or `inout` parameters — and no variadic *unmarked* parameter either, since the
+  generated overload has to pass those on and Swift cannot pass a variadic on.
+
+An unmarked parameter is otherwise reproduced as written: its label, its specifier, and its
+own default value all carry onto the overload.
 - No generic types or generic members.
 - The member must be at least `internal` — the generated overload lives in a separate
   generated file and cannot call private or fileprivate members.

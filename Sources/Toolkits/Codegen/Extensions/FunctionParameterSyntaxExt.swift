@@ -40,6 +40,37 @@ extension FunctionParameterSyntax {
             typeKeyShape: type.typeKeyShape,
             mentionedGenericParameters: type.mentionedGenericParameters(in: genericScope),
             isBareGenericParameter: type.isBareGenericParameter(in: genericScope),
-            typeNominalNames: type.nominalNames)
+            typeNominalNames: type.nominalNames,
+            isInout: type.as(AttributedTypeSyntax.self)?.specifiers.contains {
+                $0.as(SimpleTypeSpecifierSyntax.self)?.specifier.tokenKind == .keyword(.inout)
+            } ?? false,
+            isVariadic: ellipsis != nil,
+            defaultText: portableDefaultText)
+    }
+
+    /// The default value as written, when re-emitting it elsewhere would mean
+    /// the same thing.
+    ///
+    /// A default argument is evaluated at the *call site*, and Zerk's generated
+    /// member is a different call site from the declaration it stands in for. For
+    /// almost every expression that changes nothing — a literal, an implicit
+    /// member, a call to something visible from both — and where it does not, it
+    /// does not compile, loudly, in the generated file.
+    ///
+    /// A magic literal is the exception, and the only silent one: `#function`
+    /// exists precisely to capture where it was written from, so carrying it
+    /// into `Zerk<Key>.consumer(…)` would hand the developer a different
+    /// answer than their own declaration gives, with nothing to notice. Left
+    /// behind rather than reproduced, which puts such a parameter back where it
+    /// was before any of this: supplied by the caller.
+    var portableDefaultText: String? {
+        guard let value = defaultValue?.value else {
+            return nil
+        }
+        let text = value.trimmedDescription
+        guard !text.contains("#") else {
+            return nil
+        }
+        return text
     }
 }
