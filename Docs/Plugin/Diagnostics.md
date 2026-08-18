@@ -30,6 +30,7 @@ diagnostics above — no build sees both. See
 |---|---|
 | Two branches of one `#if` resolve a key with different effects, in different isolation domains, or leaving different arguments to the caller | Everything injecting the key resolves it through one `inject()` call emitted for every configuration, so the branches have to agree on what it costs. Make them match, or give the branches separate keys |
 | A `#if` inside a type gates an initializer, an `@InjectableProviding` member, a stored property, or a member with `@injected` parameters | Zerk reads a type's members without expanding conditions, so what is inside would be missed. Put the `#if` around the whole type, or move the condition into the member's body where it changes no signature |
+| A key is injected from code that is reachable in a configuration none of its providers are | The error names a configuration where nothing provides it. Guard the injection the same way its providers are guarded, or provide the key there — an `#else` branch is the usual answer, and it is also what lets Zerk see that the pair covers everything. Checked for a provider's dependency, an `@injected` parameter and an `@Injected` property alike |
 
 ## Singletons
 

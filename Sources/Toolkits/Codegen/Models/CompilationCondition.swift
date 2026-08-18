@@ -131,6 +131,82 @@ struct CompilationCondition: Hashable {
         return (asserted, denied)
     }
 
+    /// Whether this position is live under an assignment of truth values to
+    /// condition texts.
+    ///
+    /// The assignment is a *hypothetical* build configuration, not one Zerk
+    /// knows anything about — which is why the only thing built on this is a
+    /// search for a configuration that would break, never a claim about which
+    /// configuration you are in.
+    func holds(under assignment: [String: Bool]) -> Bool {
+        clauses.allSatisfy { clause in
+            clause.precedingConditions.allSatisfy { assignment[$0] == false }
+                && (clause.condition.map { assignment[$0] == true } ?? true)
+        }
+    }
+
+    /// A configuration that reaches `consumer` and none of `providers`, or `nil`
+    /// when every configuration reaching the consumer has one.
+    ///
+    /// Answered by enumerating truth assignments over the condition *texts*
+    /// involved, which is exact for the fact it is asked to establish: whether
+    /// `#if DEBUG` and its `#else` between them cover everything (they do),
+    /// whether `#if os(iOS)` and `#if os(macOS)` do (Zerk cannot say they do),
+    /// whether a consumer under `#if DEBUG` is served by a provider under a
+    /// different `#if DEBUG` (it is).
+    ///
+    /// Texts are treated as **independent**, so `#if DEBUG` and a separate
+    /// `#if !DEBUG` leave a hole where both are false. That is the same refusal
+    /// to read a negation the rest of this type makes, and it errs the same way:
+    /// what Zerk cannot prove covered, it says so about, and the fix is to write
+    /// the second one as an `#else`.
+    ///
+    /// Returns `nil` past ``assignmentAtomLimit`` distinct texts rather than
+    /// enumerating an exponential number of them. A module that conditional
+    /// enough is beyond what this can usefully say, and refusing to answer is
+    /// the harmless direction.
+    static func uncoveredConfiguration(of consumer: CompilationCondition,
+                                       by providers: [CompilationCondition]) -> [String: Bool]? {
+        // The overwhelmingly common shape, and worth not paying for: anything
+        // unconditional is live in every configuration there is.
+        if providers.contains(where: \.isUnconditional) {
+            return nil
+        }
+
+        var atoms: Set<String> = consumer.atoms
+        for provider in providers {
+            atoms.formUnion(provider.atoms)
+        }
+        let ordered = atoms.sorted()
+        guard ordered.count <= assignmentAtomLimit else {
+            return nil
+        }
+
+        for mask in 0..<(1 << ordered.count) {
+            var assignment: [String: Bool] = [:]
+            for (offset, atom) in ordered.enumerated() {
+                assignment[atom] = mask & (1 << offset) != 0
+            }
+            guard consumer.holds(under: assignment),
+                  !providers.contains(where: { $0.holds(under: assignment) }) else {
+                continue
+            }
+            return assignment
+        }
+        return nil
+    }
+
+    /// How many distinct condition texts ``uncoveredConfiguration(of:by:)`` will
+    /// enumerate over. 2^12 is instant; the limit is there so a pathological
+    /// module cannot make codegen the slow part of a build.
+    static let assignmentAtomLimit = 12
+
+    /// Every distinct condition text this position names, asserted or denied.
+    var atoms: Set<String> {
+        let mentioned = mentionedConditions
+        return mentioned.asserted.union(mentioned.denied)
+    }
+
     /// Whether no build configuration can see both of these at once.
     ///
     /// Answered structurally, never by evaluating anything — see

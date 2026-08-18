@@ -34,5 +34,12 @@ struct InjectedUseRecord {
     /// detection see it. `nil` for a use at file scope, which is nobody's
     /// dependency.
     var enclosingTypeName: String? = nil
+    /// The `#if` the property sits inside.
+    ///
+    /// The macro writes `Zerk<Key>.inject()` into the developer's own file, so
+    /// the call inherits whatever guards the declaration — which makes this a
+    /// consumer of the key in exactly the configurations named here, and the
+    /// question of whether the key resolves in all of them a real one.
+    var condition: CompilationCondition = .unconditional
     let location: AttributeLocation
 }

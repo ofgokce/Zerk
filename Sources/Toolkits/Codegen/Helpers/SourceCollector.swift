@@ -1551,6 +1551,7 @@ final class SourceCollector: SyntaxVisitor {
                 macroName: "@\(attribute.name)",
                 namesMemberDirectly: namesMemberDirectly,
                 enclosingTypeName: enclosingTypePath,
+                condition: currentCondition,
                 location: location(for: Syntax(node))
             ))
         }

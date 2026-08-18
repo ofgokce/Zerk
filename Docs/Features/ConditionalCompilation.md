@@ -100,7 +100,7 @@ extension Zerk<DebugOnlyTool> {
 
 A Release build neither builds the member nor names the type.
 
-Note what this means for consumers: in a configuration where the key has no provider, `Zerk<DebugOnlyTool>.inject()` does not exist, and anything resolving it does not compile. That is the honest outcome — the dependency really is absent — but it is worth writing the `#else` branch rather than discovering it in a Release build.
+Note what this means for consumers: in a configuration where the key has no provider, `Zerk<DebugOnlyTool>.inject()` does not exist. Injecting it from code that *is* reachable there is refused at the declaration rather than left to fail inside the generated file — see [A key must be provided everywhere it is injected](#a-key-must-be-provided-everywhere-it-is-injected).
 
 ## `#elseif` and nesting
 
@@ -191,7 +191,7 @@ To a reader these are opposites. Telling so means evaluating `DEBUG`, which Zerk
 
 The asymmetry is deliberate. Wrongly deciding two registrations are exclusive would silence a real ambiguity and pick a provider arbitrarily; wrongly deciding they can coexist only asks you to write `#else`, and says so.
 
-## Two refusals
+## Three refusals
 
 ### The branches must agree on what resolving costs
 
@@ -211,6 +211,28 @@ final class ReleaseService: Service {}
 > `'ReleaseService' and 'DebugService' both resolve 'Service', in different branches of one #if, but they resolve in different isolation domains (nonisolated versus @MainActor). …`
 
 Make the branches match, or give them separate keys.
+
+### A key must be provided everywhere it is injected
+
+The call is one `Zerk<Key>.inject()`, guarded by whatever guards the code that *injects*. The member behind it is guarded by whatever guards the *providers*. If the first reaches a configuration the second does not, the generated file names a member that is not there:
+
+```swift
+#if DEBUG
+@Injectable<Serving>
+struct DebugServing: Serving {}
+#endif
+
+@Injectable                             // ← not guarded
+struct Consumer {
+    let serving: Serving
+}
+```
+
+> `Nothing provides 'Serving' in a build where DEBUG is false, and 'consumer' resolves it for its 'serving' parameter there. …`
+
+Guard the injection the same way, or provide the key in the configurations that are missing it — an `#else` branch is the usual answer, and it is also what lets Zerk see that the pair covers everything.
+
+This is checked for every way of injecting a key: a provider's dependency, an `@injected` parameter's generated overload, and an `@Injected` property. Zerk searches for a configuration that would break rather than deciding which configuration you are in, so it says nothing where it cannot find one — and a set of guards it cannot prove exhaustive, like `#if os(iOS)` beside a separate `#if os(macOS)`, is reported rather than assumed.
 
 ### A `#if` inside a type may not gate what Zerk reads off its members
 
