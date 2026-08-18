@@ -26,6 +26,14 @@ struct InjectedUseRecord {
     /// `async` or `throws` property, so anything reachable this way is already
     /// effect-free.
     var namesMemberDirectly: Bool = false
+    /// The member the key path names, when there is one.
+    ///
+    /// Carried because a key-path use is guarded by its declaration like any
+    /// other, while the member it names is guarded by *that provider* — and
+    /// nothing else in this record can identify which provider that is. Without
+    /// it, `@Injected(\.mock)` on a member emitted only under `#if DEBUG` was
+    /// the one consumer path the coverage check could not reach.
+    var keyPathMemberName: String? = nil
     /// The type whose declaration this property sits in, when it has one.
     ///
     /// An `@Injected` property is not a provider parameter, so it contributes

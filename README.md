@@ -3,7 +3,7 @@
 [![Swift Package Manager](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg?style=flat)](https://github.com/apple/swift-package-manager)
 [![Swift Version](https://img.shields.io/badge/Swift-6.2-F16D39.svg?style=flat)](https://developer.apple.com/swift)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Platforms](https://img.shields.io/badge/platforms-iOS%2013%2B%20%7C%20macOS%2014%2B%20%7C%20macCatalyst%2013%2B%20%7C%20watchOS%206%2B%20%7C%20tvOS%2013%2B%20%7C%20visionOS%201%2B-lightgrey.svg)](#requirements)
+[![Platforms](https://img.shields.io/badge/platforms-iOS%2013%2B%20%7C%20macOS%2013%2B%20%7C%20macCatalyst%2013%2B%20%7C%20watchOS%206%2B%20%7C%20tvOS%2013%2B%20%7C%20visionOS%201%2B-lightgrey.svg)](#requirements)
 
 Zerk is a compile-time dependency injection framework for Swift. Instead of a runtime container, it combines Swift macros with a build-tool plugin that scans your module's source, resolves the dependency graph during the build, and generates plain static factory code on a `Zerk<Key>` namespace. There is nothing to register at runtime, resolution failures are build errors with file/line locations, and injected code is ordinary Swift you can step through.
 

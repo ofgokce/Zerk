@@ -731,6 +731,17 @@ struct ConditionalCompilationTests {
         let preamble: String
         let parameterName: String
         let parameterType: String
+        /// The generated member a key path would name.
+        let memberName: String
+        /// Whether *that member* exists in every configuration, which is not the
+        /// same question as whether the dependency does.
+        ///
+        /// A provider swap covers its key and does *not* cover either member:
+        /// each branch's member is named after its own type, so a key path to
+        /// `debugService` is Debug-only however well `inject()` is covered. A
+        /// value swap is the opposite — both branches declare one name, so one
+        /// key path reaches it in either build.
+        let isMemberCovering: Bool
         /// Whether Zerk can prove the declarations cover every configuration.
         let isCovering: Bool
         /// `@Injected` names a type, and a value is matched by name as well as
@@ -747,6 +758,7 @@ struct ConditionalCompilationTests {
                        struct LiveService: Service {}
                        """,
                        preamble: key, parameterName: "service", parameterType: "Service",
+                       memberName: "liveService", isMemberCovering: true,
                        isCovering: true, isReachableByInjectedProperty: true),
             Dependency(name: "key, #if with #else",
                        declarations: """
@@ -759,6 +771,7 @@ struct ConditionalCompilationTests {
                        #endif
                        """,
                        preamble: key, parameterName: "service", parameterType: "Service",
+                       memberName: "debugService", isMemberCovering: false,
                        isCovering: true, isReachableByInjectedProperty: true),
             // Covering without being one block: the second clause is reached
             // only because `DEBUG` failed, which is the fact `contradicts` reads.
@@ -776,6 +789,7 @@ struct ConditionalCompilationTests {
                        #endif
                        """,
                        preamble: key, parameterName: "service", parameterType: "Service",
+                       memberName: "debugService", isMemberCovering: false,
                        isCovering: true, isReachableByInjectedProperty: true),
             Dependency(name: "key, #if alone",
                        declarations: """
@@ -785,6 +799,7 @@ struct ConditionalCompilationTests {
                        #endif
                        """,
                        preamble: key, parameterName: "service", parameterType: "Service",
+                       memberName: "debugService", isMemberCovering: false,
                        isCovering: false, isReachableByInjectedProperty: true),
             // Opposites to a reader; two independent conditions to Zerk, which
             // does not read a negation. Reported rather than assumed — the
@@ -802,10 +817,12 @@ struct ConditionalCompilationTests {
                        #endif
                        """,
                        preamble: key, parameterName: "service", parameterType: "Service",
+                       memberName: "debugService", isMemberCovering: false,
                        isCovering: false, isReachableByInjectedProperty: true),
             Dependency(name: "value, unconditional",
                        declarations: "@InjectableValue var retries: Int { 3 }",
                        preamble: "", parameterName: "retries", parameterType: "Int",
+                       memberName: "retries", isMemberCovering: true,
                        isCovering: true, isReachableByInjectedProperty: false),
             Dependency(name: "value, #if with #else",
                        declarations: """
@@ -816,6 +833,7 @@ struct ConditionalCompilationTests {
                        #endif
                        """,
                        preamble: "", parameterName: "retries", parameterType: "Int",
+                       memberName: "retries", isMemberCovering: true,
                        isCovering: true, isReachableByInjectedProperty: false),
             Dependency(name: "value, #if alone",
                        declarations: """
@@ -824,6 +842,7 @@ struct ConditionalCompilationTests {
                        #endif
                        """,
                        preamble: "", parameterName: "retries", parameterType: "Int",
+                       memberName: "retries", isMemberCovering: false,
                        isCovering: false, isReachableByInjectedProperty: false),
             Dependency(name: "referenced value, #if alone",
                        declarations: """
@@ -832,6 +851,7 @@ struct ConditionalCompilationTests {
                        #endif
                        """,
                        preamble: "", parameterName: "retries", parameterType: "Int",
+                       memberName: "retries", isMemberCovering: false,
                        isCovering: false, isReachableByInjectedProperty: false),
         ]
     }
@@ -877,6 +897,16 @@ struct ConditionalCompilationTests {
                 }
                 """
             }, reachesValues: false),
+            // The key-path form names one member and never goes through
+            // `inject()`, so what has to cover it is that member's own guard —
+            // a different question, and the one path the check could not reach.
+            Consumption(name: "@Injected key path", declaration: { dependency in
+                """
+                final class Screen {
+                    @Injected(\\.\(dependency.memberName)) var \(dependency.parameterName): \(dependency.parameterType)
+                }
+                """
+            }, reachesValues: true),
         ]
     }
 
@@ -899,7 +929,10 @@ struct ConditionalCompilationTests {
         let gaps = result.diagnostics.filter {
             $0.severity == .error && $0.message.contains("Nothing provides")
         }
-        if dependency.isCovering {
+        let isCovered = consumption.name == "@Injected key path"
+            ? dependency.isMemberCovering
+            : dependency.isCovering
+        if isCovered {
             #expect(gaps.isEmpty, "\(consumption.name)/\(dependency.name): \(gaps.map(\.message))")
         } else {
             #expect(gaps.count == 1,
@@ -917,7 +950,10 @@ struct ConditionalCompilationTests {
     @Test("a consumer under the provider's own guard is accepted",
           arguments: Consumption.all, Dependency.all)
     func guardedConsumerIsAccepted(consumption: Consumption, dependency: Dependency) {
-        guard !dependency.isCovering,
+        let isCovered = consumption.name == "@Injected key path"
+            ? dependency.isMemberCovering
+            : dependency.isCovering
+        guard !isCovered,
               consumption.reachesValues || dependency.isReachableByInjectedProperty else {
             return
         }

@@ -1333,23 +1333,65 @@ struct GeneratorOutputBuilder {
         }
 
         // An `@Injected` property: the macro writes the call into the
-        // developer's own file, under whatever guards the declaration. Only a
-        // key can be reached this way — a value is matched by name as well as
-        // key, and `@Injected` names neither — so there is no value case here.
-        for use in injectedUses where !use.namesMemberDirectly {
-            guard let unique = primaryResolutions[use.typeKey, shape: use.typeKeyShape] else {
+        // developer's own file, under whatever guards the declaration.
+        // Two shapes, and they are guarded by different things. A plain
+        // `@Injected` goes through the key's `inject()`, so the key's variants
+        // are what must cover it. `@Injected(\.mock)` names one member outright
+        // and never touches `inject()` — so what must cover it is *that member*,
+        // which may be emitted under a narrower guard than the key as a whole.
+        // Reading the key's variants for it would answer about a call it does
+        // not make.
+        for use in injectedUses {
+            guard let member = use.keyPathMemberName else {
+                guard let unique = primaryResolutions[use.typeKey, shape: use.typeKeyShape] else {
+                    continue
+                }
+                let key = unique.injectableKey
+                check(subject: "'\(displayName(for: key))'",
+                      identity: key,
+                      providedUnder: (primaryVariants[key] ?? [unique]).map(\.condition),
+                      consumer: use.condition,
+                      resolving: "\(use.macroName) resolves it",
+                      location: use.location)
                 continue
             }
-            let key = unique.injectableKey
-            check(subject: "'\(displayName(for: key))'",
-                  identity: key,
-                  providedUnder: (primaryVariants[key] ?? [unique]).map(\.condition),
+
+            // No primary required: a key path may name an `@InjectableValue`,
+            // and a key satisfied only by values has no provider to elect. The
+            // primary is consulted only to canonicalise the key, falling back to
+            // the property's own type, which is already alias-rewritten.
+            let key = primaryResolutions[use.typeKey, shape: use.typeKeyShape]?.injectableKey
+                ?? use.typeKey
+            let named = memberConditions(named: member, forKey: key)
+            // Nothing of that name is a mistake the compiler reports against the
+            // developer's own key path, in their own file, where it reads
+            // plainly. Saying nothing here leaves it to them.
+            guard !named.isEmpty else { continue }
+            check(subject: "'Zerk<\(displayName(for: key))>.\(member)'",
+                  identity: "\(key)|\(member)",
+                  providedUnder: named,
                   consumer: use.condition,
-                  resolving: "\(use.macroName) resolves it",
+                  resolving: "\(use.macroName) names it",
                   location: use.location)
         }
 
         return diagnostics
+    }
+
+    /// The guards every generated member of `key` called `name` is emitted
+    /// under, provider and value alike.
+    ///
+    /// A key path can name either, and neither is reached through `inject()` —
+    /// which is exactly why the guards have to be gathered by *name* rather than
+    /// taken from the key's primary.
+    private func memberConditions(named name: String, forKey key: String) -> [CompilationCondition] {
+        let providers = resolutions
+            .filter { $0.injectableKey == key && memberName(for: $0) == name }
+            .map(\.condition)
+        let values = values
+            .filter { $0.typeKey == key && $0.name == name }
+            .map(\.condition)
+        return providers + values
     }
 
     /// A counterexample configuration in words, naming only the conditions the

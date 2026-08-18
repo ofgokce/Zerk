@@ -1357,8 +1357,15 @@ final class SourceCollector: SyntaxVisitor {
             return
         }
 
+        // Paired with `keys` by index, as the display spellings are: a written
+        // `@InjectableValue<Key>` names the key outright, and otherwise the
+        // annotation is the key.
+        let nominalNames = genericKeys.isEmpty
+            ? [annotation.type.nominalNames]
+            : injectableAttributes.flatMap(\.genericArgumentNominalNames)
+
         for (offset, key) in keys.enumerated() {
-            recordKeyDisplayName(displayKeys[offset], for: key)
+            recordKey(display: displayKeys[offset], nominalNames: nominalNames[offset], for: key)
             values.append(
                 InjectableValueRecord(
                     name: identifier.identifier.text,
@@ -1379,21 +1386,26 @@ final class SourceCollector: SyntaxVisitor {
         }
     }
 
-    /// Records how a key should be spelled in the generated file, preferring an
-    /// `any` spelling over a bare one when declarations disagree.
+    /// Records a key's spelling and the types that spelling mentions, together.
     ///
-    /// Only `@Injectable` declarations feed this: they are what *establish* a
-    /// key, and so what the `extension Zerk<Key>` is written as. A parameter or
-    /// an `@Injected` property keeps its own spelling at its own use site, which
+    /// Together, and through one function, because they answer for each other:
+    /// the spelling is what `extension Zerk<Key>` is written as, and the names
+    /// are what decides whether that extension's members may be `public`. A
+    /// registration that recorded only the spelling passed the export check
+    /// vacuously — the check falls back to the key *text*, which matches a bare
+    /// type name and matches nothing at all for `Cache<Hidden>` or
+    /// `any Alpha & Beta`. `@InjectableValue` did exactly that, and emitted a
+    /// `public` member exposing an internal type.
+    ///
+    /// So there is no way to record one without the other. The spelling half
+    /// prefers an `any` spelling over a bare one when declarations disagree.
+    ///
+    /// Only declarations that *establish* a key feed this. A parameter or an
+    /// `@Injected` property keeps its own spelling at its own use site, which
     /// reaches the same specialization regardless.
-    /// Records a key's spelling and the types that spelling mentions together,
-    /// so the two can never describe different things.
-    private func recordKey(display: String, nominalNames: Set<String>, for key: String) {
-        recordKeyDisplayName(display, for: key)
+    private func recordKey(display displayName: String, nominalNames: Set<String>, for key: String) {
         keyNominalNames[key, default: []].formUnion(nominalNames)
-    }
 
-    private func recordKeyDisplayName(_ displayName: String, for key: String) {
         guard let existing = keyDisplayNames[key] else {
             keyDisplayNames[key] = displayName
             return
@@ -1532,11 +1544,21 @@ final class SourceCollector: SyntaxVisitor {
 
         for attribute in attributes {
             var namesMemberDirectly = false
+            var keyPathMemberName: String?
             if case .argumentList(let arguments)? = attribute.arguments,
                arguments.count == 1,
                arguments.first?.label == nil,
-               arguments.first?.expression.is(KeyPathExprSyntax.self) == true {
+               let keyPath = arguments.first?.expression.as(KeyPathExprSyntax.self) {
                 namesMemberDirectly = true
+                // The property the path ends at. Read from the tree rather than
+                // from the rendered text, which carries the leading dot and any
+                // backticks the member's name needed.
+                keyPathMemberName = keyPath.components.compactMap { component in
+                    guard case .property(let property) = component.component else {
+                        return nil
+                    }
+                    return property.declName.baseName.text
+                }.last
             }
             injectedUses.append(InjectedUseRecord(
                 // `@Injected<Foo>` states the key; otherwise it is the
@@ -1550,6 +1572,7 @@ final class SourceCollector: SyntaxVisitor {
                 // actually wrote.
                 macroName: "@\(attribute.name)",
                 namesMemberDirectly: namesMemberDirectly,
+                keyPathMemberName: keyPathMemberName,
                 enclosingTypeName: enclosingTypePath,
                 condition: currentCondition,
                 location: location(for: Syntax(node))
@@ -2148,7 +2171,16 @@ final class SourceCollector: SyntaxVisitor {
                     ))
                     hadIssue = true
                 }
-                if parameter.type.trimmedDescription.hasPrefix("inout") {
+                // The specifier from the tree, not a prefix of the rendered
+                // text: `inoutBuffer` starts with those five letters and is not
+                // an `inout` anything. The same reason `nominalNames` is a tree
+                // walk and `mentionedGenericParameters` says "never a substring
+                // test" — a name the developer chose is not a token.
+                if parameter.type.as(AttributedTypeSyntax.self)?.specifiers
+                    .contains(where: { specifier in
+                        specifier.as(SimpleTypeSpecifierSyntax.self)?
+                            .specifier.tokenKind == .keyword(.inout)
+                    }) == true {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,
                         message: "@injected cannot be applied to 'inout' parameters.",

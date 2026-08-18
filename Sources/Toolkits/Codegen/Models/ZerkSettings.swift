@@ -139,7 +139,7 @@ extension ZerkSettings {
         // and skipped the guard, so a settings file from a newer Zerk was read
         // as if it were current.
         if let version = dictionary["version"] {
-            guard let number = version as? Int else {
+            guard !Self.isJSONBoolean(version), let number = version as? Int else {
                 throw LoadFailure(message: "'version' must be a number.", path: path)
             }
             guard number <= currentVersion else {
@@ -168,9 +168,12 @@ extension ZerkSettings {
         }
 
         if let version = dictionary["swiftVersion"] {
-            if let text = version as? String {
+            // A number is accepted because `"swiftVersion": 6` is the obvious
+            // thing to write; a boolean is not, and would otherwise arrive here
+            // as `1` and read as Swift 5.
+            if !Self.isJSONBoolean(version), let text = version as? String {
                 settings.swiftVersion = text
-            } else if let number = version as? Int {
+            } else if !Self.isJSONBoolean(version), let number = version as? Int {
                 settings.swiftVersion = String(number)
             } else {
                 throw LoadFailure(message: "'swiftVersion' must be a string.", path: path)
@@ -204,13 +207,33 @@ extension ZerkSettings {
         }
 
         if let feature = dictionary["isolatedDefaultValues"] {
-            guard let flag = feature as? Bool else {
+            guard Self.isJSONBoolean(feature), let flag = feature as? Bool else {
                 throw LoadFailure(message: "'isolatedDefaultValues' must be a boolean.", path: path)
             }
             settings.isolatedDefaultValues = flag
         }
 
         return settings
+    }
+
+    /// Whether a value `JSONSerialization` produced is a JSON **boolean**.
+    ///
+    /// Neither `is Bool` nor `is NSNumber` answers this. `JSONSerialization`
+    /// returns booleans as `__NSCFBoolean`, which bridges to both — measured,
+    /// not assumed: for `{"a": true, "b": 1}`, `a is Bool` and `b is Bool` are
+    /// both true, as are `a is NSNumber` and `b is NSNumber`, and `true as? Int`
+    /// is `1` while `1 as? Bool` is `true`. So the casts the type guards were
+    /// written as could not tell the two apart in either direction.
+    ///
+    /// That was not cosmetic. It moved the SE-0411 capability gate *both* ways
+    /// on the same source: `"isolatedDefaultValues": 1` silently disabled a
+    /// warning the target genuinely needed, and `"swiftVersion": true` read as
+    /// Swift 5 and produced one it did not.
+    ///
+    /// The CoreFoundation type is what actually differs, so that is what this
+    /// asks.
+    private static func isJSONBoolean(_ value: Any) -> Bool {
+        CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID()
     }
 
     /// JSON has no comments, but the reference settings file documents itself

@@ -28,6 +28,43 @@ struct ParameterMarkerTests {
 
     // MARK: - @injected bubbling
 
+    /// The shapes `@injected` refuses, and one it must not.
+    ///
+    /// The `inout` refusal was a `hasPrefix("inout")` on the rendered type, so a
+    /// type *named* `inoutBuffer` was reported as an `inout` parameter — naming
+    /// something the developer had not written, with renaming the type as the
+    /// only remedy. It reads the specifier off the tree now, which is what
+    /// `nominalNames` and `mentionedGenericParameters` already say about
+    /// substring tests.
+    @Test("@injected refuses the shapes it cannot resolve, and only those",
+          arguments: [
+            ("inout Serving", true),
+            ("Serving...", true),
+            ("inoutBuffer", false),
+            ("Serving", false),
+          ])
+    func refusedParameterShapes(type: String, isRefused: Bool) {
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol Serving {}
+
+        @Injectable<Serving>
+        struct Live: Serving {}
+
+        @Injectable<inoutBuffer>
+        struct inoutBuffer {}
+
+        final class Screen {
+            init(@injected s: \(type), title: String) {}
+        }
+        """)
+
+        let refusals = result.diagnostics.filter {
+            $0.message.contains("cannot be applied to")
+        }
+        #expect(refusals.isEmpty != isRefused,
+                "\(type): \(result.diagnostics.map(\.message))")
+    }
+
     @Test("a parametric dependency bubbles into the overload")
     func injectedBubbles() {
         let source = """
