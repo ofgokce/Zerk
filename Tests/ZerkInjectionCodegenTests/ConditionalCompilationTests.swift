@@ -607,119 +607,185 @@ struct ConditionalCompilationTests {
 
     // MARK: - Resolving where nothing provides
 
-    /// One way of consuming a key.
+    /// What satisfies a parameter, and whether Zerk can see that it is there in
+    /// every configuration.
     ///
-    /// Every one of them writes a `Zerk<Service>.inject()` guarded by whatever
-    /// guards the *declaration*, while the member behind that call is guarded by
-    /// whatever guards the *providers*. Nothing compared the two, so a key
-    /// registered under `#if DEBUG` and injected without a guard emitted a call
-    /// to a member a Release build does not contain — and it failed inside
+    /// A parameter is answered either by a key's providers or by one
+    /// `@InjectableValue`, and *both* are emitted under their own `#if`. The
+    /// first version of this check asked only about keys and skipped a
+    /// value-satisfied parameter outright, so the whole defect survived on that
+    /// path — which is why the two are one axis here rather than one suite each.
+    struct Dependency {
+        let name: String
+        /// What provides it.
+        let declarations: String
+        /// Anything the declarations need in scope.
+        let preamble: String
+        let parameterName: String
+        let parameterType: String
+        /// Whether Zerk can prove the declarations cover every configuration.
+        let isCovering: Bool
+        /// `@Injected` names a type, and a value is matched by name as well as
+        /// key — so a value is unreachable that way, and the cell is skipped
+        /// rather than asserted about.
+        let isReachableByInjectedProperty: Bool
+
+        static let key = "protocol Service {}"
+
+        static let all: [Dependency] = [
+            Dependency(name: "key, unconditional",
+                       declarations: """
+                       @Injectable<Service>
+                       struct LiveService: Service {}
+                       """,
+                       preamble: key, parameterName: "service", parameterType: "Service",
+                       isCovering: true, isReachableByInjectedProperty: true),
+            Dependency(name: "key, #if with #else",
+                       declarations: """
+                       #if DEBUG
+                       @Injectable<Service>
+                       struct DebugService: Service {}
+                       #else
+                       @Injectable<Service>
+                       struct ReleaseService: Service {}
+                       #endif
+                       """,
+                       preamble: key, parameterName: "service", parameterType: "Service",
+                       isCovering: true, isReachableByInjectedProperty: true),
+            // Covering without being one block: the second clause is reached
+            // only because `DEBUG` failed, which is the fact `contradicts` reads.
+            Dependency(name: "key, two blocks",
+                       declarations: """
+                       #if DEBUG
+                       @Injectable<Service>
+                       struct DebugService: Service {}
+                       #endif
+
+                       #if DEBUG
+                       #else
+                       @Injectable<Service>
+                       struct ReleaseService: Service {}
+                       #endif
+                       """,
+                       preamble: key, parameterName: "service", parameterType: "Service",
+                       isCovering: true, isReachableByInjectedProperty: true),
+            Dependency(name: "key, #if alone",
+                       declarations: """
+                       #if DEBUG
+                       @Injectable<Service>
+                       struct DebugService: Service {}
+                       #endif
+                       """,
+                       preamble: key, parameterName: "service", parameterType: "Service",
+                       isCovering: false, isReachableByInjectedProperty: true),
+            // Opposites to a reader; two independent conditions to Zerk, which
+            // does not read a negation. Reported rather than assumed — the
+            // documented direction to err in.
+            Dependency(name: "key, #if and a separate negation",
+                       declarations: """
+                       #if DEBUG
+                       @Injectable<Service>(primary: true)
+                       struct DebugService: Service {}
+                       #endif
+
+                       #if !DEBUG
+                       @Injectable<Service>
+                       struct ReleaseService: Service {}
+                       #endif
+                       """,
+                       preamble: key, parameterName: "service", parameterType: "Service",
+                       isCovering: false, isReachableByInjectedProperty: true),
+            Dependency(name: "value, unconditional",
+                       declarations: "@InjectableValue var retries: Int { 3 }",
+                       preamble: "", parameterName: "retries", parameterType: "Int",
+                       isCovering: true, isReachableByInjectedProperty: false),
+            Dependency(name: "value, #if alone",
+                       declarations: """
+                       #if DEBUG
+                       @InjectableValue var retries: Int { 3 }
+                       #endif
+                       """,
+                       preamble: "", parameterName: "retries", parameterType: "Int",
+                       isCovering: false, isReachableByInjectedProperty: false),
+            Dependency(name: "referenced value, #if alone",
+                       declarations: """
+                       #if DEBUG
+                       @InjectableValue(.referenced) var retries: Int { 3 }
+                       #endif
+                       """,
+                       preamble: "", parameterName: "retries", parameterType: "Int",
+                       isCovering: false, isReachableByInjectedProperty: false),
+        ]
+    }
+
+    /// One way of consuming a dependency.
+    ///
+    /// Every one of them writes a resolution guarded by whatever guards the
+    /// *declaration*, while the member behind it is guarded by whatever guards
+    /// what provides it. Nothing compared the two, so a dependency registered
+    /// under `#if DEBUG` and injected without a guard emitted a call to a member
+    /// a Release build does not contain — and it failed inside
     /// `Zerk.generated.swift`, in the configuration nobody builds while writing
     /// the code.
     struct Consumption {
         let name: String
-        let declaration: String
+        let declaration: (Dependency) -> String
+        /// Whether this path can reach a value at all.
+        let reachesValues: Bool
 
         static let all: [Consumption] = [
-            Consumption(name: "provider dependency", declaration: """
-            @Injectable
-            struct Consumer {
-                let service: Service
-            }
-            """),
-            Consumption(name: "@injected overload", declaration: """
-            final class Screen {
-                init(@injected service: Service, title: String) {}
-            }
-            """),
+            Consumption(name: "provider dependency", declaration: { dependency in
+                """
+                @Injectable
+                struct Consumer {
+                    let \(dependency.parameterName): \(dependency.parameterType)
+                }
+                """
+            }, reachesValues: true),
+            Consumption(name: "@injected overload", declaration: { dependency in
+                """
+                final class Screen {
+                    init(@injected \(dependency.parameterName): \(dependency.parameterType),
+                         title: String) {}
+                }
+                """
+            }, reachesValues: true),
             // The macro writes the call into the developer's own file, so it is
             // guarded by the declaration exactly as the other two are.
-            Consumption(name: "@Injected property", declaration: """
-            final class Screen {
-                @Injected var service: Service
-            }
-            """),
+            Consumption(name: "@Injected property", declaration: { dependency in
+                """
+                final class Screen {
+                    @Injected var \(dependency.parameterName): \(dependency.parameterType)
+                }
+                """
+            }, reachesValues: false),
         ]
     }
 
-    /// A way of registering the key, and whether Zerk can see that it covers
-    /// every configuration.
-    struct Registration {
-        let name: String
-        let declarations: String
-        let isCovering: Bool
-
-        static let all: [Registration] = [
-            Registration(name: "unconditional", declarations: """
-            @Injectable<Service>
-            struct LiveService: Service {}
-            """, isCovering: true),
-            Registration(name: "#if with #else", declarations: """
-            #if DEBUG
-            @Injectable<Service>
-            struct DebugService: Service {}
-            #else
-            @Injectable<Service>
-            struct ReleaseService: Service {}
-            #endif
-            """, isCovering: true),
-            // Covering without being one block: the second clause is reached
-            // only because `DEBUG` failed, which is the fact `contradicts` reads.
-            Registration(name: "two blocks", declarations: """
-            #if DEBUG
-            @Injectable<Service>
-            struct DebugService: Service {}
-            #endif
-
-            #if DEBUG
-            #else
-            @Injectable<Service>
-            struct ReleaseService: Service {}
-            #endif
-            """, isCovering: true),
-            Registration(name: "#if alone", declarations: """
-            #if DEBUG
-            @Injectable<Service>
-            struct DebugService: Service {}
-            #endif
-            """, isCovering: false),
-            // Opposites to a reader; two independent conditions to Zerk, which
-            // does not read a negation. Reported rather than assumed — the
-            // documented direction to err in.
-            Registration(name: "#if and a separate negation", declarations: """
-            #if DEBUG
-            @Injectable<Service>(primary: true)
-            struct DebugService: Service {}
-            #endif
-
-            #if !DEBUG
-            @Injectable<Service>
-            struct ReleaseService: Service {}
-            #endif
-            """, isCovering: false),
-        ]
-    }
-
-    @Test("a key is refused where it is injected but not provided",
-          arguments: Consumption.all, Registration.all)
+    @Test("a dependency is refused where it is injected but not provided",
+          arguments: Consumption.all, Dependency.all)
     func injectingWhereNothingProvides(consumption: Consumption,
-                                       registration: Registration) {
+                                       dependency: Dependency) {
+        guard consumption.reachesValues || dependency.isReachableByInjectedProperty else {
+            return
+        }
+
         let result = CompileFixture.generateWithResolution(source: """
-        protocol Service {}
+        \(dependency.preamble)
 
-        \(registration.declarations)
+        \(dependency.declarations)
 
-        \(consumption.declaration)
+        \(consumption.declaration(dependency))
         """)
 
         let gaps = result.diagnostics.filter {
-            $0.severity == .error && $0.message.contains("Nothing provides 'Service'")
+            $0.severity == .error && $0.message.contains("Nothing provides")
         }
-        if registration.isCovering {
-            #expect(gaps.isEmpty, "\(consumption.name)/\(registration.name): \(gaps.map(\.message))")
+        if dependency.isCovering {
+            #expect(gaps.isEmpty, "\(consumption.name)/\(dependency.name): \(gaps.map(\.message))")
         } else {
             #expect(gaps.count == 1,
-                    "\(consumption.name)/\(registration.name): \(result.diagnostics.map(\.message))")
+                    "\(consumption.name)/\(dependency.name): \(result.diagnostics.map(\.message))")
             // Named, because "somewhere" would leave the developer to work out
             // which configuration is missing it.
             #expect(gaps.first?.message.contains("a build where DEBUG is false") == true,
@@ -727,27 +793,31 @@ struct ConditionalCompilationTests {
         }
     }
 
-    /// A consumer guarded the way its providers are is not a gap, and that holds
+    /// A consumer guarded the way its provider is is not a gap, and that holds
     /// across separate `#if` blocks — the same condition text is the same
     /// condition, whichever block wrote it.
     @Test("a consumer under the provider's own guard is accepted",
-          arguments: Consumption.all)
-    func guardedConsumerIsAccepted(consumption: Consumption) {
+          arguments: Consumption.all, Dependency.all)
+    func guardedConsumerIsAccepted(consumption: Consumption, dependency: Dependency) {
+        guard !dependency.isCovering,
+              consumption.reachesValues || dependency.isReachableByInjectedProperty else {
+            return
+        }
+
         let result = CompileFixture.generateWithResolution(source: """
-        protocol Service {}
+        \(dependency.preamble)
+
+        \(dependency.declarations)
 
         #if DEBUG
-        @Injectable<Service>
-        struct DebugService: Service {}
-        #endif
-
-        #if DEBUG
-        \(consumption.declaration)
+        \(consumption.declaration(dependency))
         #endif
         """)
 
-        #expect(result.diagnostics.isEmpty,
-                "\(consumption.name): \(result.diagnostics.map(\.message))")
+        let gaps = result.diagnostics.filter {
+            $0.severity == .error && $0.message.contains("Nothing provides")
+        }
+        #expect(gaps.isEmpty, "\(consumption.name)/\(dependency.name): \(gaps.map(\.message))")
     }
 
     // MARK: - The graph
@@ -769,6 +839,6 @@ extension ConditionalCompilationTests.Consumption: CustomTestStringConvertible {
     var testDescription: String { name }
 }
 
-extension ConditionalCompilationTests.Registration: CustomTestStringConvertible {
+extension ConditionalCompilationTests.Dependency: CustomTestStringConvertible {
     var testDescription: String { name }
 }

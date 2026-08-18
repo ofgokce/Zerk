@@ -1198,111 +1198,6 @@ struct GeneratorOutputBuilder {
     /// never had one. Grouped by key and name together, so the same value under
     /// two keys, or two values of one key under different names, both stay legal
     /// — those are the normal cases.
-    /// Reports a key resolved somewhere its providers are not.
-    ///
-    /// Everything that injects a key writes one `Zerk<Key>.inject()`, and that
-    /// call is guarded by whatever guards the *consumer*. The members backing it
-    /// are guarded by whatever guards the *providers*. Nothing had ever compared
-    /// the two, so a key registered under `#if DEBUG` and injected without a
-    /// guard emitted a call to a member that a Release build does not contain —
-    /// and the failure landed inside `Zerk.generated.swift`, in the one
-    /// configuration nobody builds while writing the code.
-    ///
-    /// The comparison is a search for a counterexample, never a claim about the
-    /// build: see ``CompilationCondition/uncoveredConfiguration(of:by:)``. Where
-    /// it cannot find one, nothing is said.
-    private func configurationCoverageDiagnostics() -> [CodegenDiagnostic] {
-        // Keyed on the consumer's position and the key, so one declaration that
-        // resolves the same key twice is one report.
-        var seen = Set<String>()
-        var diagnostics: [CodegenDiagnostic] = []
-        let classifier = self.classifier
-
-        func check(key: String,
-                   consumer: CompilationCondition,
-                   resolving: String,
-                   location: AttributeLocation) {
-            guard seen.insert("\(location)|\(key)").inserted,
-                  let representative = primaryResolutions[key] else {
-                return
-            }
-            let providers = (primaryVariants[key] ?? [representative]).map(\.condition)
-            guard let gap = CompilationCondition.uncoveredConfiguration(of: consumer,
-                                                                        by: providers) else {
-                return
-            }
-            diagnostics.append(CodegenDiagnostic(
-                severity: .error,
-                message: "Nothing provides '\(displayName(for: key))' in \(Self.configurationDescription(gap, mentionedBy: providers)), and \(resolving) there. Guard the injection the same way its providers are guarded, or add a provider for the remaining configurations — writing the branches as one #if / #else is what lets Zerk see that they cover everything.",
-                location: location
-            ))
-        }
-
-        // A provider member resolving a dependency: the call sits in its default
-        // argument or its body, under the member's own guard.
-        for resolution in resolutions {
-            let classification = classifier.classify(resolution)
-            for classified in classification.parameters
-            where classified.binding != .external {
-                guard classifier.injectableValue(matching: classified.parameter) == nil,
-                      let dependency = primaryResolutions[classified.parameter] else {
-                    continue
-                }
-                check(key: dependency.injectableKey,
-                      consumer: resolution.condition,
-                      resolving: "'\(memberName(for: resolution))' resolves it for its '\(classified.parameter.name)' parameter",
-                      location: resolution.provider.location)
-            }
-        }
-
-        // An `@injected` parameter: the call sits in the generated overload,
-        // under the marked declaration's guard.
-        for record in markedMembers {
-            for marked in record.parameters where marked.isMarked {
-                guard classifier.injectableValue(matching: marked.parameter) == nil,
-                      let dependency = primaryResolutions[marked.parameter] else {
-                    continue
-                }
-                check(key: dependency.injectableKey,
-                      consumer: record.condition,
-                      resolving: "the generated overload resolves it for '\(marked.parameter.name)'",
-                      location: record.location)
-            }
-        }
-
-        // An `@Injected` property: the call is written into the developer's own
-        // file by the macro, under whatever guards the declaration.
-        for use in injectedUses where !use.namesMemberDirectly {
-            guard let unique = primaryResolutions[use.typeKey, shape: use.typeKeyShape] else {
-                continue
-            }
-            check(key: unique.injectableKey,
-                  consumer: use.condition,
-                  resolving: "\(use.macroName) resolves it",
-                  location: use.location)
-        }
-
-        return diagnostics
-    }
-
-    /// A counterexample configuration in words, naming only the conditions the
-    /// providers actually turn on — the rest of the assignment is whatever the
-    /// consumer needed, and repeating it would bury the part that matters.
-    private static func configurationDescription(_ assignment: [String: Bool],
-                                                 mentionedBy providers: [CompilationCondition]) -> String {
-        var atoms: Set<String> = []
-        for provider in providers {
-            atoms.formUnion(provider.atoms)
-        }
-        let named = atoms.sorted().compactMap { atom -> String? in
-            assignment[atom].map { "\(atom) is \($0)" }
-        }
-        guard !named.isEmpty else {
-            return "some configuration"
-        }
-        return "a build where \(named.joined(separator: " and "))"
-    }
-
     private func duplicateValueDiagnostics() -> [CodegenDiagnostic] {
         var byIdentity: [String: [InjectableValueRecord]] = [:]
         for value in values {
@@ -1331,6 +1226,145 @@ struct GeneratorOutputBuilder {
             }
         }
         return diagnostics
+    }
+
+    /// Reports a key resolved somewhere its providers are not.
+    ///
+    /// Everything that injects a key writes one `Zerk<Key>.inject()`, and that
+    /// call is guarded by whatever guards the *consumer*. The members backing it
+    /// are guarded by whatever guards the *providers*. Nothing had ever compared
+    /// the two, so a key registered under `#if DEBUG` and injected without a
+    /// guard emitted a call to a member that a Release build does not contain —
+    /// and the failure landed inside `Zerk.generated.swift`, in the one
+    /// configuration nobody builds while writing the code.
+    ///
+    /// The comparison is a search for a counterexample, never a claim about the
+    /// build: see ``CompilationCondition/uncoveredConfiguration(of:by:)``. Where
+    /// it cannot find one, nothing is said.
+    private func configurationCoverageDiagnostics() -> [CodegenDiagnostic] {
+        // Keyed on the consumer's position and the key, so one declaration that
+        // resolves the same key twice is one report.
+        var seen = Set<String>()
+        var diagnostics: [CodegenDiagnostic] = []
+        let classifier = self.classifier
+
+        /// `subject` names what is missing, `providers` are the guards it is
+        /// emitted under, and `identity` is what makes two reports the same
+        /// report. Everything below differs only in those three.
+        func check(subject: String,
+                   identity: String,
+                   providedUnder providers: [CompilationCondition],
+                   consumer: CompilationCondition,
+                   resolving: String,
+                   location: AttributeLocation) {
+            guard seen.insert("\(location)|\(identity)").inserted,
+                  let gap = CompilationCondition.uncoveredConfiguration(of: consumer,
+                                                                        by: providers) else {
+                return
+            }
+            diagnostics.append(CodegenDiagnostic(
+                severity: .error,
+                message: "Nothing provides \(subject) in \(Self.configurationDescription(gap, mentionedBy: providers)), and \(resolving) there. Guard the injection the same way its provider is guarded, or provide it in the remaining configurations — writing the branches as one #if / #else is what lets Zerk see that they cover everything.",
+                location: location
+            ))
+        }
+
+        /// A parameter is satisfied either by a key's providers or by one
+        /// `@InjectableValue`, and both are emitted under their own `#if`. The
+        /// first version of this check asked only about keys and skipped a
+        /// value-satisfied parameter outright, which left the whole defect
+        /// intact on that path.
+        func checkParameter(_ parameter: ParameterRecord,
+                            consumer: CompilationCondition,
+                            resolving: String,
+                            location: AttributeLocation) {
+            if let value = classifier.injectableValue(matching: parameter) {
+                // One record, always: the matcher demands a unique match, so a
+                // value with a definition per configuration answers nothing and
+                // the parameter has already fallen through to the caller.
+                check(subject: "the value '\(value.name)'",
+                      identity: value.matchIdentity,
+                      providedUnder: [value.condition],
+                      consumer: consumer,
+                      resolving: resolving,
+                      location: location)
+                return
+            }
+            guard let dependency = primaryResolutions[parameter],
+                  let representative = primaryResolutions[dependency.injectableKey] else {
+                return
+            }
+            let key = dependency.injectableKey
+            check(subject: "'\(displayName(for: key))'",
+                  identity: key,
+                  providedUnder: (primaryVariants[key] ?? [representative]).map(\.condition),
+                  consumer: consumer,
+                  resolving: resolving,
+                  location: location)
+        }
+
+        // A provider member resolving a dependency: the call sits in its default
+        // argument or its body, under the member's own guard.
+        for resolution in resolutions {
+            let classification = classifier.classify(resolution)
+            for classified in classification.parameters
+            where classified.binding != .external {
+                checkParameter(
+                    classified.parameter,
+                    consumer: resolution.condition,
+                    resolving: "'\(memberName(for: resolution))' resolves it for its '\(classified.parameter.name)' parameter",
+                    location: resolution.provider.location)
+            }
+        }
+
+        // An `@injected` parameter: the call sits in the generated overload,
+        // under the marked declaration's guard.
+        for record in markedMembers {
+            for marked in record.parameters where marked.isMarked {
+                checkParameter(
+                    marked.parameter,
+                    consumer: record.condition,
+                    resolving: "the generated overload resolves it for '\(marked.parameter.name)'",
+                    location: record.location)
+            }
+        }
+
+        // An `@Injected` property: the macro writes the call into the
+        // developer's own file, under whatever guards the declaration. Only a
+        // key can be reached this way — a value is matched by name as well as
+        // key, and `@Injected` names neither — so there is no value case here.
+        for use in injectedUses where !use.namesMemberDirectly {
+            guard let unique = primaryResolutions[use.typeKey, shape: use.typeKeyShape] else {
+                continue
+            }
+            let key = unique.injectableKey
+            check(subject: "'\(displayName(for: key))'",
+                  identity: key,
+                  providedUnder: (primaryVariants[key] ?? [unique]).map(\.condition),
+                  consumer: use.condition,
+                  resolving: "\(use.macroName) resolves it",
+                  location: use.location)
+        }
+
+        return diagnostics
+    }
+
+    /// A counterexample configuration in words, naming only the conditions the
+    /// providers actually turn on — the rest of the assignment is whatever the
+    /// consumer needed, and repeating it would bury the part that matters.
+    private static func configurationDescription(_ assignment: [String: Bool],
+                                                 mentionedBy providers: [CompilationCondition]) -> String {
+        var atoms: Set<String> = []
+        for provider in providers {
+            atoms.formUnion(provider.atoms)
+        }
+        let named = atoms.sorted().compactMap { atom -> String? in
+            assignment[atom].map { "\(atom) is \($0)" }
+        }
+        guard !named.isEmpty else {
+            return "some configuration"
+        }
+        return "a build where \(named.joined(separator: " and "))"
     }
 
     /// What to do about a member-name collision, which differs by what collided:

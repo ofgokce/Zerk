@@ -56,10 +56,35 @@ struct CrossModulePackageTests {
         process.standardError = error
         try process.run()
 
-        // Read before waiting: a full pipe buffer would deadlock otherwise, and
-        // the JSON for a real package is comfortably larger than one.
-        let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errorData = error.fileHandleForReading.readDataToEndOfFile()
+        // Both pipes, concurrently, and only then wait.
+        //
+        // Reading before waiting is half of it: a child that fills a pipe blocks
+        // writing, so `waitUntilExit()` first is a deadlock. The other half is
+        // that the two reads cannot be sequential either. `readDataToEndOfFile`
+        // on stdout returns when the child closes stdout, which is when it
+        // exits — so while it runs, nothing is draining stderr, and a child that
+        // fills *that* buffer blocks forever with both sides waiting.
+        //
+        // This helper is the worst case for it by its own design: the graph goes
+        // to stdout and SwiftPM's build chatter to stderr, so the high-volume
+        // channel is the one that would have been drained second, and the
+        // command is a full nested resolve-and-build. Measured at 500KB of
+        // stderr against this exact shape, sequential draining hangs and this
+        // does not.
+        var outData = Data()
+        var errorData = Data()
+        let drained = DispatchGroup()
+        drained.enter()
+        DispatchQueue.global().async {
+            outData = out.fileHandleForReading.readDataToEndOfFile()
+            drained.leave()
+        }
+        drained.enter()
+        DispatchQueue.global().async {
+            errorData = error.fileHandleForReading.readDataToEndOfFile()
+            drained.leave()
+        }
+        drained.wait()
         process.waitUntilExit()
 
         return (
