@@ -55,9 +55,23 @@ struct ParameterFidelityTests {
                   declarations: "public enum Mode { case fast, slow }",
                   parameter: "m: Mode = .fast", expected: "m: Mode = .fast"),
             // Deliberately *not* carried: a magic literal captures where it was
-            // written from, and the generated member is somewhere else.
+            // written from, and the generated member is somewhere else. Found by
+            // walking for the expression — a `#` in the rendered text is a
+            // different question, and answered wrong in both directions.
             Shape(name: "defaulted with #function", declarations: "",
                   parameter: "caller: String = #function", expected: "caller: String"),
+            Shape(name: "defaulted with a nested #function", declarations: "",
+                  parameter: "who: String = String(describing: #function)",
+                  expected: "who: String"),
+            Shape(name: "defaulted with # inside a string", declarations: "",
+                  parameter: #"tag: String = "issue #1""#,
+                  expected: #"tag: String = "issue #1""#),
+            Shape(name: "defaulted with a hex colour", declarations: "",
+                  parameter: ##"hex: String = "#FF0000""##,
+                  expected: ##"hex: String = "#FF0000""##),
+            Shape(name: "defaulted with a raw string", declarations: "",
+                  parameter: ###"raw: String = #"a\b"#"###,
+                  expected: ###"raw: String = #"a\b"#"###),
             Shape(name: "no label", declarations: "", parameter: "_ n: Int", expected: "_ n: Int"),
             Shape(name: "two names", declarations: "", parameter: "with n: Int",
                   expected: "with n: Int"),

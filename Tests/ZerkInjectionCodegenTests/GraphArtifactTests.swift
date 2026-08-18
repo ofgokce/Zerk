@@ -342,32 +342,42 @@ struct GraphFormatVersionTests {
     }
 
     /// A version nobody reads is decoration. `Codable` ignores unknown fields
-    /// and defaults missing ones, so a newer graph decodes "fine" and the caller
-    /// silently reads one whose meaning has changed — the situation the version
-    /// exists to make detectable.
-    @Test("a graph from a newer format is refused, not silently decoded")
-    func newerFormatIsRefused() throws {
+    /// and defaults missing ones, so a graph of *any* other version decodes
+    /// "fine" and the caller silently reads one whose meaning has changed — the
+    /// situation the version exists to make detectable.
+    ///
+    /// Both directions, because only one of them used to be checked. The guard
+    /// was "no newer than", and an older graph is not a subset of a newer one:
+    /// version 3 repurposed `isAsync`/`isThrowing` from what building a provider
+    /// costs to what reading it costs, so a version 2 document says
+    /// `isAsync: false` where 3 says `true` — and the merged output is stamped
+    /// with the current version either way, leaving nothing able to tell.
+    @Test("only the current format version is read", arguments: [
+        ZerkGraph.currentFormatVersion,
+        ZerkGraph.currentFormatVersion + 1,
+        ZerkGraph.currentFormatVersion - 1,
+        ZerkGraph.currentFormatVersion - 2,
+    ])
+    func onlyTheCurrentVersionIsRead(version: Int) throws {
         let result = try Self.export("""
-        {"formatVersion": \(ZerkGraph.currentFormatVersion + 1), "keys": [], "values": []}
+        {"formatVersion": \(version), "keys": [], "values": []}
         """)
+
+        guard version != ZerkGraph.currentFormatVersion else {
+            guard case .success = result else {
+                Issue.record("the current format was refused: \(result)")
+                return
+            }
+            return
+        }
 
         guard case .failure(let failure) = result else {
-            Issue.record("a newer graph was accepted: \(result)")
+            Issue.record("version \(version) was accepted: \(result)")
             return
         }
-        #expect(failure.message.contains("format version \(ZerkGraph.currentFormatVersion + 1)"))
-        #expect(failure.message.contains("reads up to \(ZerkGraph.currentFormatVersion)"))
-    }
-
-    @Test("the current format is accepted")
-    func currentFormatIsAccepted() throws {
-        let result = try Self.export("""
-        {"formatVersion": \(ZerkGraph.currentFormatVersion), "keys": [], "values": []}
-        """)
-
-        guard case .success = result else {
-            Issue.record("the current format was refused: \(result)")
-            return
-        }
+        // Both versions named: "wrong version" without saying which is a
+        // message the reader has to go and look something up to act on.
+        #expect(failure.message.contains("format version \(version)"))
+        #expect(failure.message.contains("reads version \(ZerkGraph.currentFormatVersion)"))
     }
 }

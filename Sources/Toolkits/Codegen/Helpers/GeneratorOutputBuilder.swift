@@ -38,6 +38,9 @@ struct GeneratorOutputBuilder {
     /// written with, keyed by qualified name. See
     /// ``SourceCollector/declaredAccessRanks``.
     var declaredAccessRanks: [String: [DeclaredAccessRecord]] = [:]
+    /// Every type declared in the module -> its generic parameters. See
+    /// ``SourceCollector/declaredGenericParameters``.
+    var declaredGenericParameters: [String: [String]] = [:]
     /// Injectable key -> every nominal type its spelling mentions. See
     /// ``SourceCollector/keyNominalNames``.
     var keyNominalNames: [String: Set<String>] = [:]
@@ -1959,6 +1962,35 @@ struct GeneratorOutputBuilder {
                         .filter { $0.1 < .internal }
                         .min(by: { $0.0 < $1.0 })
                     : nil
+                // A marked parameter naming one of the *extended type's* generic
+                // parameters. An extension declares no parameters of its own and
+                // may be collected before the type it extends, so nothing here
+                // knew `Element` was one — and with no generic scope to say so it
+                // was matched as an ordinary key. Where the module happened to
+                // declare a type of the same name it resolved to *that*, silently,
+                // and the emitted extension did not compile; where it did not, the
+                // developer was told to register a provider for something that can
+                // never have one.
+                //
+                // Only the marked parameters, and only the ones that mention a
+                // parameter of the type. `@injected repo: Repo` in an extension of
+                // a generic type is resolvable and supported — the generated
+                // extension repeats the header, so `E` stays in scope for
+                // everything passed through.
+                if let unbound = record.unboundExtendedTypeName,
+                   let typeParameters = declaredGenericParameters[unbound],
+                   let offending = record.parameters.first(where: {
+                       $0.isMarked
+                           && !$0.parameter.typeNominalNames.isDisjoint(with: typeParameters)
+                   }) {
+                    diagnostics.append(CodegenDiagnostic(
+                        severity: .error,
+                        message: "@injected parameter '\(offending.parameter.name)': '\(offending.parameter.typeName)' names a generic parameter of '\(unbound)', which nothing can register — a generic parameter is a different type at each call site, while the generated overload resolves it once. Pass it in instead, or resolve it in the member's body.",
+                        location: offending.parameter.location ?? record.location
+                    ))
+                    continue
+                }
+
                 if let hidden, let typeName {
                     diagnostics.append(CodegenDiagnostic(
                         severity: .error,

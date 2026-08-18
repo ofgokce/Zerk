@@ -33,6 +33,16 @@ final class SourceCollector: SyntaxVisitor {
     /// both: an injectable key for a nested type is `Outer.Inner`, so a map keyed
     /// by `Inner` never matches and every check reading it is silently skipped.
     private(set) var declaredAccessRanks: [String: [DeclaredAccessRecord]] = [:]
+    /// Every type declared in the module -> its generic parameters, keyed by
+    /// **qualified** name as ``declaredAccessRanks`` is.
+    ///
+    /// Recorded for every type, not just injectable ones, because the question
+    /// it answers is asked about a type Zerk may never register: whether
+    /// `extension Cache` puts generic parameters in scope. An extension names no
+    /// parameters of its own, and the type it extends may be walked after it, so
+    /// this cannot be settled while collecting — see
+    /// ``MarkedMemberRecord/unboundExtendedTypeName``.
+    private(set) var declaredGenericParameters: [String: [String]] = [:]
     /// `@Injected` property annotations seen in the module.
     private(set) var injectedUses: [InjectedUseRecord] = []
     /// Initializers/methods carrying `@injected` parameter markers.
@@ -668,6 +678,9 @@ final class SourceCollector: SyntaxVisitor {
         declaredAccessRanks[qualified(node.declaredName), default: []].append(
             DeclaredAccessRecord(access: node.modifiers.accessRank, condition: currentCondition)
         )
+        if !genericParameters.isEmpty {
+            declaredGenericParameters[qualified(node.declaredName)] = genericParameters
+        }
 
         let injectableAttributes = node.attributes.attributes(named: "Injectable")
         guard !injectableAttributes.isEmpty else { return }
@@ -1990,22 +2003,6 @@ final class SourceCollector: SyntaxVisitor {
         }
     }
 
-    /// Validates and records one member's parameter list.
-    ///
-    /// `@injected` is rejected on a parameter that already has a default, on a
-    /// variadic, and on `inout`: the generated overload drops the parameter and
-    /// supplies the value itself, which none of those forms can express.
-    /// A **top-level** `func` carrying `@injected` parameters.
-    ///
-    /// Type members are collected by walking a type's member block; a global has
-    /// no type to walk, so it is picked up here. Its overload is a file-scope
-    /// function rather than an extension member — see
-    /// ``MarkedMemberRecord/MemberKind/globalFunction(name:returnType:)``.
-    ///
-    /// "Top level" is read from the tree rather than from `typeStack`, because
-    /// the stack is also empty inside a global `var`'s accessor — and a function
-    /// declared there is local, so nothing outside the file could call the
-    /// overload.
     /// `@injected` members of an `extension`, whose overload belongs in an
     /// extension of the same type rather than at file scope.
     ///
@@ -2015,6 +2012,12 @@ final class SourceCollector: SyntaxVisitor {
     /// Only what can be generated without knowing that is collected.
     private func collectMarkedExtensionMembers(_ node: ExtensionDeclSyntax) {
         let extendedType = node.extendedType.trimmedDescription
+        // `extension Cache` leaves `Cache`'s parameters in scope; `extension
+        // Cache<Int>` binds them, and nothing generic is in scope there. Asked
+        // of the tree — any generic argument clause anywhere in the spelling
+        // binds — rather than of the text, which would be looking for a `<`.
+        let bindsItsArguments = node.extendedType.containsGenericArguments
+        let unboundExtendedTypeName = bindsItsArguments ? nil : extendedType
         let typeIsolation = statedIsolation(modifiers: node.modifiers, attributes: node.attributes)
             .resolved(default: ambientIsolation)
 
@@ -2056,12 +2059,18 @@ final class SourceCollector: SyntaxVisitor {
                 typeWhereClause: node.genericWhereClause?.trimmedDescription,
                 requiresVisibleType: true,
                 extendedTypeNominalNames: node.extendedType.nominalNames,
-                // A `where` clause constrains an already-generic type; it is not
-                // what makes one generic. The generated extension repeats the
-                // header, so the type's parameters stay in scope either way —
-                // reading the clause as genericness refused constrained
-                // extensions while accepting unconstrained ones.
+                // Not knowable here: an extension names no parameters of its
+                // own, and the type it extends may be walked after it. Deferred
+                // to emission through `unboundExtendedTypeName`, where every
+                // declaration has been seen.
+                //
+                // A `where` clause is not the answer either. It constrains an
+                // already-generic type rather than making one, and the generated
+                // extension repeats the header, so the type's parameters stay in
+                // scope either way — reading the clause as genericness refused
+                // constrained extensions while accepting unconstrained ones.
                 typeIsGeneric: false,
+                unboundExtendedTypeName: unboundExtendedTypeName,
                 typeAccess: node.modifiers.accessRank,
                 isolation: .explicit(statedIsolation(
                     modifiers: function.modifiers,
@@ -2072,6 +2081,17 @@ final class SourceCollector: SyntaxVisitor {
         }
     }
 
+    /// A **top-level** `func` carrying `@injected` parameters.
+    ///
+    /// Type members are collected by walking a type's member block; a global has
+    /// no type to walk, so it is picked up here. Its overload is a file-scope
+    /// function rather than an extension member — see
+    /// ``MarkedMemberRecord/MemberKind/globalFunction(name:returnType:)``.
+    ///
+    /// "Top level" is read from the tree rather than from `typeStack`, because
+    /// the stack is also empty inside a global `var`'s accessor — and a function
+    /// declared there is local, so nothing outside the file could call the
+    /// overload.
     private func collectMarkedGlobalFunction(_ node: FunctionDeclSyntax) {
         guard typeStack.isEmpty, Self.isTopLevel(node) else {
             return
@@ -2133,6 +2153,18 @@ final class SourceCollector: SyntaxVisitor {
         return false
     }
 
+    /// Validates and records one member's parameter list.
+    ///
+    /// `@injected` is rejected on a parameter that already has a default, on a
+    /// variadic, and on `inout`: the generated overload drops the parameter and
+    /// supplies the value itself, which none of those forms can express.
+    ///
+    /// `typeIsGeneric` is what the *caller* knows. A type body knows it; an
+    /// extension does not, and passes `unboundExtendedTypeName` instead so the
+    /// question can be settled at emission, where every declaration has been
+    /// seen. This block sat 120 lines away from here, above a different
+    /// function — which is a fair part of why the refusal it describes had a
+    /// hole in it.
     private func collectMarkedMember(parameters: FunctionParameterListSyntax,
                                      kind: MarkedMemberRecord.MemberKind,
                                      effects: ProviderEffects,
@@ -2144,6 +2176,7 @@ final class SourceCollector: SyntaxVisitor {
                                      requiresVisibleType: Bool = false,
                                      extendedTypeNominalNames: Set<String> = [],
                                      typeIsGeneric: Bool,
+                                     unboundExtendedTypeName: String? = nil,
                                      typeAccess: AccessRank,
                                      isolation: MarkedMemberIsolation,
                                      location: AttributeLocation) {
@@ -2234,6 +2267,7 @@ final class SourceCollector: SyntaxVisitor {
             typeWhereClause: typeWhereClause,
             requiresVisibleType: requiresVisibleType,
             extendedTypeNominalNames: extendedTypeNominalNames,
+            unboundExtendedTypeName: unboundExtendedTypeName,
             condition: currentCondition,
             parameters: collected,
             effects: effects,

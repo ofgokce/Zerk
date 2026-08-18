@@ -74,6 +74,19 @@ struct MarkedMemberRecord {
     /// the tree — `Hidden<Int>` reports both. Empty for a member declared on the
     /// type itself, whose access was known at collection time.
     var extendedTypeNominalNames: Set<String> = []
+    /// The extended type's name, when this member was declared in an extension
+    /// that names it **unbound** — `extension Cache`, not `extension Cache<Int>`.
+    ///
+    /// The distinction is what decides whether the type's generic parameters are
+    /// in scope: unbound, `Element` inside the extension is the *parameter*;
+    /// bound, it is whatever `Element` means at file scope. Zerk refuses
+    /// `@injected` on a generic type, and this is what lets it — an extension
+    /// declares no parameters of its own, so genericity has to come from the
+    /// type's own declaration, which may be collected afterwards.
+    ///
+    /// `nil` for a member declared on the type itself, whose genericity was
+    /// known at collection, and for an extension binding its arguments.
+    var unboundExtendedTypeName: String? = nil
     /// The `#if` the marked declaration sits inside. The generated overload
     /// delegates to it, so it cannot outlive it.
     var condition: CompilationCondition = .unconditional

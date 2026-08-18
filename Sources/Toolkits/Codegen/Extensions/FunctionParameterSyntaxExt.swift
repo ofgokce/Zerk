@@ -63,14 +63,28 @@ extension FunctionParameterSyntax {
     /// answer than their own declaration gives, with nothing to notice. Left
     /// behind rather than reproduced, which puts such a parameter back where it
     /// was before any of this: supplied by the caller.
+    ///
+    /// Found by walking for the expression rather than by looking for a `#` in
+    /// the rendered text. The two are not the same question and the text answer
+    /// was wrong in both directions people write: `"issue #1"`, `"#FF0000"` and
+    /// `#"a\b"#` are string literals that contain the character and mean the
+    /// same thing anywhere, while `String(describing: #function)` is a call that
+    /// does not contain one at the top level. A walk gets both.
     var portableDefaultText: String? {
         guard let value = defaultValue?.value else {
             return nil
         }
-        let text = value.trimmedDescription
-        guard !text.contains("#") else {
+        guard !Self.mentionsMagicLiteral(Syntax(value)) else {
             return nil
         }
-        return text
+        return value.trimmedDescription
+    }
+
+    /// Whether an expression names a magic literal anywhere inside it.
+    private static func mentionsMagicLiteral(_ node: Syntax) -> Bool {
+        if node.is(MacroExpansionExprSyntax.self) {
+            return true
+        }
+        return node.children(viewMode: .sourceAccurate).contains(where: mentionsMagicLiteral)
     }
 }

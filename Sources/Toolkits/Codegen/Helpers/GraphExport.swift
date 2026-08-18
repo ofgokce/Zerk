@@ -53,8 +53,23 @@ public struct GraphExport {
                 // so without this the caller silently reads a graph whose
                 // meaning has changed, which is the situation the version
                 // exists to make detectable.
-                guard graph.formatVersion <= ZerkGraph.currentFormatVersion else {
-                    throw Failure(message: "the graph at \(path) is format version \(graph.formatVersion), and this tool reads up to \(ZerkGraph.currentFormatVersion). Update Zerk, or regenerate the graph with the version you are running.")
+                // Equality, not "no newer than". An older graph decodes just as
+                // cleanly and means something different: version 3 exists because
+                // `isAsync`/`isThrowing` were repurposed from what building a
+                // provider costs to what *reading* it costs, so a version 2 graph
+                // carries the old answers under the new names — and the merged
+                // document is stamped with the current version, leaving nothing
+                // downstream able to tell.
+                //
+                // The realistic way to meet this is a `Zerk.graph.json` left in a
+                // work directory from before an upgrade, which is exactly the
+                // situation the version was added to make detectable. There is no
+                // migration to offer, so the honest answer is to say which
+                // version it is and ask for a rebuild; a
+                // `minimumReadableFormatVersion` beside the current one is where
+                // forward compatibility would go if it were ever wanted.
+                guard graph.formatVersion == ZerkGraph.currentFormatVersion else {
+                    throw Failure(message: "the graph at \(path) is format version \(graph.formatVersion), and this tool reads version \(ZerkGraph.currentFormatVersion). Rebuild to regenerate it, or run the Zerk version that wrote it.")
                 }
                 graphs.append(graph)
             } catch {

@@ -393,3 +393,22 @@ private extension TypeSyntax {
         return "<\(arguments)>"
     }
 }
+
+public extension TypeSyntax {
+    /// Whether this spelling binds generic arguments anywhere in it.
+    ///
+    /// `Cache<Int>` does, `Outer.Inner<E>` does, `Cache` does not. Asked of the
+    /// tree rather than by looking for a `<`, which is the same reason
+    /// ``nominalNames`` is a walk: a question about syntax answered against
+    /// rendered text is a question answered about the wrong thing.
+    var containsGenericArguments: Bool {
+        Self.bindsArguments(Syntax(self))
+    }
+
+    private static func bindsArguments(_ node: Syntax) -> Bool {
+        if node.is(GenericArgumentClauseSyntax.self) {
+            return true
+        }
+        return node.children(viewMode: .sourceAccurate).contains(where: bindsArguments)
+    }
+}

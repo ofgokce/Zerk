@@ -161,7 +161,10 @@ because nothing outside the file could call an overload of it.
 
 An unmarked parameter is otherwise reproduced as written: its label, its specifier, and its
 own default value all carry onto the overload.
-- No generic types or generic members.
+- No generic types or generic members. In an *extension* of a generic type the rule is
+  narrower and applies to the marked parameter rather than the member: a concrete key
+  resolves there as anywhere, but a marked parameter naming one of the type's own
+  parameters cannot, since nothing can register one.
 - The member must be at least `internal` — the generated overload lives in a separate
   generated file and cannot call private or fileprivate members.
 
