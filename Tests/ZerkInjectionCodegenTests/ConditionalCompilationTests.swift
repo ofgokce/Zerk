@@ -362,7 +362,7 @@ struct ConditionalCompilationTests {
         #expect(generated.contains("""
         private enum _$zerk_singletons {
         #if (DEBUG)
-            nonisolated(unsafe) static let cache: Cache = Cache()
+            static let cache: Cache = Cache()
         #endif
         }
         """))

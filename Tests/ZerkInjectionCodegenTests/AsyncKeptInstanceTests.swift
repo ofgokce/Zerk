@@ -37,8 +37,11 @@ struct AsyncKeptInstanceTests {
         final class Cache: @unchecked Sendable {}
         """)
 
-        #expect(generated.contains(
-            "nonisolated(unsafe) static let cache: Cache = Cache()"))
+        // A plain `static let`, and no `nonisolated(unsafe)`: the declaration
+        // says `Sendable`, so the annotation would be diagnosed rather than
+        // merely redundant. The escape hatch itself is covered by
+        // `SingletonStorageTests`.
+        #expect(generated.contains("static let cache: Cache = Cache()"))
         #expect(!generated.contains("ZerkAsyncBox"))
         #expect(generated.contains("nonisolated static var cache: Cache {"))
     }

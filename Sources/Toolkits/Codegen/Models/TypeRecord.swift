@@ -59,6 +59,23 @@ struct TypeRecord {
     /// Everything generated for the type is emitted under the same guard, and
     /// registrations in different clauses of one `#if` never compete for a key.
     /// See ``CompilationCondition``.
+    /// Whether the declaration's own inheritance clause names `Sendable`, with
+    /// or without `@unchecked`.
+    ///
+    /// Read to decide whether a `@Singleton`'s storage slot needs
+    /// `nonisolated(unsafe)`. It is *not* a claim that the type is Sendable —
+    /// syntax cannot settle that, and a conformance added in an extension or
+    /// inherited through a protocol is invisible here. It is the narrower fact
+    /// the emitter actually needs: whether the compiler will already know, in
+    /// which case the annotation is not merely redundant but diagnosed —
+    /// "'nonisolated(unsafe)' is unnecessary for a constant with 'Sendable'
+    /// type", which is a build failure under `-warnings-as-errors` in a file
+    /// the developer cannot edit.
+    ///
+    /// Erring towards `false` costs the old behaviour and nothing more; erring
+    /// towards `true` would drop an annotation Swift 6 requires. So only what is
+    /// written on the declaration counts.
+    var declaresSendable: Bool = false
     var condition: CompilationCondition = .unconditional
 
     /// Whether one instance of this type is kept and handed out repeatedly,

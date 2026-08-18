@@ -149,6 +149,10 @@ struct GeneratorOutputBuilder {
         /// neither a `static let` initializer nor a lock-held `build()` can
         /// await.
         var effects: ProviderEffects = .none
+        /// Whether the stored type's declaration names `Sendable`, which decides
+        /// whether the slot needs `nonisolated(unsafe)`. See
+        /// ``TypeRecord/declaresSendable``.
+        var declaresSendable: Bool = false
         /// The `#if` the owning type is declared under, which the storage slot
         /// is emitted under too — it names the type, so it cannot outlive it.
         var condition: CompilationCondition = .unconditional
@@ -957,6 +961,7 @@ struct GeneratorOutputBuilder {
             isolation: provider.isolation,
             scope: provider.scope,
             effects: provider.provider.effects.merged(with: classification.dependencyEffects),
+            declaresSendable: provider.declaresSendable,
             condition: provider.condition
         )
     }
@@ -1058,8 +1063,18 @@ struct GeneratorOutputBuilder {
                 // instance across isolation domains is the documented contract
                 // of @Singleton (Swift 6 would otherwise require the stored type
                 // to be Sendable).
+                //
+                // Unless the type says it *is* Sendable, in which case the
+                // annotation is not merely redundant but diagnosed —
+                // "'nonisolated(unsafe)' is unnecessary for a constant with
+                // 'Sendable' type" — and that is a build failure under
+                // `-warnings-as-errors`, in a file the developer cannot edit.
+                // Worse, it is what Zerk's own `Sendable` conformance check
+                // tells them to do. The other two storage forms already ask this
+                // question, because a box is Sendable; this one is the third.
+                let escape = entry.declaresSendable ? "" : "nonisolated(unsafe) "
                 lines += Self.guarded(
-                    ["    nonisolated(unsafe) static let \(entry.memberName): \(entry.typeName) = \(entry.construction)"],
+                    ["    \(escape)static let \(entry.memberName): \(entry.typeName) = \(entry.construction)"],
                     by: entry.condition)
             case .globalActor(let name):
                 // Global-actor isolation already protects the storage, so no

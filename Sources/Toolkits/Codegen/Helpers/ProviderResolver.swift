@@ -405,6 +405,7 @@ private extension ProviderResolver {
             isSingleton: type.isSingleton,
             scope: type.scope,
             condition: type.condition,
+            declaresSendable: type.declaresSendable,
             genericParameters: type.genericParameters,
             isParameterizedExistential: type.parameterizedKeys[key] != nil
         )

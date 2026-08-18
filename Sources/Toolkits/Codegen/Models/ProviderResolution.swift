@@ -33,6 +33,9 @@ struct ProviderResolution {
     /// same guard, and by the election, which uses it to tell alternatives from
     /// rivals. See ``CompilationCondition``.
     var condition: CompilationCondition = .unconditional
+    /// Whether the registering type's own declaration names `Sendable`. See
+    /// ``TypeRecord/declaresSendable``.
+    var declaresSendable: Bool = false
 
     /// Whether this resolution reads a kept instance rather than building one.
     /// See ``TypeRecord/isShared``.

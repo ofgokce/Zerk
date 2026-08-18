@@ -1052,6 +1052,7 @@ final class SourceCollector: SyntaxVisitor {
                 genericParameters: genericParameters,
                 parameterizedKeys: parameterizedKeys,
                 initializerInferenceRefusal: inferenceRefusal,
+                declaresSendable: node.declaresSendable,
                 condition: currentCondition
             )
         )

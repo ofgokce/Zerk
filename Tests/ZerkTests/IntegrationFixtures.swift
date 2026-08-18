@@ -576,3 +576,17 @@ struct NullMailer: Mailing {
     init() {}
 }
 
+
+/// A singleton whose declaration says it is `Sendable`.
+///
+/// The suite had none, and that is the whole reason a generated
+/// `nonisolated(unsafe)` on a Sendable constant reached a consumer: for a type
+/// with no conformance the annotation is required and silent, so every fixture
+/// here was the case that could not show the problem. It is also the shape
+/// Zerk's own conformance check pushes people towards, which is what made it the
+/// first thing a real project hit.
+@Singleton
+@Injectable
+final class SendableCounter: @unchecked Sendable {
+    var id: Int { ObjectIdentifier(self).hashValue }
+}

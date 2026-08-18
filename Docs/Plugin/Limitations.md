@@ -59,6 +59,28 @@ public extension Array {
 
 Both need an extension of a *foreign* generic type together with a marked parameter naming its parameter, which is why this is a stated limit rather than a guarded one. In an extension of a type declared here, the refusal is exact — including when the type is declared further down the file, since the question is settled after every declaration has been seen.
 
+### `Sendable` is read from the declaration, so a conformance in an extension is invisible
+
+A `@Singleton`'s storage slot carries `nonisolated(unsafe)`, which is what makes sharing one instance across isolation domains legal under Swift 6 without requiring the stored type to be `Sendable`. When the type *is* `Sendable` the annotation is not merely redundant — the compiler diagnoses it, and under `-warnings-as-errors` that is a build failure in a file you cannot edit. So Zerk drops it when the declaration says `Sendable`:
+
+```swift
+@Singleton @Injectable
+final class Cache: @unchecked Sendable {}   // no nonisolated(unsafe)
+
+@Singleton @Injectable
+final class Cache {}                        // nonisolated(unsafe), and needed
+```
+
+Read from the declaration's own inheritance clause, which means a conformance added elsewhere is not seen:
+
+```swift
+@Singleton @Injectable
+final class Cache {}
+extension Cache: @unchecked Sendable {}     // invisible — hatch stays, warning returns
+```
+
+Write the conformance on the declaration. This is the same boundary as [conformance checking](#conformance-is-the-compilers-to-check-not-zerks), and for the same reason: proving a conformance means resolving types, not reading syntax. Erring the other way would be worse — dropping the annotation where Swift 6 requires it turns a warning into an error.
+
 ### Global actor detection is heuristic
 
 `@MainActor` is recognized exactly; any other attribute ending in `Actor` is assumed to be a global actor. A custom global actor named otherwise, or isolation inherited through a conformance, is invisible to the plugin — annotate it with `@Isolated<A>`.

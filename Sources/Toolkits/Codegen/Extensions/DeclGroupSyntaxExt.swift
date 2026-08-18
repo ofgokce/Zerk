@@ -147,4 +147,17 @@ extension DeclGroupSyntax {
             effects: .none,
             location: location)
     }
+
+    /// Whether the declaration's own inheritance clause names `Sendable`.
+    ///
+    /// `@unchecked Sendable` counts: the compiler treats the type as Sendable
+    /// either way, which is the only thing the answer is used for. Read from the
+    /// inheritance clause and nowhere else — a conformance declared in an
+    /// extension or inherited through a protocol is not visible to syntax, and
+    /// guessing at one would drop an annotation Swift 6 requires.
+    var declaresSendable: Bool {
+        inheritanceClause?.inheritedTypes.contains { inherited in
+            inherited.type.nominalNames.contains("Sendable")
+        } ?? false
+    }
 }

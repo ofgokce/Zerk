@@ -274,7 +274,9 @@ build error rather than a collision in generated code.
 `nonisolated(unsafe)` acknowledges that sharing the instance across isolation
 domains is the documented contract of `@Singleton` — `static let` initialization
 is already thread-safe in the runtime. A `@MainActor` singleton gets
-`@MainActor static let` instead and needs no escape hatch.
+`@MainActor static let` instead and needs no escape hatch, and neither does one
+whose declaration says `Sendable`: there the compiler knows already, and warns
+that the annotation is unnecessary.
 
 The guard sits in the key's member, not in the storage initializer — it cannot be
 in the initializer, since the guard is per key while the storage is per type.

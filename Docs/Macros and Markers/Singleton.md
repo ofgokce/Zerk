@@ -110,6 +110,11 @@ only the getter is exported.
 nonisolated provider, `@MainActor static let` for a `@MainActor` one (global-actor isolation
 already protects the storage, so no `unsafe` escape hatch is needed).
 
+The escape hatch is also dropped when the type's own declaration says `Sendable` — with or
+without `@unchecked` — because there the compiler already knows and warns that the annotation
+is unnecessary. A conformance written in an *extension* is not visible to the plugin; see
+[Limitations](../Plugin/Limitations.md#sendable-is-read-from-the-declaration-so-a-conformance-in-an-extension-is-invisible).
+
 ```swift
 @MainActor
 @Singleton
