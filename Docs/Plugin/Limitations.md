@@ -45,6 +45,20 @@ A target that declares no injectables needs no plugin and can still use `@Inject
 
 `@Injectable<Key>` takes your word for it. The generated `inject()` returns `Key` and builds your type, so a type that does not actually conform fails there — `return expression of type 'Store' does not conform to 'Storing'`, naming both. Zerk used to check the inheritance clause itself and refused three correct spellings for it: a conformance added in an extension, one inherited transitively, and `Box<X, Y>: Boxable<X, Y>`, which is legal and genuinely conforms.
 
+### Genericity is read from the declaration, so a foreign type's is invisible
+
+Zerk refuses an `@injected` parameter that names one of the extended type's generic parameters — nothing can register one, since it is a different type at each call site while the generated overload resolves it once. Working out that `extension Cache` puts `Element` in scope means finding `Cache`'s own declaration, so the refusal reaches exactly as far as this module does:
+
+```swift
+public extension Array {
+    func run(@injected e: Element) {}     // `Element` is Array's parameter
+}
+```
+
+`Array` is declared in the standard library, so Zerk cannot know it is generic. If the module happens to declare a type called `Element`, the parameter resolves to *that* and the generated extension does not compile — `cannot convert value of type 'MyModule.Element' to expected argument type 'Element'`, with the two spelled identically. If it does not, the error is `'Element' is not injectable in this module`, which is misleading but at least loud.
+
+Both need an extension of a *foreign* generic type together with a marked parameter naming its parameter, which is why this is a stated limit rather than a guarded one. In an extension of a type declared here, the refusal is exact — including when the type is declared further down the file, since the question is settled after every declaration has been seen.
+
 ### Global actor detection is heuristic
 
 `@MainActor` is recognized exactly; any other attribute ending in `Actor` is assumed to be a global actor. A custom global actor named otherwise, or isolation inherited through a conformance, is invisible to the plugin — annotate it with `@Isolated<A>`.

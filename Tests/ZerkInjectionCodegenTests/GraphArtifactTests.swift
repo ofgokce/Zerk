@@ -379,5 +379,33 @@ struct GraphFormatVersionTests {
         // message the reader has to go and look something up to act on.
         #expect(failure.message.contains("format version \(version)"))
         #expect(failure.message.contains("reads version \(ZerkGraph.currentFormatVersion)"))
+
+        // Asserted on the rendered text because that is the whole artifact
+        // here. The guard was written inside the `do` whose `catch` names
+        // decode failures, so this deliberate one was swallowed and re-wrapped:
+        // the path appeared twice and the sentence arrived inside
+        // `Failure(message: "…")`. Every part of that is invisible to an
+        // assertion about *which* error was thrown.
+        #expect(!failure.message.contains("Failure(message:"),
+                Comment(rawValue: failure.message))
+        #expect(!failure.message.contains("could not read graph at"),
+                Comment(rawValue: failure.message))
+        #expect(failure.message.components(separatedBy: "Zerk.graph.json").count == 2,
+                Comment(rawValue: failure.message))
+    }
+
+    /// A file that genuinely cannot be decoded still gets the decode wording —
+    /// the point of moving the version guard out was to stop the two failures
+    /// standing in for each other, not to merge them.
+    @Test("an unreadable graph is reported as unreadable")
+    func unreadableGraphKeepsItsOwnMessage() throws {
+        let result = try Self.export("not json at all")
+
+        guard case .failure(let failure) = result else {
+            Issue.record("a corrupt graph was accepted: \(result)")
+            return
+        }
+        #expect(failure.message.contains("could not read graph at"))
+        #expect(!failure.message.contains("format version"))
     }
 }

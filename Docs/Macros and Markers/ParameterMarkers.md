@@ -164,7 +164,9 @@ own default value all carry onto the overload.
 - No generic types or generic members. In an *extension* of a generic type the rule is
   narrower and applies to the marked parameter rather than the member: a concrete key
   resolves there as anywhere, but a marked parameter naming one of the type's own
-  parameters cannot, since nothing can register one.
+  parameters cannot, since nothing can register one. That refusal reaches types declared
+  in this module; for one declared elsewhere, see
+  [Limitations](../Plugin/Limitations.md#genericity-is-read-from-the-declaration-so-a-foreign-types-is-invisible).
 - The member must be at least `internal` — the generated overload lives in a separate
   generated file and cannot call private or fileprivate members.
 

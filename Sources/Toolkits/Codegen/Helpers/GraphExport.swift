@@ -14,8 +14,16 @@ import Foundation
 public struct GraphExport {
 
     /// Thrown after a message has been written, to exit non-zero.
-    public struct Failure: Error {
+    ///
+    /// `CustomStringConvertible` so that interpolating one gives the sentence
+    /// rather than `Failure(message: "…")`. Nothing should be interpolating one
+    /// — a caller has `message` — but the synthesized description reached a
+    /// developer once already, through a `catch` that re-wrapped a failure it
+    /// was not written for.
+    public struct Failure: Error, CustomStringConvertible {
         public let message: String
+
+        public var description: String { message }
     }
 
     let inputPaths: [String]
@@ -42,41 +50,44 @@ public struct GraphExport {
 
         var graphs: [ZerkGraph] = []
         for path in inputPaths {
+            let graph: ZerkGraph
             do {
-                let graph = try JSONDecoder().decode(
+                graph = try JSONDecoder().decode(
                     ZerkGraph.self,
                     from: Data(contentsOf: URL(fileURLWithPath: path))
                 )
-                // The version is the contract, and a contract nobody checks is
-                // decoration. A graph from a newer toolchain decodes "fine" —
-                // `Codable` ignores unknown fields and defaults missing ones —
-                // so without this the caller silently reads a graph whose
-                // meaning has changed, which is the situation the version
-                // exists to make detectable.
-                // Equality, not "no newer than". An older graph decodes just as
-                // cleanly and means something different: version 3 exists because
-                // `isAsync`/`isThrowing` were repurposed from what building a
-                // provider costs to what *reading* it costs, so a version 2 graph
-                // carries the old answers under the new names — and the merged
-                // document is stamped with the current version, leaving nothing
-                // downstream able to tell.
-                //
-                // The realistic way to meet this is a `Zerk.graph.json` left in a
-                // work directory from before an upgrade, which is exactly the
-                // situation the version was added to make detectable. There is no
-                // migration to offer, so the honest answer is to say which
-                // version it is and ask for a rebuild; a
-                // `minimumReadableFormatVersion` beside the current one is where
-                // forward compatibility would go if it were ever wanted.
-                guard graph.formatVersion == ZerkGraph.currentFormatVersion else {
-                    throw Failure(message: "the graph at \(path) is format version \(graph.formatVersion), and this tool reads version \(ZerkGraph.currentFormatVersion). Rebuild to regenerate it, or run the Zerk version that wrote it.")
-                }
-                graphs.append(graph)
             } catch {
                 // Named, because a command plugin hands this several files and
                 // "the data couldn't be read" would not say which.
                 throw Failure(message: "could not read graph at \(path): \(error)")
             }
+
+            // The version is the contract, and a contract nobody checks is
+            // decoration. `Codable` ignores unknown fields and defaults missing
+            // ones, so a graph of any other version decodes "fine" and the
+            // caller silently reads one whose meaning has changed — the
+            // situation the version exists to make detectable.
+            //
+            // Equality, not "no newer than": an older graph is not a subset of a
+            // newer one. Version 3 exists because `isAsync`/`isThrowing` were
+            // repurposed from what building a provider costs to what *reading*
+            // it costs, so a version 2 document carries the old answers under
+            // the new names — and the merged output is stamped with the current
+            // version, leaving nothing downstream able to tell. The realistic
+            // way to meet this is a `Zerk.graph.json` left in a work directory
+            // from before an upgrade. There is no migration to offer, so the
+            // honest answer is to name the version and ask for a rebuild; a
+            // `minimumReadableFormatVersion` beside the current one is where
+            // forward compatibility would go if it were ever wanted.
+            //
+            // Deliberately *outside* the `do`. Inside it, the catch written for
+            // decode failures swallowed this one and wrapped it in another
+            // `Failure` — printing the path twice, with `Failure(message: …)`
+            // around the sentence the developer was meant to read.
+            guard graph.formatVersion == ZerkGraph.currentFormatVersion else {
+                throw Failure(message: "the graph at \(path) is format version \(graph.formatVersion), and this tool reads version \(ZerkGraph.currentFormatVersion). Rebuild to regenerate it, or run the Zerk version that wrote it.")
+            }
+            graphs.append(graph)
         }
 
         let rendered = try GraphRenderer(graph: GraphMerger(graphs: graphs).merge())

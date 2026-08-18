@@ -86,6 +86,13 @@ struct MarkedMemberRecord {
     ///
     /// `nil` for a member declared on the type itself, whose genericity was
     /// known at collection, and for an extension binding its arguments.
+    ///
+    /// Non-`nil` is a *name to look up*, not an answer: a type declared in
+    /// another module is never found, so `extension Array` is read as
+    /// non-generic and a marked parameter typed `Element` is matched as an
+    /// ordinary key. That limit is inherent — knowing `Array` is generic means
+    /// resolving it, which Zerk does not do — and is stated in
+    /// `Docs/Plugin/Limitations.md`.
     var unboundExtendedTypeName: String? = nil
     /// The `#if` the marked declaration sits inside. The generated overload
     /// delegates to it, so it cannot outlive it.
