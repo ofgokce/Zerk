@@ -1,4 +1,9 @@
-# Zerk
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-full-dark.svg">
+  <img src="logo-full.svg" alt="Zerk" width="100%">
+</picture>
+
+# 
 
 [![Swift Package Manager](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg?style=flat)](https://github.com/apple/swift-package-manager)
 [![Swift Version](https://img.shields.io/badge/Swift-6.2-F16D39.svg?style=flat)](https://developer.apple.com/swift)
