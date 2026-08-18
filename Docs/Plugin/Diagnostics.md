@@ -69,7 +69,8 @@ One failure Zerk cannot report lands in generated code instead: under `SWIFT_DEF
 
 | What triggers it | The fix |
 |---|---|
-| Two values share a key *and* a name | Values are matched by name as well as type, so two of one name under one key can never be told apart. Rename one, or register it under a different key |
+| Two values share a key *and* a name, and a single build can see both | Values are matched by name as well as type, so two of one name under one key can never be told apart. Rename one, or register it under a different key. Definitions in *exclusive* `#if` branches are one value per configuration and are fine |
+| One value's `#if` branches resolve with different effects or in different isolation domains | Everything injecting it reads it through a single `Zerk<Key>.name` expression, compiled in every configuration, so the branches have to agree on what that read costs. Make them match, or give them different names |
 | A value's generated member collides with a provider's | Rename the `@InjectableValue`, or register it under a different key |
 | `@InjectableValue` on a binding that is not a single named binding with an explicit type | The type is the key, and Zerk reads syntax, so it cannot infer one |
 | An `@InjectableValues` sweep picks up a member with no explicit type | Annotate it, or move the member out of the marked type |

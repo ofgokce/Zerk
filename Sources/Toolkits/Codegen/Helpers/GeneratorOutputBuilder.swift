@@ -226,6 +226,7 @@ struct GeneratorOutputBuilder {
 
         diagnostics += cycleDiagnostics()
         diagnostics += duplicateValueDiagnostics()
+        diagnostics += valueVariantDiagnostics()
         diagnostics += configurationCoverageDiagnostics()
 
         // Built up front: the storage is per type while the members reading it
@@ -1279,12 +1280,14 @@ struct GeneratorOutputBuilder {
                             resolving: String,
                             location: AttributeLocation) {
             if let value = classifier.injectableValue(matching: parameter) {
-                // One record, always: the matcher demands a unique match, so a
-                // value with a definition per configuration answers nothing and
-                // the parameter has already fallen through to the caller.
+                // Every definition in the group, not the representative's guard
+                // alone: a value defined once per configuration is covered by
+                // the branches together, exactly as a swapped provider is by its
+                // variants.
+                let definitions = classifier.injectableValues(matching: parameter)
                 check(subject: "the value '\(value.name)'",
                       identity: value.matchIdentity,
-                      providedUnder: [value.condition],
+                      providedUnder: definitions.map(\.condition),
                       consumer: consumer,
                       resolving: resolving,
                       location: location)
@@ -1365,6 +1368,57 @@ struct GeneratorOutputBuilder {
             return "some configuration"
         }
         return "a build where \(named.joined(separator: " and "))"
+    }
+
+    /// One value defined per configuration, whose branches would not agree on
+    /// what reading it costs.
+    ///
+    /// The value counterpart of ``injectVariants(for:diagnostics:)``, and it
+    /// exists for the same reason: everything injecting a value reads it through
+    /// one `Zerk<Key>.name` expression, written once and compiled in every
+    /// configuration. The branches may differ in *what they read* — that is the
+    /// point of writing the `#if` — but a branch that is `async`, or isolated to
+    /// a different actor, would make that single expression wrong in the
+    /// configuration nobody built today.
+    ///
+    /// Only mutually exclusive groups reach here. A group that is not exclusive
+    /// resolves nothing at all, and `duplicateValueDiagnostics` says so.
+    private func valueVariantDiagnostics() -> [CodegenDiagnostic] {
+        var byIdentity: [String: [InjectableValueRecord]] = [:]
+        for value in values {
+            byIdentity[value.matchIdentity, default: []].append(value)
+        }
+
+        var diagnostics: [CodegenDiagnostic] = []
+        for (_, group) in byIdentity.sorted(by: { $0.key < $1.key }) {
+            let declarations = group.sorted { $0.location < $1.location }
+            guard declarations.count > 1,
+                  let first = ParameterClassifier.representative(among: declarations) else {
+                continue
+            }
+            for variant in declarations where variant.location != first.location {
+                // Worded and ordered exactly as `contractMismatch` does for
+                // providers: it is the same contract, on the same single call
+                // site, and two spellings of it would read as two rules.
+                let mismatch: String?
+                if variant.effects != first.effects {
+                    mismatch = "resolve with different effects (\(Self.effectsDescription(first.effects)) versus \(Self.effectsDescription(variant.effects)))"
+                } else if variant.isolation.actorName != first.isolation.actorName {
+                    mismatch = "resolve in different isolation domains (\(Self.isolationDescription(first.isolation)) versus \(Self.isolationDescription(variant.isolation)))"
+                } else if variant.resolutionExpression != first.resolutionExpression {
+                    mismatch = "are read through different expressions ('\(first.resolutionExpression)' versus '\(variant.resolutionExpression)')"
+                } else {
+                    mismatch = nil
+                }
+                guard let mismatch else { continue }
+                diagnostics.append(CodegenDiagnostic(
+                    severity: .error,
+                    message: "'\(variant.name)' is defined once per configuration, but the branches \(mismatch). Everything that injects this value reads it through a single '\(first.resolutionExpression)' expression, emitted once for every configuration, so the branches have to agree on what that read costs. Make them match, or give them different names.",
+                    location: variant.location
+                ))
+            }
+        }
+        return diagnostics
     }
 
     /// What to do about a member-name collision, which differs by what collided:

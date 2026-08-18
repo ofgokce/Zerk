@@ -25,9 +25,10 @@ struct ParameterClassifier {
 
     /// Values grouped by `"key|name"`, which is what matching them takes.
     ///
-    /// Grouped rather than a plain dictionary because the *count* is load-
-    /// bearing: two values sharing a key and a name match neither, since a
-    /// parameter demands a unique one.
+    /// Grouped rather than a plain dictionary because the *group* is what has to
+    /// be judged: several declarations under one key and name are one value with
+    /// a definition per configuration when they are mutually exclusive, and
+    /// genuinely ambiguous otherwise. See ``representative(among:)``.
     private let valuesByIdentity: [String: [InjectableValueRecord]]
 
     init(values: [InjectableValueRecord], primaryResolutions: KeyIndex<ProviderResolution>) {
@@ -200,16 +201,57 @@ struct ParameterClassifier {
         return elements.filter { seen.insert($0).inserted }
     }
 
-    /// An `@InjectableValue` satisfies a parameter when both its key and its
-    /// name match — the name match is what keeps two `String` values from
-    /// being interchangeable.
-    func injectableValue(matching parameter: ParameterRecord) -> InjectableValueRecord? {
+    /// Every `@InjectableValue` declaration that could satisfy a parameter: key
+    /// and name both matching — the name match is what keeps two `String`
+    /// values from being interchangeable.
+    ///
+    /// Several is not automatically ambiguous, which is why this returns them
+    /// all. See ``representative(among:)``.
+    func injectableValues(matching parameter: ParameterRecord) -> [InjectableValueRecord] {
         // Same reasoning as `KeyIndex[parameter]`: a bare generic parameter is
         // not a key, so a value that happens to be typed `E` must not answer it.
         guard !parameter.isBareGenericParameter else {
-            return nil
+            return []
         }
-        let matches = valuesByIdentity["\(parameter.typeKey)|\(parameter.name)"] ?? []
-        return matches.count == 1 ? matches[0] : nil
+        return valuesByIdentity["\(parameter.typeKey)|\(parameter.name)"] ?? []
+    }
+
+    /// The one declaration a parameter resolves through, or `nil` when the
+    /// matches cannot be told apart.
+    func injectableValue(matching parameter: ParameterRecord) -> InjectableValueRecord? {
+        Self.representative(among: injectableValues(matching: parameter))
+    }
+
+    /// Which of several matching declarations stands for the value.
+    ///
+    /// Several records under one key and name are *one value with a definition
+    /// per configuration* when no build can see two of them — the value form of
+    /// a `#if DEBUG` / `#else` provider swap, and legal for the same reason.
+    /// Every one of them is read through the same expression,
+    /// `Zerk<Key>.name`, which is one piece of text in every configuration, so a
+    /// parameter resolves through the group exactly as it resolves through a
+    /// lone declaration. The emitter puts each definition under its own guard,
+    /// and `valueVariantDiagnostics` refuses a group whose branches would not
+    /// agree on what reading it costs.
+    ///
+    /// Anything genuinely ambiguous still resolves nothing and leaves the
+    /// parameter to the caller, which is what `duplicateValueDiagnostics`
+    /// reports. Exclusivity is tested pairwise, so a group that is exclusive
+    /// only in places is ambiguous — the same standard that diagnostic applies.
+    ///
+    /// Ordered by position, so which record stands for the group does not depend
+    /// on the order the files were collected in.
+    static func representative(among matches: [InjectableValueRecord]) -> InjectableValueRecord? {
+        guard matches.count > 1 else {
+            return matches.first
+        }
+        for (offset, left) in matches.enumerated() {
+            for right in matches[matches.index(after: offset)...]
+            where left.location != right.location
+                && !CompilationCondition.areExclusive(left.condition, right.condition) {
+                return nil
+            }
+        }
+        return matches.min { $0.location < $1.location }
     }
 }

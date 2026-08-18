@@ -236,6 +236,114 @@ struct ConditionalCompilationTests {
         #expect(result.didCompile, "\(result.compilerOutput)\n\(result.generated)")
     }
 
+    /// A value swapped per configuration resolves, exactly as a swapped provider
+    /// does.
+    ///
+    /// It used not to. `injectableValue(matching:)` demanded a *unique* match,
+    /// so two definitions of one value under exclusive guards answered nothing
+    /// and the parameter quietly fell through to the caller — an asymmetry with
+    /// the provider swap that the `#if` feature exists for. The two are read the
+    /// same way: one `Zerk<Int>.retries` expression, one piece of text in every
+    /// configuration, with the definitions guarded behind it.
+    @Test("a value defined per configuration resolves like a swapped provider")
+    func valueSwapResolves() throws {
+        let source = """
+        #if DEBUG
+        @InjectableValue var retries: Int { 3 }
+        #else
+        @InjectableValue var retries: Int { 1 }
+        #endif
+
+        @Injectable
+        struct Client {
+            let retries: Int
+        }
+        """
+
+        let result = CompileFixture.generateWithResolution(source: source)
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+
+        // Resolved, not left to the caller — the whole point.
+        #expect(result.output.output.contains(
+            "nonisolated static func client(retries: Int = Zerk<Int>.retries) -> Client {"))
+        // And each definition under its own guard, so exactly one exists.
+        #expect(result.output.output.contains("#if (DEBUG)"))
+        #expect(result.output.output.contains("#if !(DEBUG)"))
+
+        for options in [CompileFixture.Options.swift6(defining: "DEBUG"), .swift6] {
+            let compiled = try CompileFixture.run(source: source, options: options)
+            try #require(!compiled.skipped)
+            #expect(compiled.didCompile,
+                    Comment(rawValue: "\(compiled.compilerOutput)\n\(compiled.generated)"))
+        }
+    }
+
+    /// The same contract the provider swap is held to, for the same reason: one
+    /// expression is written at the call site and compiled in every
+    /// configuration, so a branch that costs more than another would be wrong in
+    /// the configuration nobody built today.
+    @Test("value branches that disagree on what reading costs are refused",
+          arguments: [
+            ("async", "resolve with different effects"),
+            ("throws", "resolve with different effects"),
+          ])
+    func valueSwapContractIsEnforced(effect: String, expected: String) {
+        let result = CompileFixture.generateWithResolution(source: """
+        #if DEBUG
+        @InjectableValue var retries: Int { get \(effect) { 3 } }
+        #else
+        @InjectableValue var retries: Int { 1 }
+        #endif
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains(expected)
+        }, "\(effect): \(result.diagnostics.map(\.message))")
+    }
+
+    @Test("value branches in different isolation domains are refused")
+    func valueSwapIsolationIsEnforced() {
+        let result = CompileFixture.generateWithResolution(source: """
+        #if DEBUG
+        @MainActor
+        @InjectableValue var retries: Int { 3 }
+        #else
+        @InjectableValue var retries: Int { 1 }
+        #endif
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("different isolation domains")
+        }, "\(result.diagnostics.map(\.message))")
+    }
+
+    /// Two definitions a single build *can* see are still ambiguous, resolve
+    /// nothing, and are reported — the swap must not have widened that.
+    @Test("two definitions that can coexist are still a duplicate")
+    func nonExclusiveValuesAreStillRefused() {
+        let result = CompileFixture.generateWithResolution(source: """
+        #if DEBUG
+        @InjectableValue var retries: Int { 3 }
+        #endif
+
+        #if os(iOS)
+        @InjectableValue var retries: Int { 1 }
+        #endif
+
+        @Injectable
+        struct Client {
+            let retries: Int
+        }
+        """)
+
+        #expect(result.diagnostics.contains {
+            $0.severity == .error && $0.message.contains("declared as a 'Int' value more than once")
+        }, "\(result.diagnostics.map(\.message))")
+        // Unresolved, so the parameter is the caller's — unchanged behaviour.
+        #expect(result.output.output.contains(
+            "nonisolated static func client(retries: Int) -> Client {"))
+    }
+
     @Test("a conditional singleton guards its storage slot")
     func conditionalSingletonStorage() throws {
         let source = """
@@ -697,6 +805,16 @@ struct ConditionalCompilationTests {
                        isCovering: false, isReachableByInjectedProperty: true),
             Dependency(name: "value, unconditional",
                        declarations: "@InjectableValue var retries: Int { 3 }",
+                       preamble: "", parameterName: "retries", parameterType: "Int",
+                       isCovering: true, isReachableByInjectedProperty: false),
+            Dependency(name: "value, #if with #else",
+                       declarations: """
+                       #if DEBUG
+                       @InjectableValue var retries: Int { 3 }
+                       #else
+                       @InjectableValue var retries: Int { 1 }
+                       #endif
+                       """,
                        preamble: "", parameterName: "retries", parameterType: "Int",
                        isCovering: true, isReachableByInjectedProperty: false),
             Dependency(name: "value, #if alone",

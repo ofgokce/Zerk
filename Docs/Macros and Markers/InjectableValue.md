@@ -345,7 +345,8 @@ declare.
 | `@InjectableValue must declare a single named binding with an explicit type.` | A tuple binding, or no type annotation |
 | `'primary' applies to types only.` | `primary:` on a value |
 | `'x' is private, so the generated file cannot reference it. Raise it to internal, or use .copied.` | A `.referenced` value narrower than `internal` |
-| `'dup' is declared as a 'String' value more than once` | Two values of one key and name |
+| `'dup' is declared as a 'String' value more than once` | Two values of one key and name that a single build can see. Definitions in exclusive `#if` branches are one value per configuration and are fine — see [Conditional compilation](../Features/ConditionalCompilation.md) |
+| `'dup' is defined once per configuration, but the branches …` | A per-configuration value whose branches disagree on effects or isolation. Every injection reads it through one expression, so they have to agree on what that read costs |
 | `@InjectableValues needs an explicit type on 'x'` | A swept property with no type annotation |
 | `@InjectableValues can only be applied to a class, struct, enum, or actor.` | The sweep on something with no members |
 | `@NonInjectable contradicts @InjectableValue on the same declaration.` | Both attributes on one declaration |

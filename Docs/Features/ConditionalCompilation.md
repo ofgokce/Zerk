@@ -146,6 +146,18 @@ A module may be asked for from several files, and every ask keeps its guard. Ide
 
 Guards are not merged away, because the module people guard an import for is usually one that is not there in the other configuration: naming it is an error, not an unnecessary import.
 
+A value can be swapped per configuration exactly as a provider can:
+
+```swift
+#if DEBUG
+@InjectableValue var retries: Int { 0 }
+#else
+@InjectableValue var retries: Int { 3 }
+#endif
+```
+
+Both definitions are emitted under their own guard, and everything injecting the value reads it through one `Zerk<Int>.retries` expression — so the branches have to agree on what that read costs, the same contract the provider swap is held to. Two definitions a single build *can* see remain ambiguous and resolve nothing, which is reported.
+
 The [graph artifact](../Plugin/GraphArtifact.md) records the guard too: each provider carries a `condition` field with the expression its member is emitted under, absent when unconditional. A graph that omitted it would claim a key is resolvable in builds where nothing resolves it.
 
 ## What Zerk will not infer
