@@ -1,352 +1,182 @@
-Zerk
-========
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-full-dark.svg">
+  <img src="logo-full.svg" alt="Zerk" width="100%">
+</picture>
 
-[![CocoaPods Version](https://img.shields.io/cocoapods/v/Zerk.svg?style=flat)](http://cocoapods.org/pods/Zerk)
-[![Swift Package Manager compatible](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg?style=flat)](https://github.com/apple/swift-package-manager)
-[![License](https://img.shields.io/cocoapods/l/Zerk.svg?style=flat)](http://cocoapods.org/pods/Zerk)
-[![Platforms](https://img.shields.io/badge/platform-iOS-lightgrey.svg)](http://cocoapods.org/pods/Zerk)
-[![Swift Version](https://img.shields.io/badge/Swift-5.0-F16D39.svg?style=flat)](https://developer.apple.com/swift)
+# 
 
-Zerk is a framework written for Swift which allows you to easily store and restore your dependencies following the [dependency injection pattern](https://en.wikipedia.org/wiki/Dependency_injection) and [clean coding principles](https://en.wikipedia.org/wiki/Robert_C._Martin). It removes the need for static methods and singletons and thus helps to create more managable and testable global or local dependencies.
+[![Swift Package Manager](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg?style=flat)](https://github.com/apple/swift-package-manager)
+[![Swift Version](https://img.shields.io/badge/Swift-6.2-F16D39.svg?style=flat)](https://developer.apple.com/swift)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platforms-iOS%2013%2B%20%7C%20macOS%2013%2B%20%7C%20macCatalyst%2013%2B%20%7C%20watchOS%206%2B%20%7C%20tvOS%2013%2B%20%7C%20visionOS%201%2B-lightgrey.svg)](#requirements)
 
-## Features
+Zerk is a compile-time dependency injection framework for Swift. Instead of a runtime container, it combines Swift macros with a build-tool plugin that scans your module's source, resolves the dependency graph during the build, and generates plain static factory code on a `Zerk<Key>` namespace. There is nothing to register at runtime, resolution failures are build errors with file/line locations, and injected code is ordinary Swift you can step through.
 
-- Zerk provides a way to store dependencies' initialization logic. The dependencies may be stored as short-, middle- or long-time living objects and are not initialized when stored. When a dependency is being called, if it hasn't been initialized before it will be initialized and only then the instance will be cached if it should to be used by upcoming calls.
+For testing, the same plugin gives every generated member a named interjection point, so `#Interject` can stand a double in for any injectable — one member, or a whole key at once — without touching production code. Interjections belong to a scope, so tests keep running in parallel, and they compile to nothing in release.
 
-- The stored dependencies can be restored easily and without any hussle so they can be injected via initializers, methods or properties.
+Generic types are registered like any other: `@Injectable struct Cache<E>` makes `Zerk<Cache<String>>.inject()` resolve, and any specialization of it satisfies a dependency that asks for one.
 
-- The dependencies may depend on other stored dependencies. They even can have argumentations to give when being initialized.
+## 📖 Documentation
 
-- With new `@Injected` keyword the injected dependencies are restored automatically, allowing an even more readable code.
+**[See full documentation](Docs/TableOfContents.md)**
 
-- Also there are other keywords for injecting only the properties or methods of your dependencies, using the cutting-edge key path feature of Swift.
-
-## Requirements
-
-- iOS 9.0+
-- Xcode 13+
-- Swift 5.0+
-- CocoaPods 1.1.1+ (if used)
+| | |
+|---|---|
+| **[Getting started](Docs/TableOfContents.md#getting-started)** | [Installation](Docs/Getting%20Started/Installation.md) · [Quick start](Docs/Getting%20Started/QuickStart.md) · [Terminology](Docs/Getting%20Started/Terminology.md) · [Declaring examples](Docs/Getting%20Started/InjectableExamples.md) · [Consuming examples](Docs/Getting%20Started/InjectedExamples.md) · [Migration from 1.x](Docs/Getting%20Started/Migration.md) |
+| **[Macros and markers](Docs/TableOfContents.md#macros-and-markers)** | [`@Injectable`](Docs/Macros%20and%20Markers/Injectable.md) · [`@InjectableProviding`](Docs/Macros%20and%20Markers/InjectableProviding.md) · [`@InjectableValue`](Docs/Macros%20and%20Markers/InjectableValue.md) · [`@Singleton`](Docs/Macros%20and%20Markers/Singleton.md) · [`@Scoped`](Docs/Macros%20and%20Markers/Scoped.md) · [`@Isolated`](Docs/Macros%20and%20Markers/Isolated.md) · [`@Injected`](Docs/Macros%20and%20Markers/Injected.md) · [Parameter markers](Docs/Macros%20and%20Markers/ParameterMarkers.md) · [Imported injectables](Docs/Macros%20and%20Markers/ImportedInjectables.md) · [Key aliases](Docs/Macros%20and%20Markers/ZerkAlias.md) |
+| **[Features](Docs/TableOfContents.md#features)** | [Foreign types](Docs/Features/ForeignTypes.md) · [Generics](Docs/Features/Generics.md) · [Concurrency](Docs/Features/Concurrency.md) |
+| **[The plugin](Docs/TableOfContents.md#the-plugin)** | [How it works](Docs/Plugin/HowItWorks.md) · [Generated code](Docs/Plugin/GeneratedCode.md) · [Settings](Docs/Plugin/Settings.md) · [Diagnostics](Docs/Plugin/Diagnostics.md) · [Graph artifact](Docs/Plugin/GraphArtifact.md) · [`ZerkCLI`](Docs/Plugin/ZerkCLI.md) · [Limitations](Docs/Plugin/Limitations.md) |
+| **[Testing](Docs/TableOfContents.md#testing)** | [Interjection](Docs/Testing/Interjection.md) · [Scopes](Docs/Testing/Scopes.md) · [Examples](Docs/Testing/Examples.md) |
 
 ## Installation
 
-Zerk is available through [CocoaPods](https://cocoapods.org) and [Swift Package Manager](https://swift.org/package-manager/).
-
-### CocoaPods
-
-To install Zerk with CocoaPods, add the following lines to your `Podfile`.
-
-```ruby
-source 'https://cdn.cocoapods.org/'
-platform :ios, '9.0'
-use_frameworks!
-
-pod 'Zerk'
-
-```
-
-Then run `pod install` command. For details of the installation and usage of CocoaPods, visit [its official website](https://cocoapods.org).
-
-### Swift Package Manager
-
-in `Package.swift` add the following:
+Attach the build plugin to every target that **declares** injectables. Test targets do not need it — they reach interjection through `@testable import`, plus the `ZerkTesting` library for the `.zerk` trait:
 
 ```swift
+// Package.swift
 dependencies: [
-    ...
-    .package(url: "https://github.com/ofgokce/Zerk.git", from: "1.0.0")
+    .package(url: "https://github.com/ofgokce/Zerk.git", from: "2.0.0"),
 ],
 targets: [
     .target(
-        name: "MyProject",
-        dependencies: [..., "Zerk"]
-    )
-    ...
+        name: "App",
+        dependencies: [.product(name: "Zerk", package: "Zerk")],
+        plugins: [.plugin(name: "ZerkPlugin", package: "Zerk")]
+    ),
+    .testTarget(
+        name: "AppTests",
+        dependencies: ["App", .product(name: "ZerkTesting", package: "Zerk")]
+    ),
 ]
 ```
 
-## Basic Usage
+See [Installation](Docs/Getting%20Started/Installation.md) for Xcode projects, the three vended products, and targets in Swift 5 language mode.
 
-### Storing
+### Important Notice
 
-Firstly the dependencies' initiation logic should be stored in a storage. For the most cases `Zerk.store` may be used to store all the dependencies.
+When adding Zerk as a dependency to an Xcode project, Xcode presents a dialog asking you to select which modules should be added to your targets.
 
-The stored dependencies can only be restored by the types they have been stored as. The dependencies may be stored as multiple types which they conform but for any type given there should be one dependency. It is recommended to store them as protocols for better testability.
+Although Zerk's package manifest exposes only `Zerk`, `ZerkTesting`, and `ZerkPlugin` as products, the dialog may also show `ZerkCodegen` as a module that can be added to a target.
 
-The dependencies can be stored with three life-time choices: 
- 
- - Transient:
-These dependencies are initialized every time they are being called.
- 
- - Scoped:
-These dependencies are initialized every time they are being restored by restore functions. This type is used by Zerk's property wrappers to ensure the instances live as long as their dependent object lives.
- 
- - Singleton:
-These dependencies are initialized only once when they are first called, then they are stored as instances in the storage and can be used globally.
+`ZerkCodegen` is an executable target used internally by `ZerkPlugin`. It is **not** an independent module and should not be added directly as a dependency to any target.
 
+Do **not** select a target for `ZerkCodegen`.
 
-The dependencies will be stored as a wrapper-class `Dependency` which is responsible for identification, creation, typecasting and instance holding of said dependencies. This class has a `getInstance(with:)` method which creates the instances if not yet created or returns the stored instances for singletons if already been instantiated.
+Instead, add `ZerkPlugin` as a build tool plugin to the target for which you want to generate the dependency graph. You can do this under the target's **Build Phases**.
 
-- Storing dependencies which don't depend on others:
+## Quick start
 
 ```swift
-Zerk.store
-    .transient(TransientDependencyClass() as TransientDependencyProtocol)
-    .scoped(ScopedDependencyClass() as ScopedDependencyProtocol)
-    .singleton(SingletonDependencyClass() as SingletonDependencyProtocol)
-```
+import Zerk
 
-- Storing dependencies which depend on other dependencies:
+// 1. A value the graph can use to satisfy parameters of matching type
+@InjectableValue
+var baseURL: String {
+    "https://api.example.com"
+}
 
-```swift
-Zerk.store
-    .transient { dependency in
-        DependentClassA(dependency: dependency) as DependentProtocolA
-    }
-    .scoped { dependency0, dependency1, dependency2, dependency3, dependency4 in
-        DependentClassB(dependency0: dependency0, dependency1: dependency1, dependency2: dependency2, dependency3: dependency3, dependency4: dependency4)
-        as DependentProtocolB
-    }
-    .singleton {
-        DependentClassC(dependency0: $0, dependency1: $1, dependency2: $2, dependency3: $3, dependency4: $4)
-        as DependentProtocolC
-    }
-```
+// 2. An injectable keyed by a protocol
+protocol ApiServicing: AnyObject {
+    var host: String { get }
+}
 
-- Storing dependencies which depend on other dependencies (restoring by storage):
+@Singleton
+@Injectable<ApiServicing>
+final class ApiService: ApiServicing {
+    let host: String
 
-```swift
-Zerk.store
-    .transient { storage in
-        DependentClassA(dependency: storage.restore()) 
-        as DependentProtocolA
-    }
-    .scoped { storage in
-        DependentClassB(dependency0: storage.restore(), dependency1: storage.restore()) 
-        as DependentProtocolB
-    }
-```
-
-- Storing dependencies with argumentative init:
-
-```swift
-Zerk.store
-    .transient { storage, arguments in
-        ArgumentativeClassA(parameterName: arguments.parameterName) 
-        as ArgumentativeProtocolA
-    }
-    .singleton { storage, arguments in
-        ArgumentativeClassB(dependency: storage.restore(), parameterName0: arguments.parameterName0, parameterName1: arguments.customName) 
-        as ArgumentativeProtocolB
-    }
-```
-
-The argument names are not name-safe and not type-safe. Swift's [dynamicCallable](https://github.com/apple/swift-evolution/blob/main/proposals/0216-dynamic-callable.md) and [dynamicMemberLookup](https://github.com/apple/swift-evolution/blob/main/proposals/0195-dynamic-member-lookup.md) annotations have been used to provide this functionality. The namings and types used to store the dependencies should match those used to restore them. Otherwise there will be fatal errors thrown. For more information please check the documentations.
-
-- For dependencies with multiple types (aliases):
-
-```swift
-Zerk.store
-    .scoped({ _, _ in
-        MultitypeClass()
-    }, as: ProtocolA.self, ProtocolB.self, ProtocolC.self)
-    .singleton({ storage, arguments in
-        MultitypeClass(dependency: storage.restore(), parameterName0: arguments.parameterName0, parameterName1: arguments.customName)
-    }, as: ProtocolA.self, ProtocolB.self, ProtocolC.self)
-```
-
-The dependency should be able to be typecasted to the types given here. Otherwise there will be fatal errors thrown.
-
-And that's it! 
-
-### Restoring
-
-Now the `restore()`, `restore(with:)` and `restore(_:)` methods of the same storage can restore the stored dependencies. While the first two methods will return the typecasted instance of the dependency itself the latter one will return the wrapper instance of type `Dependency`.
-
-```swift
-let instanceA: DependencyProtocolA = Zerk.standardStorage.restore() // Returns the typecasted dependency instance
-let instanceB: DependencyProtocolB = Zerk.standardStorage.restore(with: .arguments(argument0: value0, argument1: value1) // Returns the typecasted dependency instance, instantiated with the given arguments
-```
-OR
-
-```swift
-let dependency = Zerk.standardStorage.restore(DependencyProtocol) // Returns the wrapper instance
-```
-
-### Basic Injection
-
-There are several ways of injecting a dependency to a type. 
-
-- Initializer injection
-
-```swift
-class SomeClass {
-    private let dependency: DependencyProtocol
-    init(dependency: DependencyProtocol) {
-        self.dependency = dependency
-        ...
+    @InjectableProviding
+    init(baseURL: String) {       // `baseURL: String` auto-satisfied by the value above
+        self.host = baseURL
     }
 }
 
-let someInstance = SomeClass(dependency: Zerk.standardStorage.restore())
+// 3. A consumer
+struct FeedViewModel {
+    @Injected
+    var apiService: ApiServicing   // resolved at init, at a compile-time-verified call site
+}
 ```
 
-
-- Method injection
+The plugin generates (abridged — see [Quick start](Docs/Getting%20Started/QuickStart.md) for the whole file):
 
 ```swift
-class SomeClass {
-    private var dependency: DependencyProtocol?
-    func set(dependency: DependencyProtocol) {
-        self.dependency = dependency
+extension Zerk<ApiServicing> {
+    nonisolated static var apiService: ApiServicing {
+        // Where a test double stands in. Compiles to nothing in release.
+        if let interjected = _$interjected(for: \.`apiService`) { return interjected }
+        return _$zerk_singletons.apiService
     }
+
+    nonisolated static func inject() -> ApiServicing { apiService }
 }
 
-let someInstance = SomeClass()
-someInstance.set(dependency: Zerk.standardStorage.restore())
-```
-
-
-- Property injection
-
-```swift
-class SomeClass {
-    var dependency: DependencyProtocol?
-}
-
-let someInstance = SomeClass()
-someInstance.dependency = Zerk.standardStorage.restore()
-```
-
-### Keyword Injection
-
-Zerk provides new keywords to make the injection even easier and more readable.
-
-- @Injected
-
-Injects the whole dependency.
-
-```swift
-class SomeClass {
-    @Injected var dependency: DependencyProtocol
+// Also generated: one interjection point per member, named after its signature.
+extension Zerk<ApiServicing>.Interjection {
+    nonisolated var `apiService`: Void {}
 }
 ```
 
-To inject a dependency with argumentation:
+`@Injected var apiService` expands to a stored property whose default value is `Zerk<ApiServicing>.inject()`. The namespace itself is an empty `public enum Zerk<Injectable> {}`; everything lives in the generated extensions.
+
+## Lifetimes
+
+Three, and the default is the first:
 
 ```swift
-class SomeClass {
-    @Injected(with: .arguments(argument0: value0, argument1: value1)
-    var dependency: DependencyProtocol
-}
+@Injectable              final class Request { }   // a new one per resolution
+@Scoped(.session)        final class Cache { }     // one until Zerk.reset(.session)
+@Singleton               final class Clock { }     // one for the process
 ```
 
+A scope is an ordinary value (`InjectionScope("session")`) declared wherever you like, so a feature module can mark `@Scoped(.session)` and the app module can call `Zerk.reset(.session)` on logout without either one knowing about the other's storage.
 
-- @InjectedProperty
+A reset drops Zerk's reference; it cannot reach one already handed out. `@InjectedDynamically` is the property form that re-resolves on every access and so follows the reset, where plain `@Injected` keeps what it resolved at init. Zerk reports the mistake that follows from this — a `@Singleton` holding a `@Scoped` instance is a build error, since it would go on using the pre-reset one forever.
 
-Injects a read-only property of a dependency. Keypath syntax is to be used.
+See [`@Scoped`](Docs/Macros%20and%20Markers/Scoped.md).
 
-```swift
-class SomeClass {
-    @InjectedProperty(\DependencyProtocol.someProperty) var someProperty: SomeType
-}
-```
+## Testing
 
-
-- @InjectedMutableProperty
-
-Injects a mutable property of a dependency.
+Every generated member opens with a lookup against the interjections in force, so a test can stand a double in for one member or for a whole key — without a plugin on the test target, and without touching production code:
 
 ```swift
-class SomeClass {
-    @InjectedMutableProperty(\DependencyProtocol.someProperty) var someProperty: SomeType
-}
-```
+import Testing
+import ZerkTesting
+@testable import App
 
-
-- @InjectedUnwrappedProperty & @InjectedUnwrappedMutableProperty
-
-Unwraps and injects an optional property of a dependency. If a default value has been given, the injected property will be unwrapped by the given default value. Else the property will be force-unwrapped.
-
-```swift
-class SomeClass {
-    @InjectedUnwrappedProperty(\DependencyProtocol.someProperty, default: someValue) var someProperty: SomeType
-}
-```
-
-
-- @InjectedMethod
-
-Injects a method of a dependency. As Swift currently doesn't support keypaths to methods, this wrapper had to be working in a different way.
-
-```swift
-class SomeClass {
-    @InjectedMethod(DependencyProtocol.someMethod) var someMethod: (ParameterTypes) -> (ReturnTypes)
-}
-```
-
-OR
-
-```swift
-class SomeClass {
-    @InjectedMethod(DependencyProtocol.someMethod(_:someParameter:)) var someMethod: (ParameterTypes) -> (ReturnTypes)
-}
-```
-
-## Where to Store Dependencies
-
-The dependencies must be stored before they are used.
-
-The typical approach would be to store them in `AppDelegate`, better before exiting the `application:didFinishLaunchingWithOptions:` method.
-
-```swift
-class AppDelegate: UIResponder, UIApplicationDelegate {
-    var window: UIWindow?
-
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplicationLaunchOptionsKey : Any]? = nil) -> Bool {
-        ...
-        
-        Zerk.store
-            .transient( ... )
-            .singleton { ... }
-            ...
-            
-        ...
+@Suite(.zerk)
+struct FeedTests {
+    @Test func usesTheDouble() {
+        #Interject(\.apiService, with: MockApi())
+        #expect(FeedViewModel().apiService is MockApi)
     }
 }
 ```
 
-In order to automatize the storing process without cluttering the AppDelegate, you may conform `Zerk` to `AutoStoring` protocol in an empty file. This protocol only has a `store()` function which will be called only once when the very first time any dependency restoration is needed. 
+Interjections belong to the scope in force — `.zerk` opens one per test, so suites keep running in parallel — and the lookup compiles to nothing outside `DEBUG`. See [Testing](Docs/Testing/Interjection.md).
 
-```swift
-extension Zerk: AutoStoring {
+## How it works
 
-    func store() {
-    
-        Zerk.store
-            .transient( ... )
-            .singleton { ... }
-            ...
-    }
-}
-```
+**Almost none of the code generation happens in the macros.** `@Injectable`, `@InjectableProviding`, `@Singleton`, `@Scoped` and `@Isolated` expand to *nothing*: they exist so the attribute is legal Swift for the plugin to read, and so the errors decidable from a single declaration are reported right at that declaration. `@Injected` and `@InjectedDynamically` are the only two that generate code.
 
-## Notes
+Everything else is the plugin, for one reason: an attached macro can only see the declaration it is attached to, while resolving a dependency graph requires the whole module. `ZerkPlugin` runs `ZerkCodegen` over every `.swift` file in the target — collect, resolve, generate — into a single `Zerk.generated.swift`.
 
-I have written most of this as a DI solution for a project I was working on which is being used by millions of users on AppStore. This is the backbones of that app. I just wanted to share it with the world so I have changed it a bit and made into a framework. The documentation might be somewhat bad since there was none before but I will be bettering it as I find the time to do so. I will also check and update the requirements and compatible platforms. 
+One consequence runs through the whole design: **the plugin reads syntax, never resolved types.** It cannot see through an unmarked `typealias`, cannot follow a conformance into another module, and cannot read your build settings. That is why type keys are canonicalized only as far as syntax allows, why `@Isolated<A>` exists, and why `ZerkSettings.json` exists.
 
-Feel free to contact me if you have some ideas to make this better. It will be appreciated. Most importantly, have fun!
+See [How it works](Docs/Plugin/HowItWorks.md) and [Limitations](Docs/Plugin/Limitations.md).
 
-## Credits
+## Requirements
 
-The storage approach have been inspired by:
+- Swift 6.2 **toolchain** (`swift-tools-version: 6.1`); the runtime, the macros and the macro toolkit build in `.v6` language mode, the codegen half in `.v5`
+- swift-syntax 602.x
+- Platforms: iOS 13+, macOS 13+, watchOS 6+, tvOS 13+, visionOS 1+, Mac Catalyst 13+
 
-- [Swinject](https://github.com/Swinject/Swinject)
+6.2 is the floor because interjection points are named with raw identifiers (SE-0451). Your *language mode* is a separate question — a target with `SWIFT_VERSION = 5` under a Swift 6 toolchain is fully supported, with one construct needing an opt-in. See [Installation](Docs/Getting%20Started/Installation.md#consuming-targets-in-swift-5-language-mode).
 
-The multitypes (aliases) have been inspired by:
+## Migrating from Zerk 1.x
 
-- [DependencyInjection](https://github.com/sebastianpixel/DependencyInjection)
+Zerk 2 is a ground-up replacement for the original runtime container: registration moved from `Zerk.store.singleton(...)` calls to source annotations, resolution moved from `Zerk.standardStorage.restore()` to generated members, and what used to fail at runtime now fails during the build. Migrate one module at a time — see [Migration](Docs/Getting%20Started/Migration.md).
 
 ## License
 
-MIT license. See the [LICENSE file](LICENSE) for details.
+See [LICENSE](LICENSE).

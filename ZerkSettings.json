@@ -1,0 +1,80 @@
+{
+  // Zerk build settings.
+  //
+  // Zerk's build-tool plugin sees only your source syntax — it cannot read the
+  // target's build settings. Anything it needs to know about how the compiler
+  // is configured has to be restated here.
+  //
+  // This file changes how Zerk *reads* your code. It never changes what Zerk
+  // writes: every generated member is pinned with explicit isolation, so the
+  // generated file's meaning does not depend on any build flag.
+  //
+  // Place it next to your target's sources, or at the package root. The target
+  // directory wins if both exist.
+
+  // Schema version of this file. Do not change.
+  "version": 1,
+
+  // Ambient actor isolation Zerk assumes for declarations that state none.
+  //
+  // MUST match the SWIFT_DEFAULT_ACTOR_ISOLATION build setting of the target.
+  // If the two disagree, Zerk infers the wrong isolation for your providers and
+  // the generated code will fail to compile — loudly, but confusingly.
+  //
+  //   "nonisolated"  Swift's default.
+  //   "MainActor"    Xcode 26 "Approachable Concurrency" (SE-0466). Every
+  //                  declaration that states no isolation of its own — including
+  //                  your @Injectable types — is @MainActor, and Zerk mirrors
+  //                  that onto the generated members. Mark providers
+  //                  'nonisolated' where you want DI callable from anywhere.
+  //
+  // Any other string is treated as the name of a custom global actor.
+  "defaultActorIsolation": "nonisolated",
+
+  // How @Injectable values reach their value when the declaration does not say.
+  // Unlike the keys below this one mirrors no build setting — it is Zerk's own
+  // default, and @Injectable(.copied) / @Injectable(.referenced) overrides it.
+  //
+  //   "copied"      The declaration's body is inlined into the generated
+  //                 member, which then never reads the original. A later write
+  //                 to the source is invisible to injection.
+  //   "referenced"  The generated member reads through to the declaration, so
+  //                 runtime updates propagate. A settable source produces a
+  //                 settable member that writes back. The source must be at
+  //                 least internal for the generated file to see it.
+  "valueInjectionMethod": "copied",
+
+  // Swift language mode of the target. Mirrors SWIFT_VERSION.
+  //
+  //   "5" | "6"
+  //
+  // This is the language mode, not the toolchain version. A Swift 5 target
+  // under a current toolchain is fully supported; the only construct it cannot
+  // express is described under "isolatedDefaultValues" below.
+  "swiftVersion": "6",
+
+  // Concurrency checking level. Mirrors SWIFT_STRICT_CONCURRENCY.
+  //
+  //   "minimal" | "targeted" | "complete"
+  //
+  // Only consulted under swiftVersion "5" — Swift 6 language mode is complete
+  // checking by definition. "complete" implies isolatedDefaultValues below.
+  "strictConcurrency": "minimal",
+
+  // Whether the target has SE-0411, "isolated default value expressions".
+  // Mirrors SWIFT_UPCOMING_FEATURE_ISOLATED_DEFAULT_VALUES.
+  //
+  // Zerk resolves a dependency into a default argument. SE-0411 evaluates that
+  // expression in the *callee's* domain, which is what makes it legal for an
+  // isolated member to default an argument to a dependency in the SAME domain.
+  // Without SE-0411 the expression is evaluated at the caller and rejected.
+  //
+  // Swift 6 language mode has this always. A Swift 5 target gets it from either
+  // this upcoming feature or SWIFT_STRICT_CONCURRENCY=complete, independently.
+  //
+  // This affects exactly one construct. An isolated provider whose dependency
+  // is nonisolated, or is in a different domain, or is a @Singleton, needs
+  // nothing here. If Zerk does need it and this says the target lacks it, you
+  // get a build error naming the providers instead of code that cannot compile.
+  "isolatedDefaultValues": false
+}

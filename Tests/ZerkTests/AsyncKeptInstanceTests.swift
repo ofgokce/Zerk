@@ -1,0 +1,256 @@
+//
+//  AsyncKeptInstanceTests.swift
+//  Zerk
+//
+
+import Testing
+import Zerk
+
+/// What `ZerkAsyncBox` promises, against the real generated code.
+///
+/// The codegen side is covered in `ZerkInjectionCodegenTests`; this is the half
+/// a golden string cannot reach — that concurrent callers get *one* instance,
+/// that a failed build is not remembered, and that a reset still works while a
+/// build is in flight.
+///
+/// `.serialized` because the fixtures' construction counts are process-wide, as
+/// the storage under test is. Each test resets what it is about to assert on.
+@Suite("Async kept instances", .serialized)
+struct AsyncKeptInstanceTests {
+
+    @Test("concurrent callers of an async singleton share one instance")
+    func concurrentCallersShareOneInstance() async {
+        // Whatever built it first, every caller from here on gets that one —
+        // which is the claim, and is why identity is asserted rather than the
+        // build count, which another suite may already have moved.
+        let first = await Zerk<AsyncConnecting>.inject()
+
+        let instances = await withTaskGroup(of: ObjectIdentifier.self) { group in
+            for _ in 0..<50 {
+                group.addTask { ObjectIdentifier(await Zerk<AsyncConnecting>.inject() as AnyObject) }
+            }
+            var seen = Set<ObjectIdentifier>()
+            for await id in group { seen.insert(id) }
+            return seen
+        }
+
+        #expect(instances == [ObjectIdentifier(first as AnyObject)])
+    }
+
+    @Test("a kept instance racing from cold builds exactly once")
+    func coldRaceBuildsOnce() async {
+        // The cold path is only observable through a scope, since a singleton
+        // cannot be cleared — so this races an untouched *scoped* box instead,
+        // which has the same coordination.
+        Zerk.reset(.fixtureAsyncSession)
+        AsyncBuildLog.shared.reset()
+
+        let instances = await withTaskGroup(of: ObjectIdentifier.self) { group in
+            for _ in 0..<50 {
+                group.addTask { ObjectIdentifier(await Zerk<AsyncSession>.inject()) }
+            }
+            var seen = Set<ObjectIdentifier>()
+            for await id in group { seen.insert(id) }
+            return seen
+        }
+
+        #expect(instances.count == 1)
+        #expect(AsyncBuildLog.shared.count("AsyncSession") == 1)
+    }
+
+    @Test("resetting a scope clears an async box like any other")
+    func resetClearsAnAsyncBox() async {
+        Zerk.reset(.fixtureAsyncSession)
+
+        let before = await Zerk<AsyncSession>.inject()
+        let again = await Zerk<AsyncSession>.inject()
+        #expect(before === again)
+
+        // Synchronous, from a nonisolated context, with no `await` — which is
+        // the property the lock-based box exists to keep. An actor-based one
+        // would have forced `Zerk.reset(_:)` to become async.
+        Zerk.reset(.fixtureAsyncSession)
+
+        let after = await Zerk<AsyncSession>.inject()
+        #expect(after !== before)
+    }
+
+    @Test("a reset during a build does not undo itself")
+    func resetDuringBuildIsNotOverwritten() async {
+        Zerk.reset(.fixtureAsyncSession)
+
+        // Start a build, reset while it is still suspended, then resolve again.
+        async let inFlight = Zerk<AsyncSession>.inject()
+        try? await Task.sleep(for: .milliseconds(5))
+        Zerk.reset(.fixtureAsyncSession)
+
+        let started = await inFlight
+        let afterReset = await Zerk<AsyncSession>.inject()
+
+        // The in-flight caller still receives what it was building — it is not
+        // cancelled — but that instance was not kept, so the next resolution
+        // built a fresh one.
+        #expect(afterReset !== started)
+
+        // And the fresh one *is* kept: the stale build must not publish over it.
+        let settled = await Zerk<AsyncSession>.inject()
+        #expect(settled === afterReset)
+    }
+
+    @Test("a failed build is not remembered")
+    func failedBuildIsNotCached() async throws {
+        Zerk.reset(.fixtureFlaky)
+        AsyncBuildLog.shared.reset()
+        FlakyGate.shared.shouldFail = true
+        defer { FlakyGate.shared.shouldFail = false }
+
+        await #expect(throws: FlakyGate.Failure.self) {
+            _ = try await Zerk<FlakyResource>.inject()
+        }
+        await #expect(throws: FlakyGate.Failure.self) {
+            _ = try await Zerk<FlakyResource>.inject()
+        }
+        // Two attempts, not one silently-cached failure.
+        #expect(AsyncBuildLog.shared.count("FlakyResource") == 2)
+
+        FlakyGate.shared.shouldFail = false
+        let resource = try await Zerk<FlakyResource>.inject()
+        let again = try await Zerk<FlakyResource>.inject()
+
+        // And once it succeeds it is kept, like any other kept instance.
+        #expect(resource === again)
+    }
+
+    /// The two overloads share one box, so a non-throwing call can *join* a
+    /// build some other caller started with a throwing closure. Force-unwrapping
+    /// there trapped: the error was never ours to rule out.
+    @Test("the non-throwing overload survives joining a failed build")
+    func nonThrowingOverloadDoesNotTrapOnAJoinedFailure() async throws {
+        struct Failure: Error {}
+        let box = ZerkAsyncBox<Int>()
+
+        let failing = Task {
+            try? await box.value { () async throws -> Int in
+                try await Task.sleep(for: .milliseconds(120))
+                throw Failure()
+            }
+        }
+        // Long enough that the throwing build is still in flight to be joined.
+        try await Task.sleep(for: .milliseconds(20))
+
+        let value = await box.value { 7 }
+        _ = await failing.value
+
+        // Its own build cannot fail, so it always produces a value.
+        #expect(value == 7)
+    }
+
+    /// The retry is bounded and honours cancellation, so a caller repeatedly
+    /// failing the *throwing* overload cannot keep this one joining its failures
+    /// forever — an unbounded wait would hang the surrounding scope with nothing
+    /// observable, since the joined error is discarded.
+    @Test("the non-throwing overload returns even while another caller keeps failing")
+    func nonThrowingOverloadOutlastsAFailingCaller() async {
+        struct Failure: Error {}
+        let box = ZerkAsyncBox<Int>()
+
+        // Structured, so the failing caller is guaranteed finished before this
+        // test returns. An unstructured `Task` would outlive it and perturb the
+        // timing of a suite whose other tests race fifty callers at once.
+        let value = await withTaskGroup(of: Int?.self) { group in
+            group.addTask {
+                while !Task.isCancelled {
+                    _ = try? await box.value { () async throws -> Int in
+                        try await Task.sleep(for: .milliseconds(2))
+                        throw Failure()
+                    }
+                }
+                return nil
+            }
+            group.addTask {
+                await box.value { 7 }
+            }
+
+            // The first completion is the non-throwing caller: the other only
+            // returns once cancelled.
+            var resolved: Int?
+            while let next = await group.next() {
+                if let next {
+                    resolved = next
+                    group.cancelAll()
+                }
+            }
+            return resolved
+        }
+
+        #expect(value == 7)
+    }
+
+    /// Cancellation must not mean "rebuild": the box may already hold the
+    /// answer, and an instance built here is never published — for a
+    /// `@Singleton` that is a second instance handed out while the shared one
+    /// sits cached.
+    @Test("a cancelled caller reads the kept instance rather than rebuilding")
+    func cancelledCallerReadsTheBox() async {
+        let box = ZerkAsyncBox<Int>()
+        let first = await box.value { AsyncBuildLog.shared.record("cancelled"); return 1 }
+
+        let task = Task {
+            await Task.yield()
+            return await box.value { AsyncBuildLog.shared.record("cancelled"); return 2 }
+        }
+        task.cancel()
+
+        #expect(await task.value == first)
+    }
+
+    @Test("a cancelled cold caller does not start an abandoned build")
+    func cancelledColdCallerDoesNotStartAbandonedBuild() async {
+        let box = ZerkAsyncBox<Int>()
+        AsyncBuildLog.shared.reset()
+
+        let task = Task {
+            await Task.yield()
+            return await box.value {
+                AsyncBuildLog.shared.record("cancelled-cold")
+                try? await Task.sleep(for: .milliseconds(5))
+                return 1
+            }
+        }
+        task.cancel()
+
+        #expect(await task.value == 1)
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(AsyncBuildLog.shared.count("cancelled-cold") == 1)
+    }
+
+    @Test("a non-Sendable instance can be kept across an await")
+    func nonSendableInstanceIsKept() async {
+        let first = await Zerk<NonSendableAsyncClient>.inject()
+        let again = await Zerk<NonSendableAsyncClient>.inject()
+
+        #expect(first === again)
+    }
+
+    @Test("concurrent callers of a failing build all see the failure")
+    func failureReachesEveryWaiter() async {
+        AsyncBuildLog.shared.reset()
+        Zerk.reset(.fixtureFlaky)
+        FlakyGate.shared.shouldFail = true
+        defer { FlakyGate.shared.shouldFail = false }
+
+        let failures = await withTaskGroup(of: Bool.self) { group in
+            for _ in 0..<20 {
+                group.addTask {
+                    do { _ = try await Zerk<FlakyResource>.inject(); return false }
+                    catch { return true }
+                }
+            }
+            var count = 0
+            for await didThrow in group where didThrow { count += 1 }
+            return count
+        }
+
+        #expect(failures == 20)
+    }
+}

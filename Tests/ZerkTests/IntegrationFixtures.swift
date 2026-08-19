@@ -1,0 +1,592 @@
+import Foundation
+import Zerk
+
+@InjectableValue
+var baseURL: String {
+    "https://api.example.com"
+}
+
+protocol ApiServicing: AnyObject {
+    var host: String { get }
+}
+
+@Singleton
+@Injectable<ApiServicing>
+final class ApiService: ApiServicing {
+    let host: String
+
+    @InjectableProviding
+    init(baseURL: String) {
+        self.host = baseURL
+    }
+}
+
+/// Registered as `[String]`, depended on as `Array<String>`. Before type keys
+/// were canonicalized these were two different dependencies, and the parameter
+/// bubbled up to the caller instead of resolving.
+@InjectableValue
+var tags: [String] { ["alpha", "beta"] }
+
+protocol Tagging {
+    var joined: String { get }
+}
+
+@Injectable<any Tagging>
+final class Tagger: Tagging {
+    let joined: String
+
+    @InjectableProviding
+    init(tags: Array<String>) {
+        self.joined = tags.joined(separator: ",")
+    }
+}
+
+/// `Archiving` is a second name for `Tagging`. Without `@ZerkAlias` the two
+/// would be separate keys and this consumer's dependency would bubble up to the
+/// caller instead of resolving.
+@ZerkAlias
+typealias Archiving = Tagging
+
+@Injectable
+final class ArchiveConsumer {
+    let joined: String
+
+    @InjectableProviding
+    init(tagger: Archiving) {
+        self.joined = tagger.joined
+    }
+}
+
+/// `apiService` is marked, `baseURL` is not — and `baseURL: String` would
+/// otherwise match the `@Injectable var baseURL` value by key *and* name, so
+/// this only stays caller-supplied because the provider is in explicit mode.
+@Injectable
+final class ExplicitConsumer {
+    let host: String
+    let suffix: String
+
+    @InjectableProviding
+    init(@autoinjected apiService: ApiServicing, baseURL: String) {
+        self.host = apiService.host
+        self.suffix = baseURL
+    }
+}
+
+/// `SeededToken`'s provider needs a `seed`, so resolving `token` bubbles that
+/// requirement up. `@injectable` says this member's own `seed` supplies it, so
+/// one parameter serves both instead of being declared twice.
+final class SeedSharingConsumer {
+    let tokenValue: Int
+    let seed: Int
+
+    init(@injected token: SeededToken, @injectable seed: Int) {
+        self.tokenValue = token.value
+        self.seed = seed
+    }
+}
+
+/// `retries` would resolve from `RetryPolicy.retryLimit`, but is marked out.
+@Injectable
+final class RetryHolder {
+    let retryLimit: Int
+
+    @InjectableProviding
+    init(@noninjected retryLimit: Int) {
+        self.retryLimit = retryLimit
+    }
+}
+
+protocol Reading: AnyObject {
+    var id: Int { get }
+}
+
+protocol Writing: AnyObject {
+    var id: Int { get }
+}
+
+/// One singleton under two keys.
+///
+/// `Zerk<Reading>` and `Zerk<Writing>` are distinct generic specializations with
+/// distinct static storage, so storing the instance on them directly built one
+/// per key. It lives in `_$zerk_singletons` instead, once per type.
+@Singleton
+@Injectable<Reading, Writing>
+final class Store: Reading, Writing {
+    /// Distinguishes instances without counting them. A singleton's storage may
+    /// have been initialized before any given test ran, so *how many* were built
+    /// is not a question a test can ask — but identity answers the real one.
+    var id: Int { ObjectIdentifier(self).hashValue }
+}
+
+@Injectable
+struct Logger {
+    /// Per-test, so two tests resolving a `Logger` at once still each see their
+    /// own first one as `1`. See ``ConstructionLog``.
+    static let name = "Logger"
+    let serial: Int
+
+    @InjectableProviding
+    init() {
+        ConstructionLog.record(Self.name)
+        self.serial = ConstructionLog.count(Self.name)
+    }
+}
+
+protocol UserService {
+    func requestPath() -> String
+    var loggerSerial: Int { get }
+}
+
+@Injectable<UserService>
+final class LiveUserService: UserService {
+    static let name = "LiveUserService"
+
+    let apiService: ApiServicing
+    let loggerSerial: Int
+
+    @InjectableProviding
+    static func live(apiService: ApiServicing, logger: Logger) -> UserService {
+        ConstructionLog.record(Self.name)
+        return LiveUserService(apiService: apiService, logger: logger)
+    }
+
+    init(apiService: ApiServicing, logger: Logger) {
+        self.apiService = apiService
+        self.loggerSerial = logger.serial
+    }
+
+    func requestPath() -> String {
+        "\(apiService.host)/users"
+    }
+}
+
+@Injectable
+final class SeededToken {
+    static let name = "SeededToken"
+    let value: Int
+
+    @InjectableProviding
+    static func seeded(seed: Int) -> SeededToken {
+        ConstructionLog.record(Self.name)
+        return SeededToken(value: seed + ConstructionLog.count(Self.name))
+    }
+
+    init(value: Int) {
+        self.value = value
+    }
+}
+
+protocol Loading {
+    var source: String { get }
+}
+
+/// One type, three providers for one key. `live` is primary, so it is what
+/// `inject()` builds; the others stay reachable as named members.
+@Injectable<Loading>(primary: true)
+final class Loader: Loading {
+    let source: String
+
+    @InjectableProviding<Loading>(primary: true)
+    static func live() -> Loading { Loader(source: "live") }
+
+    @InjectableProviding<Loading>
+    static func cached() -> Loading { Loader(source: "cached") }
+
+    @InjectableProviding<Loading>
+    static func seeded(source: String) -> Loading { Loader(source: source) }
+
+    init(source: String) {
+        self.source = source
+    }
+}
+
+/// A second type under the same key. `Loader` claims it with
+/// `@Injectable<Loading>(primary: true)` above, so this one contributes a named
+/// member only — and needs no primary among its own providers.
+@Injectable<Loading>
+final class NullLoader: Loading {
+    let source = "null"
+
+    @InjectableProviding<Loading>
+    static func silent() -> Loading { NullLoader() }
+
+    @InjectableProviding<Loading>
+    static func noisy() -> Loading { NullLoader() }
+
+    init() {}
+}
+
+/// Exercises the remaining `@Injectable` / `@InjectableProviding` overloads against
+/// the real macros: the non-generic `primary:` forms, and the value-only
+/// `ValueInjectionMethod` form.
+enum RetryPolicy {
+    @InjectableValue(.referenced)
+    nonisolated(unsafe) static var retryLimit: Int = 3
+}
+
+// MARK: - Effectful and parametric values
+
+/// An effectful value against the real macros. `@Injected` and key paths cannot
+/// reach it — the same limits an effectful provider carries — so it is resolved
+/// through a provider parameter.
+@InjectableValue
+var sessionToken: String {
+    get async throws {
+        try await Task.sleep(nanoseconds: 1_000)
+        return "session-token"
+    }
+}
+
+@Injectable
+final class TokenHolder {
+    let token: String
+
+    @InjectableProviding
+    init(sessionToken: String) {
+        self.token = sessionToken
+    }
+}
+
+/// The replacement for the old parametric-value form: a function that registers
+/// the type it *returns*, with itself as the provider. `logger` resolves from
+/// the graph; `label` bubbles to the consumer's `inject(label:)`.
+struct Caption {
+    let text: String
+}
+
+@Injectable(typeNamed: true)
+func makeCaption(logger: Logger, label: String) -> Caption {
+    Caption(text: "\(label)#\(logger.serial)")
+}
+
+@Injectable
+final class CaptionHolder {
+    let caption: String
+
+    @InjectableProviding
+    init(caption: Caption) {
+        self.caption = caption.text
+    }
+}
+
+/// Exercises `@ImportedInjectableValue` against the real macro. Named so that
+/// nothing resolves through it — the point here is that the attribute parses and
+/// expands, and that the getter type-checks against a member that exists. Its
+/// cross-module behaviour is covered by `ImportedInjectableValueTests`.
+private enum ZerkImports {
+    @ImportedInjectableValue
+    static var importedRetryLimit: Int { Zerk<Int>.retryLimit }
+}
+
+// MARK: - public:
+
+public protocol Exporting: AnyObject {
+    var name: String { get }
+}
+
+/// Every `public:` overload against the real macros — `public` has to survive
+/// as an argument label through parsing, macro overload resolution, and the
+/// plugin's own reading of the attribute.
+@Injectable<Exporting>(primary: true, public: true)
+public final class ExportedService: Exporting {
+    public let name = "exported"
+
+    @InjectableProviding
+    public init() {}
+}
+
+@Injectable(public: true)
+public final class BareExportedService {
+    @InjectableProviding
+    public init() {}
+}
+
+@InjectableValue(.copied, public: true)
+public let exportedBanner: String = "banner"
+
+@InjectableValues(public: true)
+public enum ExportedConstants {
+    public static let exportedLimit: Int = 7
+
+    /// States its own answer, so the sweep does not apply.
+    @InjectableValue(public: false)
+    public static let unexportedTag: String = "tag"
+}
+
+@Injectable(primary: true)
+final class Reporter {
+    let mode: String
+
+    @InjectableProviding(primary: true)
+    init() {
+        self.mode = "default"
+    }
+
+    @InjectableProviding
+    init(mode: String) {
+        self.mode = mode
+    }
+}
+
+struct FeedViewModel {
+    @Injected
+    var userService: UserService
+}
+
+struct LoaderConsumer {
+    @Injected
+    var loader: Loading
+}
+
+/// Names a non-primary member with a key path, rather than taking `inject()`.
+struct KeyPathLoaderConsumer {
+    @Injected(\.cached)
+    var loader: Loading
+}
+
+protocol Reporting {
+    var label: String { get }
+}
+
+/// Keyed under both its own type and a protocol, so a consumer can ask for
+/// either one.
+@Injectable
+@Injectable<Reporting>
+final class ConsoleReporter: Reporting {
+    let label = "console"
+
+    @InjectableProviding
+    init() {}
+}
+
+/// Resolves the *concrete* key while storing it as the protocol.
+struct StatedKeyConsumer {
+    @Injected<ConsoleReporter>
+    var reporter: Reporting
+}
+
+/// Same, with optional storage.
+struct StatedKeyOptionalConsumer {
+    @Injected<ConsoleReporter>
+    var reporter: Reporting?
+}
+
+struct EagerTokenConsumer {
+    @Injected(seed: 100)
+    var seededToken: SeededToken
+}
+
+final class LazyTokenConsumer {
+    lazy var seededToken: SeededToken = Zerk<SeededToken>.inject(seed: 100)
+}
+
+final class SessionOwner {
+    @Injected
+    var apiService: ApiServicing
+}
+
+final class AuditTrail {
+    let logger: Logger
+    let label: String
+
+    init(@injected logger: Logger, label: String) {
+        self.logger = logger
+        self.label = label
+    }
+}
+
+// MARK: - Generic injectables
+//
+// Registered under their shape (`Codec<#0>`, `Repository<#0>`), emitted as
+// members of an unconstrained `extension Zerk` that bind `Injectable` per call.
+// The counters prove specializations are genuinely distinct at runtime rather
+// than one erased instance handed out twice.
+
+/// The build counter cannot live on `Codec` itself: static stored properties
+/// are illegal in a generic type, which is the same fact that makes a generic
+/// `@Singleton` impossible.
+/// Locked, not merely `nonisolated(unsafe)`. These fixtures are resolved from
+/// several suites at once and every suite runs in parallel, so an unguarded
+/// `Array.append` from two of them is a genuine data race — and it does not fail
+/// an assertion, it corrupts the buffer and takes the test process down, which
+/// reads as an unexplained crash far from the cause.
+///
+/// Records *which* specializations were built, process-wide, which is why the
+/// one test reading it asserts growth rather than equality. Counting how many
+/// times something was built belongs in ``ConstructionLog`` instead, which is
+/// per test and needs no such care.
+enum CodecCounter {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var storage: [String] = []
+
+    static var builds: [String] {
+        lock.withLock { storage }
+    }
+
+    static func record(_ element: String) {
+        lock.withLock { storage.append(element) }
+    }
+}
+
+/// An identity-bearing dependency for the generic fixtures alone.
+///
+/// Deliberately **not** `Logger`. That used to matter a great deal: `Logger` was
+/// counted process-wide, so a generic test resolving one in parallel broke an
+/// assertion in an unrelated suite, intermittently and far from the cause.
+/// ``ConstructionLog`` makes that impossible now, but keeping the generic
+/// fixtures' dependencies to themselves is still the cheaper habit.
+enum StampCounter {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var storage = 0
+
+    /// Returns the serial it just issued, so a caller never reads a value
+    /// another suite has already moved past.
+    static func next() -> Int {
+        lock.withLock {
+            storage += 1
+            return storage
+        }
+    }
+}
+
+@Injectable
+struct Stamp {
+    let serial: Int
+
+    @InjectableProviding
+    init() {
+        serial = StampCounter.next()
+    }
+}
+
+@Injectable
+struct Codec<Element> {
+    let stamp: Stamp
+
+    @InjectableProviding
+    init(stamp: Stamp) {
+        self.stamp = stamp
+        CodecCounter.record(String(describing: Element.self))
+    }
+}
+
+@Injectable
+struct Repository<Element> {
+    let codec: Codec<Element>
+    let stamp: Stamp
+
+    @InjectableProviding
+    init(codec: Codec<Element>, stamp: Stamp) {
+        self.codec = codec
+        self.stamp = stamp
+    }
+}
+
+/// A concrete consumer naming one specialization. Nothing registers
+/// `Repository<String>` — matching it to `Repository<#0>` is what turns this
+/// parameter from caller-supplied into resolved.
+@Injectable
+struct StringFeed {
+    let repository: Repository<String>
+
+    @InjectableProviding
+    init(repository: Repository<String>) {
+        self.repository = repository
+    }
+}
+
+// MARK: - A generic type under a concrete key
+//
+// The other generic mode: `any Describing` erases X, so the member recovers it
+// from its own argument and the result is erased into the key. The key stays
+// concrete, so unlike a generic key this one keeps its interjection point.
+
+protocol Describing {
+    var describedValue: String { get }
+}
+
+@Injectable<any Describing>
+struct ValueReport<X>: Describing {
+    let value: X
+    var describedValue: String { "\(value)" }
+
+    @InjectableProviding
+    init(_ value: X) {
+        self.value = value
+    }
+}
+
+// MARK: - A parameterized existential key
+//
+// `parameterized: true` applies the type's own parameters to the protocol's
+// primary associated types, so the key is `any Pairing<A, B>` rather than a
+// plain erased `any Pairing`. Gated on iOS 16 / macOS 13, which is where
+// parameterized existentials arrived.
+
+protocol Pairing<A, B> {
+    associatedtype A
+    associatedtype B
+    var described: String { get }
+}
+
+@Injectable<any Pairing>(parameterized: true)
+struct Pair<A, B>: Pairing {
+    let first: A
+    let second: B
+    var described: String { "\(first)|\(second)" }
+
+    @InjectableProviding
+    init(_ first: A, _ second: B) {
+        self.first = first
+        self.second = second
+    }
+}
+
+// MARK: - Naming the member a provider generates
+//
+// A provider's member is named after the provider: a factory by its own name,
+// an initializer by its type's. `typeNamed:` and `name:` move it, which is what
+// a provider type needs — `MailerProvider.live` describes neither the key nor
+// what the member returns.
+
+protocol Mailing {
+    var route: String { get }
+}
+
+struct Mailer: Mailing {
+    let route: String
+}
+
+@Injectable<Mailing>(primary: true)
+enum MailerProvider {
+    @InjectableProviding(typeNamed: true, primary: true)
+    static func live() -> Mailer { Mailer(route: "live") }
+
+    @InjectableProviding(name: "sandbox")
+    static func staging() -> Mailer { Mailer(route: "sandbox") }
+}
+
+/// `name:` on an initializer — the one naming argument it takes, since it can
+/// only ever produce its own type.
+@Injectable<Mailing>
+struct NullMailer: Mailing {
+    let route = "null"
+
+    @InjectableProviding(name: "silent")
+    init() {}
+}
+
+
+/// A singleton whose declaration says it is `Sendable`.
+///
+/// The suite had none, and that is the whole reason a generated
+/// `nonisolated(unsafe)` on a Sendable constant reached a consumer: for a type
+/// with no conformance the annotation is required and silent, so every fixture
+/// here was the case that could not show the problem. It is also the shape
+/// Zerk's own conformance check pushes people towards, which is what made it the
+/// first thing a real project hit.
+@Singleton
+@Injectable
+final class SendableCounter: @unchecked Sendable {
+    var id: Int { ObjectIdentifier(self).hashValue }
+}

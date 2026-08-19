@@ -5,3 +5,12 @@
 xcuserdata/
 DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+/.vscode/
+/Package.resolved
+/SKILL.md
+
+# Nested fixture packages build into their own directories. `/.build` above is
+# root-anchored, so without these the ~500MB `Tests/Fixtures/CrossModule/.build`
+# left by ZERK_E2E=1 would show up as untracked.
+Tests/Fixtures/**/.build/
+Tests/Fixtures/**/Package.resolved

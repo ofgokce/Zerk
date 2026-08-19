@@ -1,0 +1,193 @@
+<!-- Generated: this file and logo-full-dark.svg differ only in the `color`
+     attribute on the root. Edit the artwork in one and copy it to the other, or
+     the two themes drift apart.
+
+     The colour is an attribute rather than a stylesheet on purpose. The artwork
+     draws in `currentColor`, and a `<style>` block with a
+     `prefers-color-scheme` query inside the SVG did not take effect when GitHub
+     rendered the README — so the query lives in the README's `<picture>`
+     element instead, where the browser evaluates it against the page, and each
+     file states one colour outright. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 500" width="100%" height="100%" color="#f2f2f7">
+  <defs>
+    <!-- Mask to create a clean cutout halo where the Z bars meet the syringe -->
+    <mask id="syringe-mask">
+      <rect width="500" height="500" fill="white" />
+      <g transform="rotate(45 250 250)" fill="black" stroke="black" stroke-width="24" stroke-linecap="round" stroke-linejoin="round">
+        <!-- Masking Silhouettes -->
+        <circle cx="250" cy="55" r="22"/>
+        <circle cx="205" cy="125" r="20"/>
+        <circle cx="295" cy="125" r="20"/>
+        <rect x="210" y="145" width="80" height="15"/>
+        <rect x="220" y="160" width="60" height="160"/>
+        <rect x="235" y="320" width="30" height="10"/>
+        <path d="M 240 330 L 260 330 L 255 360 L 245 360 Z"/>
+        <line x1="250" y1="360" x2="250" y2="470" stroke-width="18"/>
+        <line x1="250" y1="77" x2="250" y2="110" stroke-width="38"/>
+      </g>
+    </mask>
+  </defs>
+
+  <!-- Scale all visible artwork while keeping the 500x500 viewBox -->
+  <g transform="scale(1.6) translate(-104 -78.5)">
+
+    <!-- HORIZONTAL Z BARS -->
+    <g mask="url(#syringe-mask)">
+      <!-- Top Bar -->
+      <path
+        d="M 120 125 L 380 125"
+        stroke="currentColor"
+        stroke-width="32"
+        stroke-linecap="square"
+      />
+
+      <!-- Bottom Bar -->
+      <path
+        d="M 120 375 L 380 375"
+        stroke="currentColor"
+        stroke-width="32"
+        stroke-linecap="square"
+      />
+    </g>
+
+    <!-- VINTAGE SYRINGE (The Z Diagonal) -->
+    <g transform="rotate(45 250 250)">
+
+      <!-- NEEDLE & HUB -->
+      <path
+        d="M 247 360 L 247 455 L 253 455 L 253 360 Z"
+        fill="currentColor"
+        stroke="none"
+      />
+
+      <path
+        d="M 240 330 L 260 330 L 255 360 L 245 360 Z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="8"
+        stroke-linejoin="round"
+      />
+
+      <rect
+        x="235"
+        y="320"
+        width="30"
+        height="10"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="8"
+        rx="2"
+      />
+
+      <!-- MAIN BARREL -->
+      <rect
+        x="220"
+        y="170"
+        width="60"
+        height="150"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="10"
+        rx="8"
+      />
+
+      <!-- High-Contrast Glass Reflection -->
+      <line x1="270" y1="320" x2="270" y2="250" stroke="currentColor" stroke-width="4"/>
+      <line x1="270" y1="242" x2="270" y2="170" stroke="currentColor" stroke-width="4"/>
+
+      <!-- MEASUREMENT TICKS -->
+      <line x1="220" y1="180" x2="235" y2="180" stroke="currentColor" stroke-width="4"/>
+      <line x1="220" y1="200" x2="230" y2="200" stroke="currentColor" stroke-width="4"/>
+      <line x1="220" y1="220" x2="240" y2="220" stroke="currentColor" stroke-width="5"/>
+      <line x1="220" y1="240" x2="230" y2="240" stroke="currentColor" stroke-width="4"/>
+      <line x1="220" y1="260" x2="235" y2="260" stroke="currentColor" stroke-width="4"/>
+      <line x1="220" y1="280" x2="230" y2="280" stroke="currentColor" stroke-width="4"/>
+      <line x1="220" y1="300" x2="240" y2="300" stroke="currentColor" stroke-width="5"/>
+
+      <!-- INTERNAL PLUNGER -->
+      <line
+        x1="250"
+        y1="110"
+        x2="250"
+        y2="242"
+        stroke="currentColor"
+        stroke-width="12"
+      />
+
+      <rect x="220" y="240" width="60" height="4" fill="currentColor"/>
+      <rect x="220" y="248" width="60" height="8" fill="currentColor"/>
+
+      <!-- BARREL TOP / FLANGE -->
+      <path
+        d="M 210 160 Q 250 172 290 160 L 290 145 L 210 145 Z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="10"
+        stroke-linejoin="round"
+      />
+
+      <!-- VINTAGE FINGER RINGS -->
+      <circle
+        cx="205"
+        cy="125"
+        r="20"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="10"
+      />
+
+      <circle
+        cx="295"
+        cy="125"
+        r="20"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="10"
+      />
+
+      <!-- THUMB RING -->
+      <circle
+        cx="250"
+        cy="55"
+        r="22"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="10"
+      />
+
+      <!-- PLUNGER SHAFT -->
+      <rect
+        x="242"
+        y="77"
+        width="16"
+        height="33"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="8"
+      />
+
+      <line x1="242" y1="90" x2="258" y2="90" stroke="currentColor" stroke-width="4"/>
+      <line x1="242" y1="100" x2="258" y2="100" stroke="currentColor" stroke-width="4"/>
+
+    </g>
+
+  </g>
+
+  <g transform="translate(520 180) scale(1.6)">
+      <!-- Letter E -->
+      <line x1="16" y1="0" x2="16" y2="200" stroke="currentColor" stroke-width="32"/>
+      <line x1="0" y1="15" x2="150" y2="15" stroke="currentColor" stroke-width="32"/>
+      <line x1="0" y1="100" x2="120" y2="100" stroke="currentColor" stroke-width="32"/>
+      <line x1="0" y1="185" x2="150" y2="185" stroke="currentColor" stroke-width="32"/>
+      <!-- Letter R -->
+      <line x1="200" y1="0" x2="200" y2="200" stroke="currentColor" stroke-width="32"/>
+      <path d="M 268,16 A 50,50 0 0,1 268,116" fill="none" stroke="currentColor" stroke-width="32"/>/>
+      <line x1="184" y1="16" x2="268" y2="16" stroke="currentColor" stroke-width="32"/>
+      <line x1="184" y1="116" x2="268" y2="116" stroke="currentColor" stroke-width="32"/>
+      <path d="M 252 116 L 302 200 L 334 200 L 284 116 Z" fill="currentColor" stroke="none"/>
+      <!-- Letter K -->
+      <line x1="380" y1="0" x2="380" y2="200" stroke="currentColor" stroke-width="32"/>
+      <path d="M 364 132 L 480 0 L 512 0 L 396 132 Z" fill="currentColor" stroke="none"/>
+      <path d="M 410 80 L 480 200 L 512 200 L 442 80 Z" fill="currentColor" stroke="none"/>
+  </g>
+</svg>
