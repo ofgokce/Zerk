@@ -87,14 +87,18 @@ public struct CodeGenerator {
 
         // Alias groups merge keys before anything compares them, so resolution
         // and generation are alias-aware without knowing aliases exist.
+        // Narrowed to the files that actually put a foreign name into the
+        // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        let resolvedImports = collector.resolvedImports(
+            declaredLocally: Set(collector.declaredAccessRanks.keys))
         // Computed from the keys as written, before anything is canonicalized:
         // two modules producing one bare name must not be merged into a single
         // key, and the written spelling is the only place that is visible.
         let clashingBareNames = KeyAliases.clashingBareNames(
             among: collector.keyDisplayNames.keys,
-            modules: collector.importedModules)
+            modules: resolvedImports.modules)
         let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                  knownModules: collector.importedModules,
+                                  knownModules: resolvedImports.modules,
                                   clashingBareNames: clashingBareNames)
         let rewriter = AliasRewriter(aliases: aliases)
         let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
@@ -145,8 +149,8 @@ public struct CodeGenerator {
             injectedUses: injectedUses,
             markedMembers: markedMembers,
             keyDisplayNames: keyDisplayNames,
-            importedModules: collector.importedModules,
-            moduleImportConditions: collector.moduleImportConditions,
+            importedModules: resolvedImports.modules,
+            moduleImportConditions: resolvedImports.conditions,
             primaryVariants: resolution.primaryVariants
         ).build()
 

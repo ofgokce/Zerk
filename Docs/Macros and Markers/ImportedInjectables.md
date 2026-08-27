@@ -196,6 +196,8 @@ The generated file names types it did not declare — a key written `@Injectable
 
 That is correct by construction rather than by diligence: a declaration mentioning `Date` sits in a file that imports `Foundation`, or that file would not compile, so the set can only ever be a superset of what the generated file needs. There is nothing to declare and nothing to keep in step.
 
+Only the files that need to, though. A file whose registrations name nothing but types this module declares has already been seen by the compiler here, so its imports buy the generated file nothing and are left out — a module in scope for no reason is a name the generated file could trip over that it never needed. Narrowing is per *file* rather than per name, because which module a name came from is exactly what syntax cannot tell.
+
 Two things are not copied. `@testable import` belongs to the test target that wrote it. Access-level modifiers and attributes are dropped — a plain `import` is what the generated file needs, and `internal import X` states a boundary about *that* file. A guarded import keeps its guard, so a debug-only module stays debug-only; see [Conditional compilation](../Features/ConditionalCompilation.md).
 
 If two imported modules export the same name, write the module out — `@Injectable<ModuleA.Config>`. Zerk normally strips a module qualifier, since `Core.Service` and `Service` are one type, but not for a name two modules both produce: those are two types and stay two keys, and the generated file says `extension Zerk<ModuleA.Config>`.

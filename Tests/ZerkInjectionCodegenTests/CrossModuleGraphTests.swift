@@ -48,7 +48,8 @@ struct CrossModuleGraphTests {
         }
 
         let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                 knownModules: collector.importedModules)
+                                 knownModules: collector.resolvedImports(
+                                     declaredLocally: Set(collector.declaredAccessRanks.keys)).modules)
         let rewriter = AliasRewriter(aliases: aliases)
         let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
         let resolution = ProviderResolver(

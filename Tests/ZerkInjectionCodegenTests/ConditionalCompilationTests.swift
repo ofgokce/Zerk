@@ -408,6 +408,12 @@ struct ConditionalCompilationTests {
         #if canImport(UIKit)
         import UIKit
         #endif
+
+        @Injectable
+        struct Probe {
+            @InjectableProviding
+            init(thing: ForeignThing) {}
+        }
         """)
 
         #expect(generated.contains("""
@@ -427,6 +433,12 @@ struct ConditionalCompilationTests {
         #if DEBUG
         import Foundation
         #endif
+
+        @Injectable
+        struct Probe {
+            @InjectableProviding
+            init(thing: ForeignThing) {}
+        }
         """)
 
         #expect(generated.contains("import Foundation"))
@@ -451,6 +463,12 @@ struct ConditionalCompilationTests {
         #if DEBUG
         import Foundation
         #endif
+
+        @Injectable
+        struct Probe {
+            @InjectableProviding
+            init(thing: ForeignThing) {}
+        }
         """)
 
         #expect(generated.contains("#if (DEBUG)\nimport Foundation\n#endif"))
@@ -472,6 +490,12 @@ struct ConditionalCompilationTests {
         #if os(iOS)
         import Foundation
         #endif
+
+        @Injectable
+        struct Probe {
+            @InjectableProviding
+            init(thing: ForeignThing) {}
+        }
         """)
 
         #expect(generated.contains("#if (DEBUG)\nimport Foundation\n#endif"))

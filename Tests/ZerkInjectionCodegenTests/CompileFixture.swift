@@ -131,12 +131,16 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
+        // Narrowed to the files that actually put a foreign name into the
+        // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        let resolvedImports = collector.resolvedImports(
+            declaredLocally: Set(collector.declaredAccessRanks.keys))
         let aliases = KeyAliases(
             declarations: collector.aliasDeclarations,
-            knownModules: collector.importedModules,
+            knownModules: resolvedImports.modules,
             clashingBareNames: KeyAliases.clashingBareNames(
                 among: collector.keyDisplayNames.keys,
-                modules: collector.importedModules))
+                modules: resolvedImports.modules))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
         // dropped before anything asks which provider backs their key.
@@ -169,8 +173,8 @@ enum CompileFixture {
             injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
             markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
             keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
-            importedModules: collector.importedModules,
-            moduleImportConditions: collector.moduleImportConditions,
+            importedModules: resolvedImports.modules,
+            moduleImportConditions: resolvedImports.conditions,
             primaryVariants: resolution.primaryVariants
         ).build()
     }
@@ -181,12 +185,16 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
+        // Narrowed to the files that actually put a foreign name into the
+        // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        let resolvedImports = collector.resolvedImports(
+            declaredLocally: Set(collector.declaredAccessRanks.keys))
         let aliases = KeyAliases(
             declarations: collector.aliasDeclarations,
-            knownModules: collector.importedModules,
+            knownModules: resolvedImports.modules,
             clashingBareNames: KeyAliases.clashingBareNames(
                 among: collector.keyDisplayNames.keys,
-                modules: collector.importedModules))
+                modules: resolvedImports.modules))
         let rewriter = AliasRewriter(aliases: aliases)
         let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
         let resolution = ProviderResolver(
@@ -226,12 +234,16 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
+        // Narrowed to the files that actually put a foreign name into the
+        // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        let resolvedImports = collector.resolvedImports(
+            declaredLocally: Set(collector.declaredAccessRanks.keys))
         let aliases = KeyAliases(
             declarations: collector.aliasDeclarations,
-            knownModules: collector.importedModules,
+            knownModules: resolvedImports.modules,
             clashingBareNames: KeyAliases.clashingBareNames(
                 among: collector.keyDisplayNames.keys,
-                modules: collector.importedModules))
+                modules: resolvedImports.modules))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
         // dropped before anything asks which provider backs their key.
@@ -264,8 +276,8 @@ enum CompileFixture {
             injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
             markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
             keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
-            importedModules: collector.importedModules,
-            moduleImportConditions: collector.moduleImportConditions,
+            importedModules: resolvedImports.modules,
+            moduleImportConditions: resolvedImports.conditions,
             primaryVariants: resolution.primaryVariants
         ).build()
 

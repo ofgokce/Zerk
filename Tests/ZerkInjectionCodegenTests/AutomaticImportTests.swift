@@ -23,9 +23,11 @@ struct AutomaticImportTests {
         import Foundation
         import Combine
 
-        protocol Repo {}
-        @Injectable<Repo>
-        struct LiveRepo: Repo {}
+        @Injectable
+        struct Stamp {
+            @InjectableProviding
+            init(at: Date, cancellable: AnyCancellable) {}
+        }
         """)
 
         #expect(generated.contains("\nimport Combine"))
@@ -57,9 +59,13 @@ struct AutomaticImportTests {
     func zerkIsNotDuplicated() {
         let generated = CompileFixture.generate(source: """
         import Zerk
+        import Foundation
 
         @Injectable
-        struct Service {}
+        struct Service {
+            @InjectableProviding
+            init(at: Date) {}
+        }
         """)
 
         #expect(generated.components(separatedBy: "import Zerk").count == 2)
@@ -75,7 +81,10 @@ struct AutomaticImportTests {
         import Combine
 
         @Injectable
-        struct Service {}
+        struct Service {
+            @InjectableProviding
+            init(at: Date, cancellable: AnyCancellable) {}
+        }
         """)
 
         #expect(!generated.contains("import Foundation"))
@@ -91,7 +100,10 @@ struct AutomaticImportTests {
         #endif
 
         @Injectable
-        struct Service {}
+        struct Service {
+            @InjectableProviding
+            init(cancellable: AnyCancellable) {}
+        }
         """)
 
         #expect(generated.contains("#if (DEBUG)\nimport Combine\n#endif"))
@@ -105,10 +117,64 @@ struct AutomaticImportTests {
         import Foundation.NSURL
 
         @Injectable
-        struct Service {}
+        struct Service {
+            @InjectableProviding
+            init(url: NSURL) {}
+        }
         """)
 
         #expect(generated.contains("\nimport Foundation"))
+    }
+
+    // MARK: - Only what is needed
+
+    /// An import is copied from a file that put a name into the generated file
+    /// which this module does not declare. A file registering nothing but local
+    /// types has already been seen by the compiler here, so its imports buy the
+    /// generated file nothing — and a module in scope for no reason is a name
+    /// the generated file could trip over that it never needed.
+    @Test("a file registering only local types contributes no imports")
+    func localOnlyFilesContributeNothing() {
+        let generated = CompileFixture.generate(source: """
+        import Combine
+        import Foundation
+
+        protocol Repo {}
+
+        @Injectable<Repo>
+        struct LiveRepo: Repo {}
+        """)
+
+        #expect(!generated.contains("import Combine"))
+        #expect(!generated.contains("import Foundation"))
+        // `Zerk` is never optional.
+        #expect(generated.contains("import Zerk"))
+    }
+
+    /// And one foreign name in the file is enough to bring them.
+    @Test("one foreign name brings the file's imports")
+    func oneForeignNameIsEnough() {
+        let generated = CompileFixture.generate(source: """
+        import Combine
+        import Foundation
+
+        protocol Repo {}
+
+        @Injectable<Repo>
+        struct LiveRepo: Repo {}
+
+        @Injectable
+        struct Stamp {
+            @InjectableProviding
+            init(at: Date) {}
+        }
+        """)
+
+        #expect(generated.contains("\nimport Foundation"))
+        // Both, because imports are read per file and this is one file. Narrowing
+        // is per file rather than per name: which module a name came from is the
+        // very thing syntax cannot tell.
+        #expect(generated.contains("\nimport Combine"))
     }
 
     // MARK: - Two modules, one name
