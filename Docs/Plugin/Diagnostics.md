@@ -93,8 +93,6 @@ One failure Zerk cannot report lands in generated code instead: under `SWIFT_DEF
 | `@ImportedInjectableValue` written as an assignment rather than a getter | It reads the other module's value on every resolution, so it needs a getter: `static var apiKey: String { Zerk<String>.apiKey }` |
 | An `@ImportedInjectableValue` getter that is not a single `Zerk` expression | Same reason as `@ImportedInjectable` — it is inlined, so it cannot contain other logic |
 | `@ImportedInjectableValue` with no member named, or with no explicit type | Name the member; there is no primary value for a key to fall back on |
-| `#ZerkImport` with no module names | `#ZerkImport(module: "Foundation")` — at least one |
-| `#ZerkImport` given anything but plain string literals | Zerk reads these from source and cannot evaluate an expression |
 
 ## Key aliases
 

@@ -87,8 +87,15 @@ public struct CodeGenerator {
 
         // Alias groups merge keys before anything compares them, so resolution
         // and generation are alias-aware without knowing aliases exist.
+        // Computed from the keys as written, before anything is canonicalized:
+        // two modules producing one bare name must not be merged into a single
+        // key, and the written spelling is the only place that is visible.
+        let clashingBareNames = KeyAliases.clashingBareNames(
+            among: collector.keyDisplayNames.keys,
+            modules: collector.importedModules)
         let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                  knownModules: collector.importedModules)
+                                  knownModules: collector.importedModules,
+                                  clashingBareNames: clashingBareNames)
         let rewriter = AliasRewriter(aliases: aliases)
         let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
         let keyNominalNames = rewriter.rewrite(keyNominalNames: collector.keyNominalNames)

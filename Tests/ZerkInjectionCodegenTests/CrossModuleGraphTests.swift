@@ -122,7 +122,7 @@ struct CrossModuleGraphTests {
             .providers.first?.dependencies.first
 
         // Written `CrossCore.ApiServicing`, and only one key because
-        // `#ZerkImport(module: "CrossCore")` is there.
+        // the file's own `import CrossCore` is there.
         #expect(dependency?.source == "injectable")
         #expect(dependency?.key == "ApiServicing")
     }

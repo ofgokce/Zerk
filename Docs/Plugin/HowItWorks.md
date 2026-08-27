@@ -6,7 +6,7 @@ Zerk is a macro package and a build-tool plugin, and it is worth knowing which d
 
 `@Injectable`, `@InjectableProviding`, `@Singleton`, `@Scoped`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier, a generic parameter nothing can infer — are reported right at the declaration.
 
-The same is true of the rest of the markers: `@InjectableValue`, `@InjectableValues`, `@NonInjectable`, `@ZerkAlias`, `@ZerkImport`, and `@ImportedInjectableValue` all expand to nothing and exist for the same two reasons.
+The same is true of the rest of the markers: `@InjectableValue`, `@InjectableValues`, `@NonInjectable`, `@ZerkAlias`, and `@ImportedInjectableValue` all expand to nothing and exist for the same two reasons.
 
 `@Injected` and `@InjectedDynamically` are the two markers that generate code, because the expression they need (`Zerk<Key>.inject()`) depends on nothing but the property's own type. No whole-module view is required, so a macro can do it alone.
 

@@ -402,11 +402,11 @@ struct ConditionalCompilationTests {
         }
     }
 
-    @Test("a conditional #ZerkImport guards its import")
+    @Test("a conditional import guards its import")
     func conditionalImport() {
         let generated = CompileFixture.generate(source: """
         #if canImport(UIKit)
-        #ZerkImport(module: "UIKit")
+        import UIKit
         #endif
         """)
 
@@ -422,10 +422,10 @@ struct ConditionalCompilationTests {
     @Test("a module asked for both ways is imported unconditionally")
     func widerImportWins() {
         let generated = CompileFixture.generate(source: """
-        #ZerkImport(module: "Foundation")
+        import Foundation
 
         #if DEBUG
-        #ZerkImport(module: "Foundation")
+        import Foundation
         #endif
         """)
 
@@ -438,18 +438,18 @@ struct ConditionalCompilationTests {
     /// Two `#if DEBUG` blocks are two conditions — clause identity is file and
     /// offset — and the second ask used to widen the import to unconditional
     /// because it was not *equal* to the first. Writing the same guarded
-    /// `#ZerkImport` in each file that needs the module is an ordinary way to
+    /// `import` in each file that needs the module is an ordinary way to
     /// work, and it silently produced a Release build importing a module that is
     /// not in it.
     @Test("a module asked for twice under the same guard keeps it")
     func repeatedImportKeepsItsGuard() {
         let generated = CompileFixture.generate(source: """
         #if DEBUG
-        #ZerkImport(module: "Foundation")
+        import Foundation
         #endif
 
         #if DEBUG
-        #ZerkImport(module: "Foundation")
+        import Foundation
         #endif
         """)
 
@@ -466,11 +466,11 @@ struct ConditionalCompilationTests {
     func differingImportsKeepBothGuards() {
         let generated = CompileFixture.generate(source: """
         #if DEBUG
-        #ZerkImport(module: "Foundation")
+        import Foundation
         #endif
 
         #if os(iOS)
-        #ZerkImport(module: "Foundation")
+        import Foundation
         #endif
         """)
 

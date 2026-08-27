@@ -66,8 +66,8 @@ final class SourceCollector: SyntaxVisitor {
     /// `@ZerkAlias` / `#ZerkAlias` declarations, which merge keys before
     /// resolution. See ``KeyAliases``.
     private(set) var aliasDeclarations: [AliasDeclaration] = []
-    /// Modules `#ZerkImport` asked the generated file to import, from anywhere
-    /// in the module. Emitted deduplicated and sorted.
+    /// Modules the generated file imports: every module a file Zerk read
+    /// imported. Emitted deduplicated and sorted.
     private(set) var importedModules: Set<String> = []
     /// `@ImportedInjectable` declarations: keys from other modules this one may
     /// resolve against.
@@ -504,7 +504,6 @@ final class SourceCollector: SyntaxVisitor {
         collectAlias(macroName: node.macroName.text,
                      arguments: node.genericArgumentClause,
                      syntax: Syntax(node))
-        collectImport(macroName: node.macroName.text, arguments: node.arguments)
         return .skipChildren
     }
 
@@ -512,38 +511,50 @@ final class SourceCollector: SyntaxVisitor {
         collectAlias(macroName: node.macroName.text,
                      arguments: node.genericArgumentClause,
                      syntax: Syntax(node))
-        collectImport(macroName: node.macroName.text, arguments: node.arguments)
         return .skipChildren
     }
 
-    /// `#ZerkImport(module: "Foundation")` — names a module the generated file
-    /// must import. The macro has already refused anything unreadable, so a
-    /// non-literal argument is simply absent here.
-    private func collectImport(macroName: String, arguments: LabeledExprListSyntax) {
-        guard macroName == "ZerkImport" else {
-            return
+    /// Every `import` in a file Zerk reads becomes an import of the file Zerk
+    /// writes.
+    ///
+    /// The generated file names types it did not declare — a key written
+    /// `@Injectable<URLSession>`, a provider parameter typed `Date`, an
+    /// `@injected` member's own signature — and reading syntax cannot tell which
+    /// module a name came from. Asking the developer to restate it was what
+    /// `#ZerkImport` did, and restating is the part that goes wrong: the failure
+    /// is a missing name inside a generated file, and it arrives every time
+    /// somebody touches a foreign type.
+    ///
+    /// Copying the imports instead is correct by construction rather than by
+    /// diligence. A declaration mentioning `Date` sits in a file that imports
+    /// `Foundation`, or that file would not compile — so the union over the
+    /// files Zerk reads can only ever be a *superset* of what the generated file
+    /// needs. It cannot under-import, which is the failure `#ZerkImport` had.
+    ///
+    /// Two things are deliberately not copied:
+    ///
+    /// - **`@testable`**, which the generated file has no business carrying: it
+    ///   belongs to a test target, and reproducing it in one that is not is
+    ///   either an error or a lie about what the module can see.
+    /// - **Access-level modifiers and other attributes.** A plain `import` is
+    ///   what the generated file needs; `internal import X` restates a boundary
+    ///   about *that* file, not about this one.
+    ///
+    /// The `#if` a file's import sits under travels with it, exactly as a
+    /// registration's does, so a debug-only module stays debug-only. See
+    /// ``moduleImportConditions``.
+    override func visit(_ node: ImportDeclSyntax) -> SyntaxVisitorContinueKind {
+        guard !node.attributes.hasAttribute(named: "testable") else {
+            return .skipChildren
         }
-        for argument in arguments {
-            guard let module = argument.moduleNameLiteral else {
-                continue
-            }
-            importedModules.insert(module)
-            // Every ask is kept, and the emitter writes one guarded import per
-            // distinct guard. Collapsing them here is what a previous version
-            // did — two asks that were not *equal* widened the import to
-            // unconditional — and its defence was that "an unnecessary import is
-            // a warning at worst". That is false for exactly the module people
-            // guard an import for: a debug-only or platform-only module is not
-            // merely unnecessary in a Release build, it is absent, and naming it
-            // does not compile.
-            //
-            // It was also reachable by accident. `CompilationCondition` equality
-            // is structural over clauses whose identity is file-and-offset, so
-            // two files each writing `#if DEBUG` around the same `#ZerkImport`
-            // were unequal — and the second file silently dropped the guard the
-            // first had earned.
-            moduleImportConditions[module, default: []].insert(currentCondition)
+        // The module is the first path component: `import A.B.C` is a submodule
+        // of `A`, and naming `A` is what puts `A.B.C`'s contents in scope.
+        guard let module = node.path.first?.name.text, module != "Zerk" else {
+            return .skipChildren
         }
+        importedModules.insert(module)
+        moduleImportConditions[module, default: []].insert(currentCondition)
+        return .skipChildren
     }
 
     private func collectAlias(macroName: String,

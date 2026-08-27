@@ -203,12 +203,12 @@ struct ReviewRegressionTests {
     func differingImportConditionsAreOrderIndependent() {
         let debug = """
         #if DEBUG
-        #ZerkImport(module: "Mocks")
+        import Mocks
         #endif
         """
         let ios = """
         #if os(iOS)
-        #ZerkImport(module: "Mocks")
+        import Mocks
         #endif
         """
         let generated = CompileFixture.generate(source: "\(debug)\n\(ios)")
@@ -223,7 +223,7 @@ struct ReviewRegressionTests {
     func singleImportConditionIsKept() {
         let generated = CompileFixture.generate(source: """
         #if DEBUG
-        #ZerkImport(module: "Mocks")
+        import Mocks
         #endif
         """)
 

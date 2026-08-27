@@ -131,8 +131,12 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
-        let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                  knownModules: collector.importedModules)
+        let aliases = KeyAliases(
+            declarations: collector.aliasDeclarations,
+            knownModules: collector.importedModules,
+            clashingBareNames: KeyAliases.clashingBareNames(
+                among: collector.keyDisplayNames.keys,
+                modules: collector.importedModules))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
         // dropped before anything asks which provider backs their key.
@@ -177,8 +181,12 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
-        let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                  knownModules: collector.importedModules)
+        let aliases = KeyAliases(
+            declarations: collector.aliasDeclarations,
+            knownModules: collector.importedModules,
+            clashingBareNames: KeyAliases.clashingBareNames(
+                among: collector.keyDisplayNames.keys,
+                modules: collector.importedModules))
         let rewriter = AliasRewriter(aliases: aliases)
         let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
         let resolution = ProviderResolver(
@@ -218,8 +226,12 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
-        let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                  knownModules: collector.importedModules)
+        let aliases = KeyAliases(
+            declarations: collector.aliasDeclarations,
+            knownModules: collector.importedModules,
+            clashingBareNames: KeyAliases.clashingBareNames(
+                among: collector.keyDisplayNames.keys,
+                modules: collector.importedModules))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
         // dropped before anything asks which provider backs their key.
