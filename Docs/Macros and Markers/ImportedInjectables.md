@@ -202,7 +202,9 @@ Two things are not copied. `@testable import` belongs to the test target that wr
 
 If two imported modules export the same name, write the module out — `@Injectable<ModuleA.Config>`. Zerk normally strips a module qualifier, since `Core.Service` and `Service` are one type, but not for a name two modules both produce: those are two types and stay two keys, and the generated file says `extension Zerk<ModuleA.Config>`.
 
-This module counts as one of the producers. If it declares `Serving` and also imports a `Core.Serving`, the qualifier stays for the same reason — and for the reason Swift keeps them apart: a bare `Serving` names the local declaration, which shadows the import, and `Core.Serving` is the only way to reach the other. Both keys exist side by side, with `Zerk<Serving>` resolving the local one and `Zerk<Core.Serving>` the imported one.
+This module counts as one of the producers. If it declares `Serving` and also imports a `Core.Serving`, the qualifier stays for the same reason — and for the reason Swift keeps them apart: a bare `Serving` names the local declaration, which shadows the import, and `Core.Serving` is the only way to reach the other. Both keys exist side by side, with `Zerk<Serving>` resolving the local one and `Zerk<Core.Serving>` the imported one. Nesting is no different: declare `Outer` and `Core.Outer.Inner` keeps its qualifier too, decided on `Outer`, the component Swift looks up.
+
+Naming a type after a module goes further. A local `Core` shadows the module itself, everywhere in this module and not only in the file that declares it, so `Core.Serving` stops being a module qualifier at all and names that type's member. Zerk stops stripping it, and still emits `import Core` for the files that need the module.
 
 ## Diagnostics
 

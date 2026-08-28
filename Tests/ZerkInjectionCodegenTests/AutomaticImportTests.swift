@@ -276,6 +276,81 @@ struct AutomaticImportTests {
         #expect(result.output.output.contains("foreign: Core.Serving = Zerk<Core.Serving>.inject()"))
     }
 
+    /// The nested form of the same shadow. `Core.Outer.Inner` and `Outer.Inner`
+    /// are two types once this module declares `Outer`, so the qualifier stays
+    /// — decided on the first component, which is the one Swift looks up.
+    @Test("a local nested type shadows an imported one of the same spelling")
+    func aLocalNestedTypeShadowsAnImportedOne() {
+        let result = CompileFixture.generateWithResolution(source: """
+        import Core
+
+        enum Outer {
+            protocol Inner {}
+        }
+
+        enum ZerkImports {
+            @ImportedInjectable
+            static func coreInner() -> Core.Outer.Inner
+        }
+
+        @Injectable<Outer.Inner>
+        struct LocalInner: Outer.Inner {
+            @InjectableProviding
+            init() {}
+        }
+
+        @Injectable
+        struct Feed {
+            @InjectableProviding
+            init(local: Outer.Inner, foreign: Core.Outer.Inner) {}
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("local: Outer.Inner = Zerk<Outer.Inner>.inject()"))
+        #expect(result.output.output.contains("foreign: Core.Outer.Inner = Zerk<Core.Outer.Inner>.inject()"))
+    }
+
+    /// A qualifier is only a module name while no local type claims the word.
+    /// Declaring `Core` shadows the module everywhere in this one — including
+    /// files that do not declare it — so `Core.Serving` names that type's own
+    /// member, and stripping it would emit `extension Zerk<Serving>` over
+    /// whatever the *import* calls `Serving`, while the call site still said
+    /// `Zerk<Core.Serving>`. The import is still emitted; only stripping stops.
+    @Test("a type named after a module is not a module qualifier")
+    func aModuleNamesakeIsNotAQualifier() {
+        let result = CompileFixture.generateWithResolution(source: """
+        import Core
+
+        enum Core {
+            protocol Serving {}
+        }
+
+        @Injectable<Core.Serving>
+        struct LocalNested: Core.Serving {
+            @InjectableProviding
+            init() {}
+        }
+
+        @Injectable
+        struct Feed {
+            @InjectableProviding
+            init(nested: Core.Serving) {}
+        }
+
+        @Injectable
+        struct Wall {
+            @InjectableProviding
+            init(token: Core.Token) {}
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("extension Zerk<Core.Serving> {"))
+        #expect(result.output.output.contains("nested: Core.Serving = Zerk<Core.Serving>.inject()"))
+        #expect(!result.output.output.contains("extension Zerk<Serving> {"))
+    }
+
     /// And with no clash the qualifier is still dropped, so a dependency written
     /// `Core.Serving` resolves against a provider registered as `Serving`.
     @Test("a lone qualifier is still stripped")

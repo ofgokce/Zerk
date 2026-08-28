@@ -135,12 +135,16 @@ enum CompileFixture {
         // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
         let declaredLocally = Set(collector.declaredAccessRanks.keys)
         let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
+        // Mirrors CodeGenerator: a module this one declares a namesake for is
+        // no longer a strippable qualifier, though it is still imported.
+        let strippableModules = resolvedImports.modules
+            .subtracting(declaredLocally.lazy.filter { !$0.contains(".") })
         let aliases = KeyAliases(
             declarations: collector.aliasDeclarations,
-            knownModules: resolvedImports.modules,
+            knownModules: strippableModules,
             clashingBareNames: KeyAliases.clashingBareNames(
                 among: collector.writtenKeySpellings,
-                modules: resolvedImports.modules,
+                modules: strippableModules,
                 declaredLocally: declaredLocally))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
@@ -190,12 +194,16 @@ enum CompileFixture {
         // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
         let declaredLocally = Set(collector.declaredAccessRanks.keys)
         let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
+        // Mirrors CodeGenerator: a module this one declares a namesake for is
+        // no longer a strippable qualifier, though it is still imported.
+        let strippableModules = resolvedImports.modules
+            .subtracting(declaredLocally.lazy.filter { !$0.contains(".") })
         let aliases = KeyAliases(
             declarations: collector.aliasDeclarations,
-            knownModules: resolvedImports.modules,
+            knownModules: strippableModules,
             clashingBareNames: KeyAliases.clashingBareNames(
                 among: collector.writtenKeySpellings,
-                modules: resolvedImports.modules,
+                modules: strippableModules,
                 declaredLocally: declaredLocally))
         let rewriter = AliasRewriter(aliases: aliases)
         let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
@@ -240,12 +248,16 @@ enum CompileFixture {
         // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
         let declaredLocally = Set(collector.declaredAccessRanks.keys)
         let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
+        // Mirrors CodeGenerator: a module this one declares a namesake for is
+        // no longer a strippable qualifier, though it is still imported.
+        let strippableModules = resolvedImports.modules
+            .subtracting(declaredLocally.lazy.filter { !$0.contains(".") })
         let aliases = KeyAliases(
             declarations: collector.aliasDeclarations,
-            knownModules: resolvedImports.modules,
+            knownModules: strippableModules,
             clashingBareNames: KeyAliases.clashingBareNames(
                 among: collector.writtenKeySpellings,
-                modules: resolvedImports.modules,
+                modules: strippableModules,
                 declaredLocally: declaredLocally))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are

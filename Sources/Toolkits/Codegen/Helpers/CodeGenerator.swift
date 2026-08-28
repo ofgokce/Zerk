@@ -91,15 +91,24 @@ public struct CodeGenerator {
         // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
         let declaredLocally = Set(collector.declaredAccessRanks.keys)
         let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
+        // A qualifier names a module only until this module declares a type of
+        // that name. Swift then resolves the bare word to the type — module
+        // wide, from any file, whether or not that file declares it — so
+        // `Core.Serving` names a *member* and stripping it would rename a local
+        // type to something else entirely. The import itself still has to be
+        // emitted, so this narrows only what may be stripped, not what is
+        // imported.
+        let strippableModules = resolvedImports.modules
+            .subtracting(declaredLocally.lazy.filter { !$0.contains(".") })
         // Computed from the keys as written, before anything is canonicalized:
         // two modules producing one bare name must not be merged into a single
         // key, and the written spelling is the only place that is visible.
         let clashingBareNames = KeyAliases.clashingBareNames(
             among: collector.writtenKeySpellings,
-            modules: resolvedImports.modules,
+            modules: strippableModules,
             declaredLocally: declaredLocally)
         let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                  knownModules: resolvedImports.modules,
+                                  knownModules: strippableModules,
                                   clashingBareNames: clashingBareNames)
         let rewriter = AliasRewriter(aliases: aliases)
         let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
