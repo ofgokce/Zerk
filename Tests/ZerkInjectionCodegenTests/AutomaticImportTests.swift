@@ -351,6 +351,82 @@ struct AutomaticImportTests {
         #expect(!result.output.output.contains("extension Zerk<Serving> {"))
     }
 
+    // MARK: - Nested scope
+
+    /// Swift looks a bare name up innermost-first; Zerk re-emits it at file
+    /// scope. Written inside `LiveFeed`, `Config` is `LiveFeed.Config`, and the
+    /// generated file said `config: Config` — which compiles as
+    /// `cannot find type 'Config' in scope`, against code nobody wrote.
+    @Test("a dependency naming a type nested in its own scope is refused")
+    func aNestedDependencyNameIsRefused() {
+        let result = CompileFixture.generateWithResolution(source: """
+        @Injectable<Feed>
+        struct LiveFeed: Feed {
+            struct Config {}
+
+            @InjectableProviding
+            init(config: Config) {}
+        }
+        """)
+
+        #expect(result.diagnostics.count == 1)
+        #expect(result.diagnostics.first?.message.contains("'Config' here means 'LiveFeed.Config'") == true)
+        #expect(result.diagnostics.first?.message.contains("Write 'LiveFeed.Config'") == true)
+    }
+
+    /// And qualifying is the way out, so the refusal is actionable.
+    @Test("qualifying a nested dependency resolves it")
+    func qualifyingANestedDependencyResolvesIt() {
+        let result = CompileFixture.generateWithResolution(source: """
+        @Injectable<Feed>
+        struct LiveFeed: Feed {
+            struct Config {}
+
+            @InjectableProviding
+            init(config: LiveFeed.Config) {}
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("config: LiveFeed.Config"))
+    }
+
+    /// The same lookup through `@Injected`, where the damage was a *wrong*
+    /// answer rather than a missing one: the bare `Service` matched the
+    /// top-level key, whose provider is async, and Zerk refused code that was
+    /// resolving the synchronous `Feature.Service` all along.
+    @Test("an @Injected use is read in the scope it was written in")
+    func anInjectedUseIsReadInItsOwnScope() {
+        let result = CompileFixture.generateWithResolution(source: """
+        protocol Service {}
+
+        @Injectable<Service>
+        struct SlowService: Service {
+            @InjectableProviding
+            init() async {}
+        }
+
+        enum Feature {
+            protocol Service {}
+
+            final class ViewModel {
+                @Injected var service: Service
+            }
+        }
+
+        @Injectable<Feature.Service>
+        struct FastService: Feature.Service {
+            @InjectableProviding
+            init() {}
+        }
+        """)
+
+        // The fixture keeps generating past an error, so the stale async
+        // complaint is still in the list; the generator stops before it. What
+        // matters is that the scope is now read, and it is read first.
+        #expect(result.diagnostics.first?.message.contains("'Service' here means 'Feature.Service'") == true)
+    }
+
     /// And with no clash the qualifier is still dropped, so a dependency written
     /// `Core.Serving` resolves against a provider registered as `Serving`.
     @Test("a lone qualifier is still stripped")

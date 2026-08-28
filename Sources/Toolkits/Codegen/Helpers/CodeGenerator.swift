@@ -141,8 +141,16 @@ public struct CodeGenerator {
         ).merged(into: localValues)
         let values = importedValues.values
 
+        // After the walk, never during it: a nested type declared below its own
+        // use is still the one Swift's lookup picks, so this can only be
+        // answered once every declaration in the module is known.
+        let nestedNames = NestedNameCheck(declaredAccessRanks: collector.declaredAccessRanks)
+            .diagnostics(types: collector.types,
+                         markedMembers: collector.markedMembers,
+                         injectedUses: collector.injectedUses)
+
         var diagnostics = collector.diagnostics + gate.diagnostics + resolution.diagnostics
-            + imports.diagnostics + importedValues.diagnostics
+            + imports.diagnostics + importedValues.diagnostics + nestedNames
 
         if diagnostics.contains(where: { $0.severity == .error }) {
             emitDiagnostics(diagnostics)

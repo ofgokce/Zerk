@@ -299,6 +299,12 @@ enum CompileFixture {
         // Accumulated rather than summed in one expression: a six-way `+` chain
         // of arrays trips the type-checker's complexity limit.
         var diagnostics: [CodegenDiagnostic] = collector.diagnostics
+        // Mirrors CodeGenerator: answered after the walk, once every
+        // declaration is known.
+        diagnostics += NestedNameCheck(declaredAccessRanks: collector.declaredAccessRanks)
+            .diagnostics(types: collector.types,
+                         markedMembers: collector.markedMembers,
+                         injectedUses: collector.injectedUses)
         diagnostics += gate.diagnostics
         diagnostics += resolution.diagnostics
         diagnostics += imports.diagnostics

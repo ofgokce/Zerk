@@ -1471,23 +1471,6 @@ final class SourceCollector: SyntaxVisitor {
         }
     }
 
-    /// Records a key's spelling and the types that spelling mentions, together.
-    ///
-    /// Together, and through one function, because they answer for each other:
-    /// the spelling is what `extension Zerk<Key>` is written as, and the names
-    /// are what decides whether that extension's members may be `public`. A
-    /// registration that recorded only the spelling passed the export check
-    /// vacuously — the check falls back to the key *text*, which matches a bare
-    /// type name and matches nothing at all for `Cache<Hidden>` or
-    /// `any Alpha & Beta`. `@InjectableValue` did exactly that, and emitted a
-    /// `public` member exposing an internal type.
-    ///
-    /// So there is no way to record one without the other. The spelling half
-    /// prefers an `any` spelling over a bare one when declarations disagree.
-    ///
-    /// Only declarations that *establish* a key feed this. A parameter or an
-    /// `@Injected` property keeps its own spelling at its own use site, which
-    /// reaches the same specialization regardless.
     /// Every nominal name a record's parameters mention, noted for this file.
     private func note(parametersOf record: TypeRecord) {
         var names: Set<String> = []
@@ -1511,6 +1494,23 @@ final class SourceCollector: SyntaxVisitor {
         mentionedNamesByFile[sourceFile, default: []].formUnion(names)
     }
 
+    /// Records a key's spelling and the types that spelling mentions, together.
+    ///
+    /// Together, and through one function, because they answer for each other:
+    /// the spelling is what `extension Zerk<Key>` is written as, and the names
+    /// are what decides whether that extension's members may be `public`. A
+    /// registration that recorded only the spelling passed the export check
+    /// vacuously — the check falls back to the key *text*, which matches a bare
+    /// type name and matches nothing at all for `Cache<Hidden>` or
+    /// `any Alpha & Beta`. `@InjectableValue` did exactly that, and emitted a
+    /// `public` member exposing an internal type.
+    ///
+    /// So there is no way to record one without the other. The spelling half
+    /// prefers an `any` spelling over a bare one when declarations disagree.
+    ///
+    /// Only declarations that *establish* a key feed this. A parameter or an
+    /// `@Injected` property keeps its own spelling at its own use site, which
+    /// reaches the same specialization regardless.
     private func recordKey(display displayName: String, nominalNames: Set<String>, for key: String) {
         keyNominalNames[key, default: []].formUnion(nominalNames)
         note(nominalNames)

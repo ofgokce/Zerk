@@ -2,6 +2,26 @@
 
 What Zerk cannot do, and why. Most of it follows from one fact: the plugin reads syntax and never resolved types. The rest are rules the graph enforces so the generated file is unambiguous.
 
+## A dependency's name is read where you wrote it
+
+Swift looks a bare type name up innermost-first, and Zerk re-emits that name at file scope in
+the generated file, so the two disagree for anything nested. Written inside `LiveFeed`, a bare
+`Config` means `LiveFeed.Config`, which file scope cannot spell:
+
+```swift
+@Injectable<Feed>
+struct LiveFeed: Feed {
+    struct Config {}
+
+    @InjectableProviding
+    init(config: Config) {}   // error: 'Config' here means 'LiveFeed.Config'
+}
+```
+
+Write `LiveFeed.Config` and it resolves. This is the same limit `@Injectable` states for a
+nested type — Zerk builds from file scope — reaching dependencies rather than registrations,
+and it applies to `@Injected` and `@injected` markers on the same terms.
+
 ## What the plugin can read
 
 ### Syntax-level resolution
