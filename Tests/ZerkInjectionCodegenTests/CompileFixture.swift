@@ -133,14 +133,15 @@ enum CompileFixture {
 
         // Narrowed to the files that actually put a foreign name into the
         // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
-        let resolvedImports = collector.resolvedImports(
-            declaredLocally: Set(collector.declaredAccessRanks.keys))
+        let declaredLocally = Set(collector.declaredAccessRanks.keys)
+        let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
         let aliases = KeyAliases(
             declarations: collector.aliasDeclarations,
             knownModules: resolvedImports.modules,
             clashingBareNames: KeyAliases.clashingBareNames(
                 among: collector.writtenKeySpellings,
-                modules: resolvedImports.modules))
+                modules: resolvedImports.modules,
+                declaredLocally: declaredLocally))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
         // dropped before anything asks which provider backs their key.
@@ -187,14 +188,15 @@ enum CompileFixture {
 
         // Narrowed to the files that actually put a foreign name into the
         // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
-        let resolvedImports = collector.resolvedImports(
-            declaredLocally: Set(collector.declaredAccessRanks.keys))
+        let declaredLocally = Set(collector.declaredAccessRanks.keys)
+        let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
         let aliases = KeyAliases(
             declarations: collector.aliasDeclarations,
             knownModules: resolvedImports.modules,
             clashingBareNames: KeyAliases.clashingBareNames(
                 among: collector.writtenKeySpellings,
-                modules: resolvedImports.modules))
+                modules: resolvedImports.modules,
+                declaredLocally: declaredLocally))
         let rewriter = AliasRewriter(aliases: aliases)
         let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
         let resolution = ProviderResolver(
@@ -236,14 +238,15 @@ enum CompileFixture {
 
         // Narrowed to the files that actually put a foreign name into the
         // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
-        let resolvedImports = collector.resolvedImports(
-            declaredLocally: Set(collector.declaredAccessRanks.keys))
+        let declaredLocally = Set(collector.declaredAccessRanks.keys)
+        let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
         let aliases = KeyAliases(
             declarations: collector.aliasDeclarations,
             knownModules: resolvedImports.modules,
             clashingBareNames: KeyAliases.clashingBareNames(
                 among: collector.writtenKeySpellings,
-                modules: resolvedImports.modules))
+                modules: resolvedImports.modules,
+                declaredLocally: declaredLocally))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
         // dropped before anything asks which provider backs their key.

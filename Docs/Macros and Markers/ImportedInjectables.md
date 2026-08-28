@@ -202,6 +202,8 @@ Two things are not copied. `@testable import` belongs to the test target that wr
 
 If two imported modules export the same name, write the module out — `@Injectable<ModuleA.Config>`. Zerk normally strips a module qualifier, since `Core.Service` and `Service` are one type, but not for a name two modules both produce: those are two types and stay two keys, and the generated file says `extension Zerk<ModuleA.Config>`.
 
+This module counts as one of the producers. If it declares `Serving` and also imports a `Core.Serving`, the qualifier stays for the same reason — and for the reason Swift keeps them apart: a bare `Serving` names the local declaration, which shadows the import, and `Core.Serving` is the only way to reach the other. Both keys exist side by side, with `Zerk<Serving>` resolving the local one and `Zerk<Core.Serving>` the imported one.
+
 ## Diagnostics
 
 The macros check one declaration each; the plugin checks the module. In Zerk's own words:

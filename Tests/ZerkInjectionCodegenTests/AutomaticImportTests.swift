@@ -241,6 +241,41 @@ struct AutomaticImportTests {
         #expect(result.output.output.contains("b: ModuleB.Config = Zerk<ModuleB.Config>.inject()"))
     }
 
+    /// A local declaration is a producer of a bare name too, and the one Swift
+    /// picks: `Serving` names the local protocol and `Core.Serving` the
+    /// imported one, which compiles as written. Stripping here merged them, and
+    /// the report — that a key is both imported and declared locally — named
+    /// the one thing the developer had done right.
+    @Test("a local declaration shadows an imported name rather than merging with it")
+    func aLocalDeclarationShadowsAnImportedName() {
+        let result = CompileFixture.generateWithResolution(source: """
+        import Core
+
+        protocol Serving {}
+
+        enum ZerkImports {
+            @ImportedInjectable
+            static func coreServing() -> Core.Serving
+        }
+
+        @Injectable<Serving>
+        struct LocalServing: Serving {
+            @InjectableProviding
+            init() {}
+        }
+
+        @Injectable
+        struct Feed {
+            @InjectableProviding
+            init(local: Serving, foreign: Core.Serving) {}
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("local: Serving = Zerk<Serving>.inject()"))
+        #expect(result.output.output.contains("foreign: Core.Serving = Zerk<Core.Serving>.inject()"))
+    }
+
     /// And with no clash the qualifier is still dropped, so a dependency written
     /// `Core.Serving` resolves against a provider registered as `Serving`.
     @Test("a lone qualifier is still stripped")

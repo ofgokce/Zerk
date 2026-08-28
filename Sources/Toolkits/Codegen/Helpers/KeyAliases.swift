@@ -166,15 +166,28 @@ struct KeyAliases {
     /// spelling that tells them apart is exactly the one being discarded. Naming
     /// the module is how this is resolved in ordinary Swift; this is what makes
     /// it work here too.
+    ///
+    /// - Parameter declaredLocally: names this module declares itself. It is a
+    ///   producer of bare names like any import, and the *shadowing* one:
+    ///   Swift resolves a bare `Serving` to the local declaration and reaches
+    ///   the other only as `Core.Serving`, so a module that declares `Serving`
+    ///   and imports one clashes on it even though no two imports do. Missing
+    ///   this read as importing a key the module also declares, and advised
+    ///   dropping one of them — for source Swift compiles as written.
     static func clashingBareNames(among writtenKeys: some Sequence<String>,
-                                  modules: Set<String>) -> Set<String> {
+                                  modules: Set<String>,
+                                  declaredLocally: Set<String> = []) -> Set<String> {
         var qualifiers: [String: Set<String>] = [:]
+        var shadowed: Set<String> = []
         for key in writtenKeys {
             for (module, bare) in Self.qualifiedComponents(of: key, modules: modules) {
+                if declaredLocally.contains(bare) {
+                    shadowed.insert(bare)
+                }
                 qualifiers[bare, default: []].insert(module)
             }
         }
-        return Set(qualifiers.filter { $0.value.count > 1 }.keys)
+        return shadowed.union(qualifiers.filter { $0.value.count > 1 }.keys)
     }
 
     /// Every `Module.Name` pair a spelling contains, for modules that are known.
