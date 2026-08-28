@@ -139,7 +139,7 @@ enum CompileFixture {
             declarations: collector.aliasDeclarations,
             knownModules: resolvedImports.modules,
             clashingBareNames: KeyAliases.clashingBareNames(
-                among: collector.keyDisplayNames.keys,
+                among: collector.writtenKeySpellings,
                 modules: resolvedImports.modules))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
@@ -193,7 +193,7 @@ enum CompileFixture {
             declarations: collector.aliasDeclarations,
             knownModules: resolvedImports.modules,
             clashingBareNames: KeyAliases.clashingBareNames(
-                among: collector.keyDisplayNames.keys,
+                among: collector.writtenKeySpellings,
                 modules: resolvedImports.modules))
         let rewriter = AliasRewriter(aliases: aliases)
         let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
@@ -242,7 +242,7 @@ enum CompileFixture {
             declarations: collector.aliasDeclarations,
             knownModules: resolvedImports.modules,
             clashingBareNames: KeyAliases.clashingBareNames(
-                among: collector.keyDisplayNames.keys,
+                among: collector.writtenKeySpellings,
                 modules: resolvedImports.modules))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are

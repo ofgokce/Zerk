@@ -209,6 +209,38 @@ struct AutomaticImportTests {
         #expect(result.output.output.contains("extension Zerk<ModuleB.Config> {"))
     }
 
+    /// The same clash between two *imported* keys, which is the shape it
+    /// actually takes: a bare name two modules both produce is almost always
+    /// foreign on both sides, so neither key is declared here. Read from
+    /// `keyDisplayNames` alone this case was invisible, and the two imports
+    /// merged into one key.
+    @Test("two imported keys sharing a bare name stay two keys")
+    func clashingImportedQualifiersAreNotMerged() {
+        let result = CompileFixture.generateWithResolution(source: """
+        import ModuleA
+        import ModuleB
+
+        enum ZerkImports {
+            @ImportedInjectable
+            static func a() -> ModuleA.Config
+
+            @ImportedInjectable
+            static func b() -> ModuleB.Config
+        }
+
+        @Injectable
+        struct Bridge {
+            @InjectableProviding
+            init(a: ModuleA.Config, b: ModuleB.Config) {}
+        }
+        """)
+
+        // Not "'Config' is imported more than once": they are two keys.
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("a: ModuleA.Config = Zerk<ModuleA.Config>.inject()"))
+        #expect(result.output.output.contains("b: ModuleB.Config = Zerk<ModuleB.Config>.inject()"))
+    }
+
     /// And with no clash the qualifier is still dropped, so a dependency written
     /// `Core.Serving` resolves against a provider registered as `Serving`.
     @Test("a lone qualifier is still stripped")

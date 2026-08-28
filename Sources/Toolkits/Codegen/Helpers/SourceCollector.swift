@@ -600,6 +600,21 @@ final class SourceCollector: SyntaxVisitor {
         return (modules, conditions)
     }
 
+    /// Every key spelling as it was written, from both places a key can come
+    /// from: a local declaration and an `@ImportedInjectable`.
+    ///
+    /// The only input to ``KeyAliases/clashingBareNames(among:modules:)``, which
+    /// is why it is one property here rather than an expression at each call
+    /// site. It was the latter, reading ``keyDisplayNames`` alone, and that
+    /// missed the case the clash rule was written for: two modules producing one
+    /// bare name are almost always both *foreign*, so neither reaches
+    /// `keyDisplayNames` and the two merged into a single key — reported as
+    /// `'Config' is imported more than once`, against two imports that name
+    /// different types.
+    var writtenKeySpellings: [String] {
+        Array(keyDisplayNames.keys) + importedInjectables.map(\.typeName)
+    }
+
     private func collectAlias(macroName: String,
                               arguments: GenericArgumentClauseSyntax?,
                               syntax: Syntax) {

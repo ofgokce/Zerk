@@ -95,7 +95,7 @@ public struct CodeGenerator {
         // two modules producing one bare name must not be merged into a single
         // key, and the written spelling is the only place that is visible.
         let clashingBareNames = KeyAliases.clashingBareNames(
-            among: collector.keyDisplayNames.keys,
+            among: collector.writtenKeySpellings,
             modules: resolvedImports.modules)
         let aliases = KeyAliases(declarations: collector.aliasDeclarations,
                                   knownModules: resolvedImports.modules,
