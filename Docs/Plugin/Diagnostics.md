@@ -171,6 +171,19 @@ The Swift 5 diagnostic names the three settings it read out of `ZerkSettings.jso
 | `@Injectable(primary:)` or `(public:)` given anything but a `true`/`false` literal | Zerk reads this from source and cannot evaluate an expression |
 | `@InjectableProviding` on something other than an initializer or a `static` function, or on a function with no return type | The return type is the key |
 
+## Storage a property does not have
+
+`@Injected` initializes a property's storage at the moment its enclosing value is initialized, so
+it needs the property to be stored and to belong to an instance. Each of these says which of
+those is missing. See [SwiftUI and `@Observable`](../Features/SwiftUI.md).
+
+| What triggers it | The fix |
+|---|---|
+| `@Injected` on a `static` or `class` property | There is no instance initialization to hook — write `static let x = Zerk<Key>.inject()`, or use `@InjectedDynamically` |
+| `@Injected` on a property at file scope | Likewise — write `let x = Zerk<Key>.inject()`, or use `@InjectedDynamically` |
+| `@Injected` on a property of an `@Observable` type | `@Observable` rewrites it into a computed property; mark it `@ObservationIgnored`, which leaves it stored |
+| `@Injected` alongside a property wrapper — `@State`, `@StateObject`, `@ObservedObject`, `@Published`, `@Bindable` | The wrapper owns the storage; hand it the value instead — `@StateObject var model = Zerk<Key>.inject()` |
+
 ## The one diagnostic that is not Zerk's
 
 One diagnostic comes from the compiler rather than Zerk: a non-`Sendable` kept instance — a `@Singleton` or a `@Scoped` — injected across an isolation boundary. Zerk emits a `Sendable` constraint check with an explanatory comment so the failure lands somewhere legible instead of inside a factory body.

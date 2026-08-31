@@ -84,6 +84,19 @@ public struct InjectedPropertyInfo {
             let isObservationIgnored = variableDecl.attributes
                 .hasAttribute(named: "ObservationIgnored")
 
+            // A property wrapper owns its own storage, and this macro
+            // initializes storage — so there is nothing here to initialize. The
+            // compiler says so as "init accessor cannot refer to property",
+            // naming a macro expansion rather than the wrapper, which is the one
+            // thing that would explain it.
+            //
+            // The wrapper's own initializer takes the resolved value directly,
+            // so the fix is a spelling rather than a redesign.
+            if let wrapper = variableDecl.attributes.firstWrappedValueAttributeName {
+                context.zerkError(attribute, "\(macroName) initializes a property's storage, and @\(wrapper) owns storage of its own. Write '@\(wrapper) var \(Self.name(of: variableDecl) ?? "property") = Zerk<Key>.inject()', which hands the wrapper the resolved value.")
+                return nil
+            }
+
             // Nothing encloses the declaration. Two very different things look
             // like this, and only one of them is a global.
             if context.lexicalContext.isEmpty {

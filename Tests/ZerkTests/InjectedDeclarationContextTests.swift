@@ -161,6 +161,25 @@ struct InjectedDeclarationContextTests {
         #expect(diagnostics.first?.message.contains("a global has no such moment") == false)
     }
 
+    // MARK: - Property wrappers
+
+    /// A property wrapper owns its storage, so there is none here for this
+    /// macro to initialize. Without this the compiler reports "init accessor
+    /// cannot refer to property" against a macro expansion, naming neither the
+    /// wrapper nor Zerk.
+    @Test("a wrapped property names the wrapper and the spelling that works")
+    func aWrappedPropertyIsRefused() throws {
+        let (info, diagnostics) = try expand(
+            Context(name: "@StateObject",
+                    declaration: "@StateObject @Injected var model: Model",
+                    enclosing: "struct FeedView {}",
+                    isAccepted: false))
+
+        #expect(info == nil)
+        #expect(diagnostics.first?.message.contains("@StateObject owns storage of its own") == true)
+        #expect(diagnostics.first?.message.contains("= Zerk<Key>.inject()") == true)
+    }
+
     private func expand(_ context: Context,
                         macroName: String = "@Injected",
                         requiresInstanceStorage: Bool = true) throws

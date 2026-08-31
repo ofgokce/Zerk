@@ -49,6 +49,7 @@ Topics that span several macros.
 | [Generics](Features/Generics.md) | The three ways to register a generic type, and what each can do |
 | [Concurrency](Features/Concurrency.md) | Isolation, effects, crossing a domain, and what Swift 6 needs from you |
 | [Conditional compilation](Features/ConditionalCompilation.md) | `#if` around registrations — carrying the guard into generated code, and per-configuration primaries |
+| [SwiftUI and `@Observable`](Features/SwiftUI.md) | `@ObservationIgnored`, property wrappers, and registering a view model |
 
 ## The plugin
 
