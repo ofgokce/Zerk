@@ -357,8 +357,8 @@ struct AutomaticImportTests {
     /// scope. Written inside `LiveFeed`, `Config` is `LiveFeed.Config`, and the
     /// generated file said `config: Config` — which compiles as
     /// `cannot find type 'Config' in scope`, against code nobody wrote.
-    @Test("a dependency naming a type nested in its own scope is refused")
-    func aNestedDependencyNameIsRefused() {
+    @Test("a dependency naming a type nested in its own scope is qualified")
+    func aNestedDependencyNameIsQualified() {
         let result = CompileFixture.generateWithResolution(source: """
         @Injectable<Feed>
         struct LiveFeed: Feed {
@@ -369,14 +369,15 @@ struct AutomaticImportTests {
         }
         """)
 
-        #expect(result.diagnostics.count == 1)
-        #expect(result.diagnostics.first?.message.contains("'Config' here means 'LiveFeed.Config'") == true)
-        #expect(result.diagnostics.first?.message.contains("Write 'LiveFeed.Config'") == true)
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("config: LiveFeed.Config"))
+        #expect(!result.output.output.contains("config: Config"))
     }
 
-    /// And qualifying is the way out, so the refusal is actionable.
-    @Test("qualifying a nested dependency resolves it")
-    func qualifyingANestedDependencyResolvesIt() {
+    /// Writing the qualified spelling yourself reaches the same place, so the
+    /// rewrite adds a spelling rather than requiring one.
+    @Test("a dependency already qualified is left alone")
+    func anAlreadyQualifiedDependencyIsUnchanged() {
         let result = CompileFixture.generateWithResolution(source: """
         @Injectable<Feed>
         struct LiveFeed: Feed {
@@ -389,6 +390,25 @@ struct AutomaticImportTests {
 
         #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
         #expect(result.output.output.contains("config: LiveFeed.Config"))
+    }
+
+    /// Nesting inside the name too: Swift resolves the *base* of a dotted path
+    /// in the enclosing scope, so `Config.Key` is `LiveFeed.Config.Key` and the
+    /// `Key` after the dot is not touched.
+    @Test("only the base of a dotted spelling is qualified")
+    func onlyTheBaseOfADottedSpellingIsQualified() {
+        let result = CompileFixture.generateWithResolution(source: """
+        @Injectable<Feed>
+        struct LiveFeed: Feed {
+            struct Config { struct Key {} }
+
+            @InjectableProviding
+            init(key: Config.Key) {}
+        }
+        """)
+
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
+        #expect(result.output.output.contains("key: LiveFeed.Config.Key"))
     }
 
     /// The same lookup through `@Injected`, where the damage was a *wrong*
@@ -421,10 +441,8 @@ struct AutomaticImportTests {
         }
         """)
 
-        // The fixture keeps generating past an error, so the stale async
-        // complaint is still in the list; the generator stops before it. What
-        // matters is that the scope is now read, and it is read first.
-        #expect(result.diagnostics.first?.message.contains("'Service' here means 'Feature.Service'") == true)
+        // Not "'Service' has an async ... chain", which read the wrong key.
+        #expect(result.diagnostics.isEmpty, "\(result.diagnostics.map(\.message))")
     }
 
     /// And with no clash the qualifier is still dropped, so a dependency written

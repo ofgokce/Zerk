@@ -133,6 +133,12 @@ enum CompileFixture {
 
         // Narrowed to the files that actually put a foreign name into the
         // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        // Mirrors CodeGenerator: a bare name is read in the scope it was
+        // written in, before anything compares keys.
+        let scoped = NestedNameResolver(declaredAccessRanks: collector.declaredAccessRanks)
+            .resolved(types: collector.types,
+                      markedMembers: collector.markedMembers,
+                      injectedUses: collector.injectedUses)
         let declaredLocally = Set(collector.declaredAccessRanks.keys)
         let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
         // Mirrors CodeGenerator: a module this one declares a namesake for is
@@ -149,7 +155,7 @@ enum CompileFixture {
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
         // dropped before anything asks which provider backs their key.
-        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
+        let gate = GenericGate.admitted(rewriter.rewrite(types: scoped.types))
         let resolution = ProviderResolver(
             types: gate.types,
             aliases: aliases,
@@ -175,8 +181,8 @@ enum CompileFixture {
             declaredAccessRanks: collector.declaredAccessRanks,
             declaredGenericParameters: collector.declaredGenericParameters,
             keyNominalNames: rewriter.rewrite(keyNominalNames: collector.keyNominalNames),
-            injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
-            markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
+            injectedUses: rewriter.rewrite(injectedUses: scoped.injectedUses),
+            markedMembers: rewriter.rewrite(markedMembers: scoped.markedMembers),
             keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
             importedModules: resolvedImports.modules,
             moduleImportConditions: resolvedImports.conditions,
@@ -192,6 +198,12 @@ enum CompileFixture {
 
         // Narrowed to the files that actually put a foreign name into the
         // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        // Mirrors CodeGenerator: a bare name is read in the scope it was
+        // written in, before anything compares keys.
+        let scoped = NestedNameResolver(declaredAccessRanks: collector.declaredAccessRanks)
+            .resolved(types: collector.types,
+                      markedMembers: collector.markedMembers,
+                      injectedUses: collector.injectedUses)
         let declaredLocally = Set(collector.declaredAccessRanks.keys)
         let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
         // Mirrors CodeGenerator: a module this one declares a namesake for is
@@ -206,7 +218,7 @@ enum CompileFixture {
                 modules: strippableModules,
                 declaredLocally: declaredLocally))
         let rewriter = AliasRewriter(aliases: aliases)
-        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
+        let gate = GenericGate.admitted(rewriter.rewrite(types: scoped.types))
         let resolution = ProviderResolver(
             types: gate.types,
             aliases: aliases,
@@ -246,6 +258,12 @@ enum CompileFixture {
 
         // Narrowed to the files that actually put a foreign name into the
         // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        // Mirrors CodeGenerator: a bare name is read in the scope it was
+        // written in, before anything compares keys.
+        let scoped = NestedNameResolver(declaredAccessRanks: collector.declaredAccessRanks)
+            .resolved(types: collector.types,
+                      markedMembers: collector.markedMembers,
+                      injectedUses: collector.injectedUses)
         let declaredLocally = Set(collector.declaredAccessRanks.keys)
         let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
         // Mirrors CodeGenerator: a module this one declares a namesake for is
@@ -262,7 +280,7 @@ enum CompileFixture {
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
         // dropped before anything asks which provider backs their key.
-        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
+        let gate = GenericGate.admitted(rewriter.rewrite(types: scoped.types))
         let resolution = ProviderResolver(
             types: gate.types,
             aliases: aliases,
@@ -288,8 +306,8 @@ enum CompileFixture {
             declaredAccessRanks: collector.declaredAccessRanks,
             declaredGenericParameters: collector.declaredGenericParameters,
             keyNominalNames: rewriter.rewrite(keyNominalNames: collector.keyNominalNames),
-            injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
-            markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
+            injectedUses: rewriter.rewrite(injectedUses: scoped.injectedUses),
+            markedMembers: rewriter.rewrite(markedMembers: scoped.markedMembers),
             keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
             importedModules: resolvedImports.modules,
             moduleImportConditions: resolvedImports.conditions,
@@ -299,12 +317,6 @@ enum CompileFixture {
         // Accumulated rather than summed in one expression: a six-way `+` chain
         // of arrays trips the type-checker's complexity limit.
         var diagnostics: [CodegenDiagnostic] = collector.diagnostics
-        // Mirrors CodeGenerator: answered after the walk, once every
-        // declaration is known.
-        diagnostics += NestedNameCheck(declaredAccessRanks: collector.declaredAccessRanks)
-            .diagnostics(types: collector.types,
-                         markedMembers: collector.markedMembers,
-                         injectedUses: collector.injectedUses)
         diagnostics += gate.diagnostics
         diagnostics += resolution.diagnostics
         diagnostics += imports.diagnostics

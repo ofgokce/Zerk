@@ -4,6 +4,29 @@ An annotated tour of the file `ZerkPlugin` writes. Every listing below is real
 codegen output — the fixture on the left was run through `ZerkCodegen` and the
 result pasted verbatim.
 
+## Nested names are qualified for you
+
+Swift looks a bare type name up innermost-first, and the generated file lives at file scope, so
+the two disagree for anything nested. Zerk resolves the name the way Swift would and emits the
+qualified spelling:
+
+```swift
+@Injectable<Feed>
+struct LiveFeed: Feed {
+    struct Config {}
+
+    @InjectableProviding
+    init(config: Config) {}          // Config here is LiveFeed.Config
+}
+```
+
+```swift
+nonisolated static func liveFeed(config: LiveFeed.Config) -> Feed
+```
+
+Only the *base* of a dotted spelling moves, since that is the part Swift looks up: `Config.Key`
+becomes `LiveFeed.Config.Key`. Writing the qualified name yourself reaches the same place.
+
 ## Where the file is
 
 One file per target: `Zerk.generated.swift`, inside the plugin's

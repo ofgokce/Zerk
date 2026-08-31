@@ -85,6 +85,15 @@ public struct CodeGenerator {
             collector.walk(tree, path: path)
         }
 
+        // Before aliases and before resolution, because both compare keys and
+        // this decides what a key *is*. After the walk, never during it: a
+        // nested type declared below its own use is still the one Swift picks,
+        // so it can only be answered once the whole module is known.
+        let scoped = NestedNameResolver(declaredAccessRanks: collector.declaredAccessRanks)
+            .resolved(types: collector.types,
+                      markedMembers: collector.markedMembers,
+                      injectedUses: collector.injectedUses)
+
         // Alias groups merge keys before anything compares them, so resolution
         // and generation are alias-aware without knowing aliases exist.
         // Narrowed to the files that actually put a foreign name into the
@@ -113,11 +122,11 @@ public struct CodeGenerator {
         let rewriter = AliasRewriter(aliases: aliases)
         let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
         let keyNominalNames = rewriter.rewrite(keyNominalNames: collector.keyNominalNames)
-        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
+        let gate = GenericGate.admitted(rewriter.rewrite(types: scoped.types))
         let types = gate.types
         let localValues = rewriter.rewrite(values: collector.values)
-        let injectedUses = rewriter.rewrite(injectedUses: collector.injectedUses)
-        let markedMembers = rewriter.rewrite(markedMembers: collector.markedMembers)
+        let injectedUses = rewriter.rewrite(injectedUses: scoped.injectedUses)
+        let markedMembers = rewriter.rewrite(markedMembers: scoped.markedMembers)
 
         let resolution = ProviderResolver(types: types, aliases: aliases, keyDisplayNames: keyDisplayNames).resolve()
 
@@ -141,16 +150,8 @@ public struct CodeGenerator {
         ).merged(into: localValues)
         let values = importedValues.values
 
-        // After the walk, never during it: a nested type declared below its own
-        // use is still the one Swift's lookup picks, so this can only be
-        // answered once every declaration in the module is known.
-        let nestedNames = NestedNameCheck(declaredAccessRanks: collector.declaredAccessRanks)
-            .diagnostics(types: collector.types,
-                         markedMembers: collector.markedMembers,
-                         injectedUses: collector.injectedUses)
-
         var diagnostics = collector.diagnostics + gate.diagnostics + resolution.diagnostics
-            + imports.diagnostics + importedValues.diagnostics + nestedNames
+            + imports.diagnostics + importedValues.diagnostics
 
         if diagnostics.contains(where: { $0.severity == .error }) {
             emitDiagnostics(diagnostics)
