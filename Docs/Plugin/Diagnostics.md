@@ -98,9 +98,9 @@ One failure Zerk cannot report lands in generated code instead: under `SWIFT_DEF
 
 | What triggers it | The fix |
 |---|---|
-| `@ZerkAlias` on something that is not a `typealias` | It relates two spellings of one key; only a typealias states that |
-| `@ZerkAlias` on a generic typealias | Zerk matches keys by spelling rather than resolving them — alias a concrete instantiation instead |
-| `#ZerkAlias` with fewer than two distinct types | It needs at least two types to relate, written `#ZerkAlias<A, B>()` — every listed type must be a distinct key |
+| `@InjectableAlias` on something that is not a `typealias` | It relates two spellings of one key; only a typealias states that |
+| `@InjectableAlias` on a generic typealias | Zerk matches keys by spelling rather than resolving them — alias a concrete instantiation instead |
+| `#InjectableAlias` with fewer than two distinct types | It needs at least two types to relate, written `#InjectableAlias<A, B>()` — every listed type must be a distinct key |
 
 ## Parameter markers
 

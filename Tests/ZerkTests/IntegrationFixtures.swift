@@ -41,10 +41,10 @@ final class Tagger: Tagging {
     }
 }
 
-/// `Archiving` is a second name for `Tagging`. Without `@ZerkAlias` the two
+/// `Archiving` is a second name for `Tagging`. Without `@InjectableAlias` the two
 /// would be separate keys and this consumer's dependency would bubble up to the
 /// caller instead of resolving.
-@ZerkAlias
+@InjectableAlias
 typealias Archiving = Tagging
 
 @Injectable

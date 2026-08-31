@@ -3,7 +3,7 @@
 //  Zerk
 //
 
-/// Collapses keys that `@ZerkAlias` / `#ZerkAlias` proved interchangeable into
+/// Collapses keys that `@InjectableAlias` / `#InjectableAlias` proved interchangeable into
 /// one representative each.
 ///
 /// Zerk matches dependencies by spelling, so without this a provider registered
@@ -260,7 +260,7 @@ struct KeyAliases {
         var aliasOnly = Set<String>()
 
         for declaration in declarations {
-            // Unqualified up front, so a `@ZerkAlias` written against
+            // Unqualified up front, so a `@InjectableAlias` written against
             // `Core.Foo` joins the same group as one written against `Foo`.
             let keys = declaration.keys.map { Self.unqualified($0, modules: knownModules, clashing: clashingBareNames) }
             for key in keys where parent[key] == nil {

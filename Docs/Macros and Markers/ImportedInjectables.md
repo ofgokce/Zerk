@@ -229,4 +229,4 @@ The macros check one declaration each; the plugin checks the module. In Zerk's o
 
 [← Table of contents](../TableOfContents.md)
 
-**See also:** [`@Injectable`](Injectable.md) · [`@InjectableValue`](InjectableValue.md) · [Key aliases](ZerkAlias.md) · [Foreign types](../Features/ForeignTypes.md) · [Concurrency](../Features/Concurrency.md) · [How it works](../Plugin/HowItWorks.md) · [Generated code](../Plugin/GeneratedCode.md) · [Limitations](../Plugin/Limitations.md) · [Diagnostics](../Plugin/Diagnostics.md)
+**See also:** [`@Injectable`](Injectable.md) · [`@InjectableValue`](InjectableValue.md) · [Key aliases](InjectableAlias.md) · [Foreign types](../Features/ForeignTypes.md) · [Concurrency](../Features/Concurrency.md) · [How it works](../Plugin/HowItWorks.md) · [Generated code](../Plugin/GeneratedCode.md) · [Limitations](../Plugin/Limitations.md) · [Diagnostics](../Plugin/Diagnostics.md)

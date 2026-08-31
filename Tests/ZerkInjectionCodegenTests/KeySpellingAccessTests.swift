@@ -163,7 +163,7 @@ struct KeySpellingAccessTests {
         struct Hidden {}
         public struct Box<E> {}
 
-        @ZerkAlias
+        @InjectableAlias
         typealias AliasBox = Box<Hidden>
 
         @Injectable<AliasBox>(public: true)

@@ -37,7 +37,7 @@ Every attribute and freestanding macro Zerk vends, except the testing ones.
 | [`@Injected`](Macros%20and%20Markers/Injected.md) | The property macro — every variant, `@InjectedDynamically`, and the one macro that generates code |
 | [Parameter markers](Macros%20and%20Markers/ParameterMarkers.md) | The four lowercase wrappers: `@injected`, `@autoinjected`, `@noninjected`, `@injectable` |
 | [Imported injectables](Macros%20and%20Markers/ImportedInjectables.md) | `@ImportedInjectable`, `@ImportedInjectableValue` — reaching another module's graph |
-| [Key aliases](Macros%20and%20Markers/ZerkAlias.md) | `@ZerkAlias` and `#ZerkAlias<A, B>()` — telling Zerk two names are one key |
+| [Key aliases](Macros%20and%20Markers/InjectableAlias.md) | `@InjectableAlias` and `#InjectableAlias<A, B>()` — telling Zerk two names are one key |
 
 ## Features
 

@@ -63,7 +63,7 @@ final class SourceCollector: SyntaxVisitor {
     /// ``TypeSyntax/nominalNames``. Read when deciding whether the generated
     /// members may be `public`.
     private(set) var keyNominalNames: [String: Set<String>] = [:]
-    /// `@ZerkAlias` / `#ZerkAlias` declarations, which merge keys before
+    /// `@InjectableAlias` / `#InjectableAlias` declarations, which merge keys before
     /// resolution. See ``KeyAliases``.
     private(set) var aliasDeclarations: [AliasDeclaration] = []
     /// File -> every nominal type name that file put into something Zerk emits.
@@ -480,13 +480,13 @@ final class SourceCollector: SyntaxVisitor {
         }
     }
 
-    /// `@ZerkAlias typealias Persisting = Storing` — the alias and the type it
+    /// `@InjectableAlias typealias Persisting = Storing` — the alias and the type it
     /// names become one key.
     ///
     /// A generic typealias is rejected by the macro; skipping it here keeps the
     /// plugin from acting on something the macro already refused.
     override func visit(_ node: TypeAliasDeclSyntax) -> SyntaxVisitorContinueKind {
-        guard node.attributes.hasAttribute(named: "ZerkAlias") else {
+        guard node.attributes.hasAttribute(named: "InjectableAlias") else {
             return .skipChildren
         }
         guard node.genericParameterClause?.parameters.isEmpty ?? true else {
@@ -507,7 +507,7 @@ final class SourceCollector: SyntaxVisitor {
         return .skipChildren
     }
 
-    /// `#ZerkAlias<A, B, C>()` — every listed type is the same key.
+    /// `#InjectableAlias<A, B, C>()` — every listed type is the same key.
     ///
     /// The macro's expansion is what proves the claim to the compiler; all the
     /// plugin needs is the list. Written without the trailing `()` the generic
@@ -618,7 +618,7 @@ final class SourceCollector: SyntaxVisitor {
     private func collectAlias(macroName: String,
                               arguments: GenericArgumentClauseSyntax?,
                               syntax: Syntax) {
-        guard macroName == "ZerkAlias" else {
+        guard macroName == "InjectableAlias" else {
             return
         }
         // A generic argument may be a value rather than a type (SE-0453); only

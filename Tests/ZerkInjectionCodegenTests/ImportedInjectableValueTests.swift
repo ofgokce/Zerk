@@ -191,7 +191,7 @@ struct ImportedInjectableValueTests {
     @Test("an imported value's key folds onto its alias representative")
     func aliasRewritingReachesImports() {
         let source = """
-        @ZerkAlias
+        @InjectableAlias
         typealias Handle = String
 
         enum ZerkImports {

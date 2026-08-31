@@ -6,7 +6,7 @@ Zerk is a macro package and a build-tool plugin, and it is worth knowing which d
 
 `@Injectable`, `@InjectableProviding`, `@Singleton`, `@Scoped`, and `@Isolated` expand to *nothing*. They exist so the attribute is legal Swift for the plugin to read, and so the errors that *are* decidable from a single declaration — a missing `@InjectableProviding`, an `@Isolated` contradicting a `nonisolated` modifier, a generic parameter nothing can infer — are reported right at the declaration.
 
-The same is true of the rest of the markers: `@InjectableValue`, `@InjectableValues`, `@NonInjectable`, `@ZerkAlias`, and `@ImportedInjectableValue` all expand to nothing and exist for the same two reasons.
+The same is true of the rest of the markers: `@InjectableValue`, `@InjectableValues`, `@NonInjectable`, `@InjectableAlias`, and `@ImportedInjectableValue` all expand to nothing and exist for the same two reasons.
 
 `@Injected` and `@InjectedDynamically` are the two markers that generate code, because the expression they need (`Zerk<Key>.inject()`) depends on nothing but the property's own type. No whole-module view is required, so a macro can do it alone.
 
@@ -15,7 +15,7 @@ They generate different *kinds* of thing, which is why they are two attributes r
 The macros that are not markers expand for the same kind of reason: what they emit is decidable from the single site they are written at.
 
 - `#Interject` expands to a registration against the scope in force.
-- `#ZerkAlias<A, B>()` expands to a compile-time proof that the listed types really are interchangeable — the plugin takes the listing on trust when it builds the key graph, so the generated code is what checks it.
+- `#InjectableAlias<A, B>()` expands to a compile-time proof that the listed types really are interchangeable — the plugin takes the listing on trust when it builds the key graph, so the generated code is what checks it.
 - `@ImportedInjectable` is given a body that resolves the imported key exactly as the graph will, so an import that names a key nothing exports, or gets its parameters or effects wrong, fails to compile at the declaration rather than somewhere downstream.
 
 ## Everything else is the plugin
@@ -98,7 +98,7 @@ One consequence runs through the whole design: **the plugin reads syntax, never 
 
 Each of those three has its own answer:
 
-- **Type keys** are unified only where the equivalence is decidable from spelling. Anything that needs real type resolution stays a distinct key, and `@ZerkAlias` is how you declare an equivalence the plugin cannot see.
+- **Type keys** are unified only where the equivalence is decidable from spelling. Anything that needs real type resolution stays a distinct key, and `@InjectableAlias` is how you declare an equivalence the plugin cannot see.
 - **Isolation** is stated, not inferred from context the plugin cannot reach — `@Isolated<A>` says which global actor a declaration belongs to when the syntax does not.
 - **Build settings** are restated in `ZerkSettings.json`, because the plugin has no access to the target's actual configuration.
 
@@ -106,4 +106,4 @@ Each of those three has its own answer:
 
 [← Table of contents](../TableOfContents.md)
 
-**See also:** [Generated code](GeneratedCode.md) · [Settings](Settings.md) · [Diagnostics](Diagnostics.md) · [Limitations](Limitations.md) · [@Injected](../Macros%20and%20Markers/Injected.md) · [@Isolated](../Macros%20and%20Markers/Isolated.md) · [@ZerkAlias](../Macros%20and%20Markers/ZerkAlias.md) · [Generics](../Features/Generics.md)
+**See also:** [Generated code](GeneratedCode.md) · [Settings](Settings.md) · [Diagnostics](Diagnostics.md) · [Limitations](Limitations.md) · [@Injected](../Macros%20and%20Markers/Injected.md) · [@Isolated](../Macros%20and%20Markers/Isolated.md) · [@InjectableAlias](../Macros%20and%20Markers/InjectableAlias.md) · [Generics](../Features/Generics.md)

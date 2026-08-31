@@ -18,7 +18,7 @@ Spellings Swift treats as one type *are* unified into one key, because that much
 
 A prefix from a module nothing imports is left alone. Syntax cannot tell `Outer.Inner` (a nested type) from `Core.Inner` (a module-qualified one), so the imported-module list is the only evidence Zerk has — and stripping without it would both mis-key the dependency and emit a name the generated file could not resolve. Only the leading component goes: `Core.Outer.Inner` keeps its nesting.
 
-What still needs real type resolution, and stays distinct: any `typealias` you have not marked with `@ZerkAlias` — the plugin cannot see through an alias on its own, which is exactly why that macro exists. A provider parameter like `seed: Int` is likewise indistinguishable from an injectable dependency except by whether a matching injectable exists.
+What still needs real type resolution, and stays distinct: any `typealias` you have not marked with `@InjectableAlias` — the plugin cannot see through an alias on its own, which is exactly why that macro exists. A provider parameter like `seed: Int` is likewise indistinguishable from an injectable dependency except by whether a matching injectable exists.
 
 `any` is a special case. Zerk cannot tell a protocol from a superclass or a struct, and `any` is only legal on an existential — so keys *match* with `any` stripped, but the generated file emits the spelling you wrote. If one declaration says `P` and another `any P`, they are one key and `any P` is what gets emitted.
 
@@ -181,4 +181,4 @@ The plugin output lives in the build directory (`Zerk.generated.swift`). Never e
 
 [← Table of contents](../TableOfContents.md)
 
-**See also:** [Diagnostics](Diagnostics.md) · [How it works](HowItWorks.md) · [Generated code](GeneratedCode.md) · [Settings](Settings.md) · [Generics](../Features/Generics.md) · [Concurrency](../Features/Concurrency.md) · [Conditional compilation](../Features/ConditionalCompilation.md) · [Key aliases](../Macros%20and%20Markers/ZerkAlias.md) · [`@Singleton`](../Macros%20and%20Markers/Singleton.md) · [Interjection](../Testing/Interjection.md)
+**See also:** [Diagnostics](Diagnostics.md) · [How it works](HowItWorks.md) · [Generated code](GeneratedCode.md) · [Settings](Settings.md) · [Generics](../Features/Generics.md) · [Concurrency](../Features/Concurrency.md) · [Conditional compilation](../Features/ConditionalCompilation.md) · [Key aliases](../Macros%20and%20Markers/InjectableAlias.md) · [`@Singleton`](../Macros%20and%20Markers/Singleton.md) · [Interjection](../Testing/Interjection.md)

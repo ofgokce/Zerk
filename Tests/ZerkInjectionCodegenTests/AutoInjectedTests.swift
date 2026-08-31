@@ -347,7 +347,7 @@ struct AutoInjectedTests {
         let source = """
         \(Self.graph)
 
-        @ZerkAlias
+        @InjectableAlias
         typealias Persisting = Storing
 
         @Injectable

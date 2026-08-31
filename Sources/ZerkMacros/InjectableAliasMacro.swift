@@ -1,5 +1,5 @@
 //
-//  ZerkAliasMacro.swift
+//  InjectableAliasMacro.swift
 //  Zerk
 //
 
@@ -9,20 +9,20 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-/// Validates `@ZerkAlias` and expands to nothing.
+/// Validates `@InjectableAlias` and expands to nothing.
 ///
 /// The equivalence it declares is module-wide, so the build plugin is what acts
 /// on it — as with every other Zerk marker. All this macro can decide from one
 /// declaration is that the attribute is on something that *is* a typealias, and
 /// that the alias is not generic.
-public struct ZerkAliasMacro: PeerMacro {
+public struct InjectableAliasMacro: PeerMacro {
     public static func expansion(of node: AttributeSyntax,
                                  providingPeersOf declaration: some DeclSyntaxProtocol,
                                  in context: some MacroExpansionContext) throws -> [DeclSyntax] {
         guard let alias = declaration.as(TypeAliasDeclSyntax.self) else {
             context.zerkError(
                 node,
-                "@ZerkAlias can only be applied to a typealias."
+                "@InjectableAlias can only be applied to a typealias."
             )
             return []
         }
@@ -30,7 +30,7 @@ public struct ZerkAliasMacro: PeerMacro {
         if let parameters = alias.genericParameterClause?.parameters, !parameters.isEmpty {
             context.zerkError(
                 node,
-                "@ZerkAlias does not support generic typealiases. '\(alias.name.text)' has type parameters, and Zerk matches keys by spelling rather than resolving them. Alias a concrete instantiation instead, e.g. typealias IntPair = \(alias.name.text)<Int>."
+                "@InjectableAlias does not support generic typealiases. '\(alias.name.text)' has type parameters, and Zerk matches keys by spelling rather than resolving them. Alias a concrete instantiation instead, e.g. typealias IntPair = \(alias.name.text)<Int>."
             )
         }
 
@@ -38,11 +38,11 @@ public struct ZerkAliasMacro: PeerMacro {
     }
 }
 
-/// Expands `#ZerkAlias<A, B, C>` into a compile-time proof that the listed types
+/// Expands `#InjectableAlias<A, B, C>` into a compile-time proof that the listed types
 /// really are interchangeable.
 ///
 /// The plugin takes the listing on trust when it builds the key graph, so the
-/// generated code has to be what checks it — otherwise a wrong `#ZerkAlias`
+/// generated code has to be what checks it — otherwise a wrong `#InjectableAlias`
 /// would silently merge two unrelated keys and misroute every dependency of
 /// both.
 ///
@@ -53,7 +53,7 @@ public struct ZerkAliasMacro: PeerMacro {
 /// the existential-metatype trap — `A.self` is `(any A).Type` while `B.Type`
 /// reads as `any B.Type`, so the direct coercion does not even compile when the
 /// types are protocols, which is the common case for an injection key.
-public struct ZerkAliasDeclarationMacro: DeclarationMacro {
+public struct InjectableAliasDeclarationMacro: DeclarationMacro {
     public static func expansion(of node: some FreestandingMacroExpansionSyntax,
                                  in context: some MacroExpansionContext) throws -> [DeclSyntax] {
         // Only type arguments: a generic argument may be a value (SE-0453),
@@ -65,14 +65,14 @@ public struct ZerkAliasDeclarationMacro: DeclarationMacro {
             return type
         }
 
-        // The trailing `()` is not optional. Written bare, `#ZerkAlias<A, B>`
-        // parses as a macro expansion *expression* named `ZerkAlias` followed by
+        // The trailing `()` is not optional. Written bare, `#InjectableAlias<A, B>`
+        // parses as a macro expansion *expression* named `InjectableAlias` followed by
         // loose `<`/`>` tokens, and the generic clause never reaches the macro —
         // so the empty argument list is what makes the types visible here.
         guard types.count >= 2 else {
             context.zerkError(
                 Syntax(node),
-                "#ZerkAlias needs at least two types to relate, written as #ZerkAlias<A, B>() — the trailing '()' is required, without it Swift does not pass the types to the macro."
+                "#InjectableAlias needs at least two types to relate, written as #InjectableAlias<A, B>() — the trailing '()' is required, without it Swift does not pass the types to the macro."
             )
             return []
         }
@@ -89,7 +89,7 @@ public struct ZerkAliasDeclarationMacro: DeclarationMacro {
                     : "'\(first.trimmedDescription)' and '\(type.trimmedDescription)', which are already one key"
                 context.zerkError(
                     Syntax(node),
-                    "#ZerkAlias lists \(spellings). Every listed type must be a distinct key."
+                    "#InjectableAlias lists \(spellings). Every listed type must be a distinct key."
                 )
                 return []
             }
@@ -108,7 +108,7 @@ public struct ZerkAliasDeclarationMacro: DeclarationMacro {
             }
         }
 
-        // A unique name per expansion, so several #ZerkAlias in one file cannot
+        // A unique name per expansion, so several #InjectableAlias in one file cannot
         // collide.
         let functionName = context.makeUniqueName("zerk_alias_check")
 
