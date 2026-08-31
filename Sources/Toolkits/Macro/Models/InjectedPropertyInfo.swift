@@ -42,6 +42,15 @@ public struct InjectedPropertyInfo {
         self.expression = expression
     }
 
+    /// Why an observed property cannot be injected, and what to do instead.
+    ///
+    /// Shared because both expansions of one observed property report it, and a
+    /// developer who sees them both should not have to work out that they are
+    /// the same problem.
+    static func observedPropertyMessage(_ macroName: String) -> String {
+        "\(macroName) cannot resolve an observed property: @Observable rewrites it into a computed property, and \(macroName) initializes stored storage. Mark the property '@ObservationIgnored', which excludes it from observation and leaves it stored."
+    }
+
     /// - Parameter requiresInstanceStorage: whether the macro initializes the
     ///   property's storage rather than replacing it with a getter. Only the
     ///   storage-initializing form needs an instance to initialize; see the
@@ -72,10 +81,38 @@ public struct InjectedPropertyInfo {
                 context.zerkError(attribute, "\(macroName) resolves while its enclosing value is being initialized, and a type-level property has no such moment. Write 'static let \(Self.name(of: variableDecl) ?? "property") = Zerk<Key>.inject()', or use @InjectedDynamically to resolve on each access.")
                 return nil
             }
-            // Empty means nothing encloses the declaration: it is at file scope,
-            // where there is likewise no initialization to hook.
+            let isObservationIgnored = variableDecl.attributes
+                .hasAttribute(named: "ObservationIgnored")
+
+            // Nothing encloses the declaration. Two very different things look
+            // like this, and only one of them is a global.
             if context.lexicalContext.isEmpty {
+                // `@Observable` rewrites a stored property into a computed one
+                // and copies its attributes — this one included — onto the
+                // backing storage it generates. That copy expands in a buffer of
+                // its own, so it arrives with no lexical context and was read as
+                // file scope. It is not, and the developer never wrote it.
+                //
+                // The copy always carries `@ObservationIgnored`, which is what
+                // separates it from a real global here: nothing at file scope
+                // has any reason to.
+                if isObservationIgnored {
+                    context.zerkError(attribute, Self.observedPropertyMessage(macroName))
+                    return nil
+                }
                 context.zerkError(attribute, "\(macroName) resolves while its enclosing value is being initialized, and a global has no such moment. Write 'let \(Self.name(of: variableDecl) ?? "property") = Zerk<Key>.inject()', or use @InjectedDynamically to resolve on each access.")
+                return nil
+            }
+
+            // The same property, one expansion earlier, where it is still the
+            // developer's own declaration inside their own type. Refusing here
+            // is what keeps the compiler from reporting "init accessor cannot
+            // refer to property" against an expansion nobody wrote — and the
+            // property that *is* `@ObservationIgnored` is the supported
+            // spelling, so it passes.
+            if !isObservationIgnored,
+               context.lexicalContext.contains(where: \.declaresObservable) {
+                context.zerkError(attribute, Self.observedPropertyMessage(macroName))
                 return nil
             }
         }
