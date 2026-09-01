@@ -110,4 +110,4 @@ How code generation works, and what it produces.
 
 ---
 
-[← Back to the README](../README.md)
+[Changelog](../CHANGELOG.md) · [← Back to the README](../README.md)

@@ -18,13 +18,13 @@ Generic types are registered like any other: `@Injectable struct Cache<E>` makes
 
 ## 📖 Documentation
 
-**[See full documentation](Docs/TableOfContents.md)**
+**[See full documentation](Docs/TableOfContents.md)** · **[Changelog](CHANGELOG.md)**
 
 | | |
 |---|---|
 | **[Getting started](Docs/TableOfContents.md#getting-started)** | [Installation](Docs/Getting%20Started/Installation.md) · [Quick start](Docs/Getting%20Started/QuickStart.md) · [Terminology](Docs/Getting%20Started/Terminology.md) · [Declaring examples](Docs/Getting%20Started/InjectableExamples.md) · [Consuming examples](Docs/Getting%20Started/InjectedExamples.md) · [Migration from 1.x](Docs/Getting%20Started/Migration.md) |
 | **[Macros and markers](Docs/TableOfContents.md#macros-and-markers)** | [`@Injectable`](Docs/Macros%20and%20Markers/Injectable.md) · [`@InjectableProviding`](Docs/Macros%20and%20Markers/InjectableProviding.md) · [`@InjectableValue`](Docs/Macros%20and%20Markers/InjectableValue.md) · [`@Singleton`](Docs/Macros%20and%20Markers/Singleton.md) · [`@Scoped`](Docs/Macros%20and%20Markers/Scoped.md) · [`@Isolated`](Docs/Macros%20and%20Markers/Isolated.md) · [`@Injected`](Docs/Macros%20and%20Markers/Injected.md) · [Parameter markers](Docs/Macros%20and%20Markers/ParameterMarkers.md) · [Imported injectables](Docs/Macros%20and%20Markers/ImportedInjectables.md) · [Key aliases](Docs/Macros%20and%20Markers/InjectableAlias.md) |
-| **[Features](Docs/TableOfContents.md#features)** | [Foreign types](Docs/Features/ForeignTypes.md) · [Generics](Docs/Features/Generics.md) · [Concurrency](Docs/Features/Concurrency.md) |
+| **[Features](Docs/TableOfContents.md#features)** | [Foreign types](Docs/Features/ForeignTypes.md) · [Generics](Docs/Features/Generics.md) · [Concurrency](Docs/Features/Concurrency.md) · [SwiftUI and `@Observable`](Docs/Features/SwiftUI.md) |
 | **[The plugin](Docs/TableOfContents.md#the-plugin)** | [How it works](Docs/Plugin/HowItWorks.md) · [Generated code](Docs/Plugin/GeneratedCode.md) · [Settings](Docs/Plugin/Settings.md) · [Diagnostics](Docs/Plugin/Diagnostics.md) · [Graph artifact](Docs/Plugin/GraphArtifact.md) · [`ZerkCLI`](Docs/Plugin/ZerkCLI.md) · [Limitations](Docs/Plugin/Limitations.md) |
 | **[Testing](Docs/TableOfContents.md#testing)** | [Interjection](Docs/Testing/Interjection.md) · [Scopes](Docs/Testing/Scopes.md) · [Examples](Docs/Testing/Examples.md) |
 
