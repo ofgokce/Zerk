@@ -220,7 +220,7 @@ struct AutomaticImportTests {
         import ModuleA
         import ModuleB
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func a() -> ModuleA.Config
 
@@ -253,7 +253,7 @@ struct AutomaticImportTests {
 
         protocol Serving {}
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func coreServing() -> Core.Serving
         }
@@ -288,7 +288,7 @@ struct AutomaticImportTests {
             protocol Inner {}
         }
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func coreInner() -> Core.Outer.Inner
         }

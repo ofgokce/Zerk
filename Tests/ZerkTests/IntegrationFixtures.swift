@@ -273,7 +273,7 @@ final class CaptionHolder {
 /// nothing resolves through it — the point here is that the attribute parses and
 /// expands, and that the getter type-checks against a member that exists. Its
 /// cross-module behaviour is covered by `ImportedInjectableValueTests`.
-private enum ZerkImports {
+private enum ImportedInjectables {
     @ImportedInjectableValue
     static var importedRetryLimit: Int { Zerk<Int>.retryLimit }
 }

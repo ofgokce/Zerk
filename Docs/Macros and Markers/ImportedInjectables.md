@@ -15,7 +15,7 @@ the consuming module still has no idea the key exists, what it needs, or what ef
 isolation it carries. This states all of that:
 
 ```swift
-private enum ZerkImports {
+private enum ImportedInjectables {
     @ImportedInjectable
     static func session(baseURL: URL) -> Session
 
@@ -59,7 +59,7 @@ Given a key import and a value import side by side:
 ```swift
 protocol Session {}
 
-private enum ZerkImports {
+private enum ImportedInjectables {
     @ImportedInjectable
     static func session() -> Session
 
@@ -110,7 +110,7 @@ What the declaration states is what the graph plans for. An `async throws` impor
 inlined as written:
 
 ```swift
-private enum ZerkImports {
+private enum ImportedInjectables {
     @ImportedInjectable
     static func session() async throws -> Session
 
@@ -161,7 +161,7 @@ name, letting one imported `String` answer for every `String` parameter in the m
 separate marker, on a property rather than a function:
 
 ```swift
-private enum ZerkImports {
+private enum ImportedInjectables {
     @ImportedInjectableValue
     static var baseURL: String { Zerk<String>.baseURL }
 
