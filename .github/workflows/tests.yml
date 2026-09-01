@@ -32,13 +32,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The floor `Package.swift` claims: swift-tools-version 6.1, which is
-          # the Swift that ships with Xcode 16.4. If this leg breaks, either the
-          # sources have moved past 6.1 or the declared tools version has.
-          - xcode: "16.4"
+          # Swift 6.2, the toolchain floor — interjection points are named with
+          # raw identifiers (SE-0451), which land in the generated file the
+          # consuming toolchain compiles. `swift-tools-version: 6.1` in
+          # `Package.swift` is the manifest API level and a lower number; it is
+          # not the floor, and pinning CI to it would test a toolchain Zerk
+          # cannot actually run on.
+          - xcode: "26.0.1"
           # A current toolchain, so a Swift release does not break the package
           # unnoticed between releases.
-          - xcode: "26.0.1"
+          - xcode: "26.3"
 
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +64,36 @@ jobs:
       # package and runs the real plugin over it. It is skipped by default
       # because it is slow and writes a ~500MB build directory; CI is the place
       # it was written for.
+      - name: Test
+        run: swift test
+        env:
+          ZERK_E2E: "1"
+
+  linux:
+    name: Linux · Swift ${{ matrix.swift }}
+    runs-on: ubuntu-latest
+    # The official image rather than a toolchain-installing action: it pins the
+    # Swift version by tag and brings its own SDK, so nothing third-party sits
+    # between the workflow and the compiler.
+    container: swift:${{ matrix.swift }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same floor and current pair as macOS. `platforms:` in the manifest
+        # only constrains Apple deployment targets — it does not exclude Linux,
+        # and nothing in the sources is Darwin-only now that `ZerkSettings`
+        # decodes its JSON rather than type-casting it.
+        swift: ["6.2", "6.3"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report the toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build --build-tests
+
       - name: Test
         run: swift test
         env:

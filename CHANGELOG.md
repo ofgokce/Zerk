@@ -56,6 +56,16 @@ change, so the build says where. See [Changes in 2.1](Docs/Getting%20Started/Mig
   names the wrapper and the spelling that works —
   `@StateObject var model = Zerk<Key>.inject()`.
 
+### Changed
+
+- **`ZerkSettings.json` is decoded rather than deserialized and cast.** The type guards used to
+  read a `JSONSerialization` `Any`, where a JSON boolean and a JSON number are indistinguishable
+  in both directions — `true as? Int` is `1` and `1 as? Bool` is `true` — so telling them apart
+  needed `CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID()`. `JSONDecoder` draws the
+  distinction in the language instead, and the messages for a malformed key are unchanged.
+- That was also the one thing in Zerk only Darwin could answer, so the package now has no
+  Apple-only dependency outside `#if canImport` guards. CI builds and tests it on Linux.
+
 ### Documentation
 
 - New [SwiftUI and `@Observable`](Docs/Features/SwiftUI.md) page: `@ObservationIgnored`, property
