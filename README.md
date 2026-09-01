@@ -4,9 +4,10 @@
 </picture>
 
 # 
-[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fofgokce%2FZerk%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/ofgokce/Zerk)
-[![](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fofgokce%2FZerk%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/ofgokce/Zerk)
-[![](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Swift Version](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fofgokce%2FZerk%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/ofgokce/Zerk)
+[![Platform](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fofgokce%2FZerk%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/ofgokce/Zerk)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tests](https://github.com/ofgokce/Zerk/actions/workflows/tests.yml/badge.svg)](https://github.com/ofgokce/Zerk/actions/workflows/tests.yml)
 
 Zerk is a compile-time dependency injection framework for Swift. Instead of a runtime container, it combines Swift macros with a build-tool plugin that scans your module's source, resolves the dependency graph during the build, and generates plain static factory code on a `Zerk<Key>` namespace. There is nothing to register at runtime, resolution failures are build errors with file/line locations, and injected code is ordinary Swift you can step through.
 

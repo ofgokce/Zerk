@@ -1,0 +1,67 @@
+name: Tests
+
+on:
+  push:
+    # `master` and the version branches Zerk is developed on — work sits on a
+    # branch like `2.1.0` for a long time before its pull request exists, and
+    # that is exactly when the tests are worth running.
+    #
+    # `*` and nothing else: it matches any run of characters except `/`, which
+    # is the one glob rule these filters document plainly. A branch named
+    # `fix.a.typo` matches too, and running the tests on it is no loss.
+    branches:
+      - master
+      - "*.*.*"
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a branch makes the run already in flight redundant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: macOS · Xcode ${{ matrix.xcode }}
+    runs-on: macos-15
+    strategy:
+      # One leg failing is worth seeing on its own, so the other still runs.
+      fail-fast: false
+      matrix:
+        include:
+          # The floor `Package.swift` claims: swift-tools-version 6.1, which is
+          # the Swift that ships with Xcode 16.4. If this leg breaks, either the
+          # sources have moved past 6.1 or the declared tools version has.
+          - xcode: "16.4"
+          # A current toolchain, so a Swift release does not break the package
+          # unnoticed between releases.
+          - xcode: "26.0.1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode ${{ matrix.xcode }}
+        run: sudo xcode-select --switch /Applications/Xcode_${{ matrix.xcode }}.app
+
+      - name: Report the toolchain
+        run: swift --version
+
+      # Deliberately uncached. `Package.resolved` is not committed, so the
+      # swift-syntax range floats and each run resolves it afresh — which is the
+      # drift this workflow exists to catch. A `.build` cache would restore the
+      # previously resolved revision and hide it, and the only thing it would buy
+      # is a few minutes of swift-syntax build time.
+      - name: Build
+        run: swift build --build-tests
+
+      # `ZERK_E2E` enables `CrossModulePackageTests`, which builds a nested
+      # package and runs the real plugin over it. It is skipped by default
+      # because it is slow and writes a ~500MB build directory; CI is the place
+      # it was written for.
+      - name: Test
+        run: swift test
+        env:
+          ZERK_E2E: "1"
