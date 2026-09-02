@@ -1,0 +1,118 @@
+name: Tests
+
+on:
+  push:
+    # `master` and the version branches Zerk is developed on — work sits on a
+    # branch like `2.1.0` for a long time before its pull request exists, and
+    # that is exactly when the tests are worth running.
+    #
+    # `*` and nothing else: it matches any run of characters except `/`, which
+    # is the one glob rule these filters document plainly. A branch named
+    # `fix.a.typo` matches too, and running the tests on it is no loss.
+    branches:
+      - master
+      - "*.*.*"
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a branch makes the run already in flight redundant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: macOS · Xcode ${{ matrix.xcode }}
+    runs-on: macos-15
+    strategy:
+      # One leg failing is worth seeing on its own, so the other still runs.
+      fail-fast: false
+      matrix:
+        include:
+          # Swift 6.2, the toolchain floor `Package.swift` declares —
+          # interjection points are named with raw identifiers (SE-0451), which
+          # land in the generated file the consuming toolchain compiles.
+          - xcode: "26.0.1"
+          # Whatever the runner image ships newest, resolved at run time. Pinning
+          # this leg would mean it silently stops being "current" the moment a
+          # newer Xcode lands, which is the one thing it exists to notice.
+          - xcode: "latest"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode ${{ matrix.xcode }}
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.xcode }}" = "latest" ]; then
+            # Sorted by version, not by name — `sort` alone puts 16.4 after
+            # 26.3 — and betas are excluded: `Xcode_26.4.0_beta.app` outsorts
+            # every release, so "latest" would quietly become "prerelease".
+            # `|| true` because `pipefail` makes a grep that matches nothing
+            # fail the whole substitution, and `set -e` would then end the step
+            # before the message below ever ran — a bare non-zero exit.
+            app=$(ls -d /Applications/Xcode_*.app 2>/dev/null \
+                  | grep -E '/Xcode_[0-9]+(\.[0-9]+)*\.app$' \
+                  | sort -V | tail -1) || true
+            if [ -z "$app" ]; then
+              echo "::error::no released Xcode found in /Applications" >&2
+              exit 1
+            fi
+          else
+            app=/Applications/Xcode_${{ matrix.xcode }}.app
+          fi
+          echo "Selected $app"
+          sudo xcode-select --switch "$app"
+
+      - name: Report the toolchain
+        run: swift --version
+
+      # Deliberately uncached. `Package.resolved` is not committed, so the
+      # swift-syntax range floats and each run resolves it afresh — which is the
+      # drift this workflow exists to catch. A `.build` cache would restore the
+      # previously resolved revision and hide it, and the only thing it would buy
+      # is a few minutes of swift-syntax build time.
+      - name: Build
+        run: swift build --build-tests
+
+      # `ZERK_E2E` enables `CrossModulePackageTests`, which builds a nested
+      # package and runs the real plugin over it. It is skipped by default
+      # because it is slow and writes a ~500MB build directory; CI is the place
+      # it was written for.
+      - name: Test
+        run: swift test
+        env:
+          ZERK_E2E: "1"
+
+  linux:
+    name: Linux · Swift ${{ matrix.swift }}
+    runs-on: ubuntu-latest
+    # The official image rather than a toolchain-installing action: it pins the
+    # Swift version by tag and brings its own SDK, so nothing third-party sits
+    # between the workflow and the compiler.
+    container: swift:${{ matrix.swift }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same floor and current pair as macOS. `platforms:` in the manifest
+        # only constrains Apple deployment targets — it does not exclude Linux,
+        # and nothing in the sources is Darwin-only now that `ZerkSettings`
+        # decodes its JSON rather than type-casting it.
+        swift: ["6.2", "6.3"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Report the toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: swift test
+        env:
+          ZERK_E2E: "1"

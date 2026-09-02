@@ -74,6 +74,15 @@ struct ZerkCLI: CommandPlugin {
                 graphPaths: graphPaths,
                 options: options
             )
+
+        case .settings(let options):
+            // No Xcode project is implied here — a package is not one — so the
+            // path has to be given rather than discovered.
+            try writeSettings(
+                tool: context.tool(named: "ZerkSettingsTool"),
+                project: try Self.project(named: options.projectPath, in: nil),
+                options: options
+            )
         }
     }
 
@@ -137,11 +146,66 @@ struct ZerkCLI: CommandPlugin {
         }
     }
 
+    /// Runs `ZerkSettingsTool` for one project.
+    ///
+    /// The tool does the reading and the mapping; this only settles which
+    /// project to read. `--output` is passed straight through, so the default —
+    /// no output path — prints, and adopting the result is a separate,
+    /// deliberate act.
+    private func writeSettings(tool: PluginContext.Tool,
+                               project: URL,
+                               options: SettingsOptions) throws {
+        var arguments = ["--project", project.path]
+        if let target = options.targetName {
+            arguments += ["--target", target]
+        }
+        if let output = options.outputPath {
+            arguments += ["--output", output]
+        }
+        try run(tool.url, arguments: arguments,
+                failure: "could not read the build settings of \(project.lastPathComponent)")
+    }
+
+    /// The `.xcodeproj` to read, given what the caller said and where we are.
+    ///
+    /// Named explicitly, or the only one in `directory`. Never guessed at when
+    /// there are several: reading the wrong project's settings produces a file
+    /// that looks right and describes another target.
+    private static func project(named path: String?, in directory: URL?) throws -> URL {
+        if let path {
+            return URL(fileURLWithPath: path)
+        }
+        guard let directory else {
+            throw Failure("""
+                --project is required outside Xcode.
+                \(ZerkCLI.settingsUsage)
+                """)
+        }
+        let projects = ((try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "xcodeproj" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        switch projects.count {
+        case 1:
+            return projects[0]
+        case 0:
+            throw Failure("""
+                no .xcodeproj found in \(directory.path) — name one with --project.
+                \(ZerkCLI.settingsUsage)
+                """)
+        default:
+            let names = projects.map(\.lastPathComponent).joined(separator: ", ")
+            throw Failure("several projects in \(directory.path) — name one with --project: \(names)")
+        }
+    }
+
     // MARK: - Commands
 
     enum Command {
         case help(topic: String?)
         case graph(GraphOptions)
+        case settings(SettingsOptions)
 
         init(arguments: [String]) throws {
             // Bare `swift package zerk` prints help rather than erroring: there
@@ -168,6 +232,12 @@ struct ZerkCLI: CommandPlugin {
                     return
                 }
                 self = .graph(try GraphOptions(arguments: rest))
+            case "settings":
+                if rest.contains(where: Self.isHelpFlag) {
+                    self = .help(topic: "settings")
+                    return
+                }
+                self = .settings(try SettingsOptions(arguments: rest))
             default:
                 throw Failure("""
                     unknown command '\(first)'.
@@ -219,6 +289,38 @@ struct ZerkCLI: CommandPlugin {
         }
     }
 
+    struct SettingsOptions {
+        var projectPath: String?
+        var targetName: String?
+        var outputPath: String?
+
+        init(arguments: [String]) throws {
+            var index = 0
+            while index < arguments.count {
+                let argument = arguments[index]
+                guard ["--project", "--target", "--output"].contains(argument) else {
+                    throw Failure("""
+                        unexpected argument '\(argument)'.
+                        \(ZerkCLI.settingsUsage)
+                        """)
+                }
+                guard index + 1 < arguments.count else {
+                    throw Failure("\(argument) expects a value")
+                }
+                let value = arguments[index + 1]
+                guard !value.hasPrefix("--") else {
+                    throw Failure("\(argument) expects a value, but the next argument is '\(value)'")
+                }
+                switch argument {
+                case "--project": projectPath = value
+                case "--target": targetName = value
+                default: outputPath = value
+                }
+                index += 2
+            }
+        }
+    }
+
     // MARK: - Help
 
     static let usage = """
@@ -226,9 +328,51 @@ struct ZerkCLI: CommandPlugin {
 
         Commands:
           graph     Export the resolved dependency graph for this package.
+          settings  Write ZerkSettings.json from an Xcode target's build settings.
           help      Show this message.
 
         Run 'swift package zerk <command> --help' for a command's options.
+        """
+
+    static let settingsUsage = """
+        Usage: swift package zerk settings [options]
+
+        Reads an Xcode target's build settings and prints the ZerkSettings.json
+        that matches them.
+
+        Zerk's plugin cannot read build settings — the plugin API hands it
+        sources and nothing else — so the four settings it needs have to be
+        restated in ZerkSettings.json, and restating them by hand is where they
+        drift. This asks xcodebuild instead, and maps:
+
+          SWIFT_DEFAULT_ACTOR_ISOLATION                    defaultActorIsolation
+          SWIFT_VERSION                                    swiftVersion
+          SWIFT_STRICT_CONCURRENCY                         strictConcurrency
+          SWIFT_UPCOMING_FEATURE_ISOLATED_DEFAULT_VALUES   isolatedDefaultValues
+
+        A setting the target does not set is left out, so Zerk's default applies.
+        `valueInjectionMethod` is never written: it mirrors no build setting and
+        is yours to choose, so re-running this will not overwrite your answer —
+        but it will not carry it over either. Merge that key by hand.
+
+        Options:
+          --project <path>   The .xcodeproj to read. Required outside Xcode;
+                             inside Xcode, the open project is used.
+          --target <name>    Which target's settings. Required when the project
+                             has more than one.
+          --output <path>    Write to a file instead of stdout. Writing inside
+                             the package needs the plugin to be run as
+                             'swift package --allow-writing-to-package-directory
+                             zerk settings …'.
+          -h, --help         Show this message.
+
+        Examples:
+          swift package zerk settings --project App.xcodeproj --target App
+          swift package --allow-writing-to-package-directory \\
+            zerk settings --project App.xcodeproj --target App --output App/ZerkSettings.json
+
+        Needs Xcode: xcodebuild is the only thing that can resolve a target's
+        settings. On Linux, write the file by hand.
         """
 
     static let graphUsage = """
@@ -262,6 +406,7 @@ struct ZerkCLI: CommandPlugin {
     static func help(for topic: String?) -> String {
         switch topic {
         case "graph": return graphUsage
+        case "settings": return settingsUsage
         default: return usage
         }
     }
@@ -368,6 +513,16 @@ extension ZerkCLI: XcodeCommandPlugin {
             try render(
                 tool: context.tool(named: "ZerkGraphTool"),
                 graphPaths: graphPaths,
+                options: options
+            )
+
+        case .settings(let options):
+            // The one place `--project` can be inferred: Xcode is running us
+            // *inside* a project, so its directory is the right place to look.
+            try writeSettings(
+                tool: context.tool(named: "ZerkSettingsTool"),
+                project: try ZerkCLI.project(named: options.projectPath,
+                                             in: context.xcodeProject.directoryURL),
                 options: options
             )
         }

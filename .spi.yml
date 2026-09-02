@@ -1,0 +1,19 @@
+# Swift Package Index manifest — https://swiftpackageindex.com/SwiftPackageIndex/SPIManifest
+version: 1
+
+metadata:
+  authors: Ömer Faruk Gökce
+
+builder:
+  configs:
+    # The two library products, which are what a package importing Zerk sees.
+    # `ZerkPlugin` and `ZerkCLI` are build-tool plugins and `ZerkMacros`,
+    # `ZerkCodegen` and `ZerkGraphTool` are executables the build runs, so none
+    # of them has an API to document.
+    #
+    # There is no DocC catalogue: the documentation is built from the symbol
+    # graph and the doc comments on it, and the narrative guide lives in `Docs/`,
+    # linked from the README.
+    - documentation_targets:
+        - Zerk
+        - ZerkTesting

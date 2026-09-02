@@ -22,7 +22,7 @@ struct ImportedInjectableValueTests {
     @Test("an imported value satisfies a parameter of the same name")
     func importSatisfiesAParameter() {
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var baseURL: String { Zerk<String>.baseURL }
         }
@@ -47,7 +47,7 @@ struct ImportedInjectableValueTests {
         // primary per key, so a second `String` is rejected as a duplicate
         // import and the first answers for every `String` parameter.
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var baseURL: String { Zerk<String>.baseURL }
 
@@ -75,7 +75,7 @@ struct ImportedInjectableValueTests {
         // is what gets read. A module whose parameters spell it differently does
         // not have to rename them.
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var headline: String { Zerk<String>.banner }
         }
@@ -99,7 +99,7 @@ struct ImportedInjectableValueTests {
         // The regression this whole macro exists for: under `@ImportedInjectable`
         // the single imported `String` answered here too, silently.
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var baseURL: String { Zerk<String>.baseURL }
         }
@@ -126,7 +126,7 @@ struct ImportedInjectableValueTests {
         // here would redeclare someone else's dependency on the same
         // specialization.
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var baseURL: String { Zerk<String>.baseURL }
         }
@@ -143,7 +143,7 @@ struct ImportedInjectableValueTests {
     @Test("a local value on the same key is still emitted alongside an import")
     func localValuesSurviveAnImport() {
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var baseURL: String { Zerk<String>.baseURL }
         }
@@ -164,7 +164,7 @@ struct ImportedInjectableValueTests {
     @Test("an imported value's isolation reaches the resolution")
     func isolationPropagates() {
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             @MainActor
             static var baseURL: String { Zerk<String>.baseURL }
@@ -191,10 +191,10 @@ struct ImportedInjectableValueTests {
     @Test("an imported value's key folds onto its alias representative")
     func aliasRewritingReachesImports() {
         let source = """
-        @ZerkAlias
+        @InjectableAlias
         typealias Handle = String
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var baseURL: Handle { Zerk<String>.baseURL }
         }
@@ -218,7 +218,7 @@ struct ImportedInjectableValueTests {
     @Test("an import colliding with a local value of the same name is an error")
     func localCollisionIsAnError() {
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var baseURL: String { Zerk<String>.baseURL }
         }
@@ -239,7 +239,7 @@ struct ImportedInjectableValueTests {
     @Test("the same name imported twice is an error")
     func duplicateImportIsAnError() {
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var baseURL: String { Zerk<String>.baseURL }
         }
@@ -262,7 +262,7 @@ struct ImportedInjectableValueTests {
         // The whole point: a key import collides with another of its key, a
         // value import only with another of its *name*.
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var baseURL: String { Zerk<String>.baseURL }
 
@@ -284,7 +284,7 @@ struct ImportedInjectableValueTests {
         let source = """
         protocol Session {}
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func session() -> Session
 
@@ -303,7 +303,7 @@ struct ImportedInjectableValueTests {
         // The macro reports the shape; the plugin simply does not register it,
         // rather than reporting the same thing a second time.
         let source = """
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectableValue
             static var baseURL: String { compute() }
         }

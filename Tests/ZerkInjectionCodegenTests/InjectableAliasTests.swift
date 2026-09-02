@@ -1,5 +1,5 @@
 //
-//  ZerkAliasTests.swift
+//  InjectableAliasTests.swift
 //  Zerk
 //
 
@@ -7,15 +7,15 @@ import SwiftParser
 import Testing
 @testable import CodegenToolkit
 
-/// Coverage of `@ZerkAlias` / `#ZerkAlias` and the key merging they drive.
+/// Coverage of `@InjectableAlias` / `#InjectableAlias` and the key merging they drive.
 ///
 /// Merging is not a convenience. `Zerk<Storing>` and `Zerk<Persisting>` are the
 /// same generic specialization, so registering an injectable under each emits
 /// two `inject()` members on one type — `invalid redeclaration of 'inject()'`.
 /// Zerk did exactly that before aliases were understood, so several of these
 /// cases are regression tests for a generated file that would not compile.
-@Suite("Zerk aliases")
-struct ZerkAliasTests {
+@Suite("Key aliases")
+struct InjectableAliasTests {
 
     // MARK: - Key merging
 
@@ -24,7 +24,7 @@ struct ZerkAliasTests {
         let source = """
         protocol Storing {}
 
-        @ZerkAlias
+        @InjectableAlias
         typealias Persisting = Storing
 
         @Injectable<Storing>
@@ -54,7 +54,7 @@ struct ZerkAliasTests {
         protocol Storing {}
         typealias Persisting = Storing
 
-        #ZerkAlias<Storing, Persisting>()
+        #InjectableAlias<Storing, Persisting>()
 
         @Injectable<Storing>
         final class FileStore: Storing {
@@ -82,7 +82,7 @@ struct ZerkAliasTests {
         let source = """
         protocol Storing {}
 
-        @ZerkAlias
+        @InjectableAlias
         typealias Persisting = Storing
 
         @Injectable<Storing>(primary: true)
@@ -114,10 +114,10 @@ struct ZerkAliasTests {
         let source = """
         protocol Storing {}
 
-        @ZerkAlias
+        @InjectableAlias
         typealias Persisting = Storing
 
-        @ZerkAlias
+        @InjectableAlias
         typealias Caching = Persisting
 
         @Injectable<Storing>
@@ -144,7 +144,7 @@ struct ZerkAliasTests {
     @Test("the underlying type represents the group, not the alias")
     func underlyingTypeIsTheRepresentative() {
         let source = """
-        @ZerkAlias
+        @InjectableAlias
         typealias Names = [String]
 
         @InjectableValue
@@ -165,7 +165,7 @@ struct ZerkAliasTests {
         protocol Zebra {}
         typealias Apple = Zebra
 
-        #ZerkAlias<Zebra, Apple>()
+        #InjectableAlias<Zebra, Apple>()
 
         @Injectable<Zebra>
         final class Impl: Zebra {
@@ -185,7 +185,7 @@ struct ZerkAliasTests {
         let source = """
         protocol Storing {}
 
-        @ZerkAlias
+        @InjectableAlias
         typealias Persisting = Storing
 
         @Injectable<any Persisting>
@@ -210,7 +210,7 @@ struct ZerkAliasTests {
         let source = """
         protocol Storing {}
 
-        @ZerkAlias
+        @InjectableAlias
         typealias Persisting = Storing
 
         @Injectable<Storing>
@@ -232,7 +232,7 @@ struct ZerkAliasTests {
             $0.severity == .error
                 && $0.message.contains("Multiple types are injectable under 'Storing'")
                 && $0.message.contains("'Storing' and 'Persisting' are the same type")
-                && $0.message.contains("@ZerkAlias")
+                && $0.message.contains("@InjectableAlias")
         })
     }
 
@@ -268,7 +268,7 @@ struct ZerkAliasTests {
         // would merge `Pair` with a spelling that means nothing without
         // substitution.
         let source = """
-        @ZerkAlias
+        @InjectableAlias
         typealias Pair<T> = (T, T)
         """
 

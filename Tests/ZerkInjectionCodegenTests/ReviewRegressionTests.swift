@@ -203,16 +203,25 @@ struct ReviewRegressionTests {
     func differingImportConditionsAreOrderIndependent() {
         let debug = """
         #if DEBUG
-        #ZerkImport(module: "Mocks")
+        import Mocks
         #endif
         """
         let ios = """
         #if os(iOS)
-        #ZerkImport(module: "Mocks")
+        import Mocks
         #endif
         """
-        let generated = CompileFixture.generate(source: "\(debug)\n\(ios)")
-        let reversed = CompileFixture.generate(source: "\(ios)\n\(debug)")
+        // An import is copied only from a file that names something this module
+        // does not declare, so the fixture has to register one.
+        let probe = """
+        @Injectable
+        struct Probe {
+            @InjectableProviding
+            init(mock: MockThing) {}
+        }
+        """
+        let generated = CompileFixture.generate(source: "\(debug)\n\(ios)\n\(probe)")
+        let reversed = CompileFixture.generate(source: "\(ios)\n\(debug)\n\(probe)")
 
         #expect(generated == reversed)
         #expect(generated.contains("#if (DEBUG)\nimport Mocks\n#endif"))
@@ -223,8 +232,14 @@ struct ReviewRegressionTests {
     func singleImportConditionIsKept() {
         let generated = CompileFixture.generate(source: """
         #if DEBUG
-        #ZerkImport(module: "Mocks")
+        import Mocks
         #endif
+
+        @Injectable
+        struct Probe {
+            @InjectableProviding
+            init(mock: MockThing) {}
+        }
         """)
 
         #expect(generated.contains("#if (DEBUG)\nimport Mocks\n#endif"))

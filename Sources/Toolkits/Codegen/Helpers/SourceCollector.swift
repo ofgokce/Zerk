@@ -63,12 +63,32 @@ final class SourceCollector: SyntaxVisitor {
     /// ``TypeSyntax/nominalNames``. Read when deciding whether the generated
     /// members may be `public`.
     private(set) var keyNominalNames: [String: Set<String>] = [:]
-    /// `@ZerkAlias` / `#ZerkAlias` declarations, which merge keys before
+    /// `@InjectableAlias` / `#InjectableAlias` declarations, which merge keys before
     /// resolution. See ``KeyAliases``.
     private(set) var aliasDeclarations: [AliasDeclaration] = []
-    /// Modules `#ZerkImport` asked the generated file to import, from anywhere
-    /// in the module. Emitted deduplicated and sorted.
-    private(set) var importedModules: Set<String> = []
+    /// File -> every nominal type name that file put into something Zerk emits.
+    ///
+    /// Read together with ``filesWithDeclarations`` to decide whose imports the
+    /// generated file needs. A file whose names are all declared in this module
+    /// contributed nothing the generated file cannot already see, so its imports
+    /// are not copied.
+    ///
+    /// Accounted for at three places, and the list is the whole of it: every key
+    /// (through ``recordKey(display:nominalNames:for:)``, which is the only way
+    /// to register one), every provider parameter, and every `@injected`
+    /// member's own signature. A source of emitted names that did not report
+    /// here would cost a needed import, so the narrowing errs the other way —
+    /// see ``filesWithDeclarations``.
+    private(set) var mentionedNamesByFile: [String: Set<String>] = [:]
+    /// File -> the modules it imports, with the guard each sits under.
+    private var importsByFile: [String: [(String, CompilationCondition)]] = [:]
+    /// Files carrying any declaration Zerk collects.
+    ///
+    /// A file in here with *no* recorded names is included anyway. That is the
+    /// "I did not account for this" case: it means the file registered something
+    /// whose names nothing above reported, and dropping its imports on that
+    /// basis would reintroduce exactly the failure automatic imports removed.
+    private(set) var filesWithDeclarations: Set<String> = []
     /// `@ImportedInjectable` declarations: keys from other modules this one may
     /// resolve against.
     private(set) var importedInjectables: [ImportedInjectableRecord] = []
@@ -80,13 +100,6 @@ final class SourceCollector: SyntaxVisitor {
     /// `visit(_: ProtocolDeclSyntax)`.
     private(set) var protocolPrimaryAssociatedTypeCounts: [String: Int] = [:]
 
-    /// Module -> every `#if` it was asked for under. See ``importedModules``.
-    ///
-    /// A set rather than one condition, because the same module may be asked for
-    /// from several files under several guards, and none of those asks may be
-    /// dropped: the guard is what keeps a Release build from naming a module
-    /// that is not there.
-    private(set) var moduleImportConditions: [String: Set<CompilationCondition>] = [:]
 
     private let settings: ZerkSettings
     private var sourceFile: String = ""
@@ -467,13 +480,13 @@ final class SourceCollector: SyntaxVisitor {
         }
     }
 
-    /// `@ZerkAlias typealias Persisting = Storing` — the alias and the type it
+    /// `@InjectableAlias typealias Persisting = Storing` — the alias and the type it
     /// names become one key.
     ///
     /// A generic typealias is rejected by the macro; skipping it here keeps the
     /// plugin from acting on something the macro already refused.
     override func visit(_ node: TypeAliasDeclSyntax) -> SyntaxVisitorContinueKind {
-        guard node.attributes.hasAttribute(named: "ZerkAlias") else {
+        guard node.attributes.hasAttribute(named: "InjectableAlias") else {
             return .skipChildren
         }
         guard node.genericParameterClause?.parameters.isEmpty ?? true else {
@@ -494,7 +507,7 @@ final class SourceCollector: SyntaxVisitor {
         return .skipChildren
     }
 
-    /// `#ZerkAlias<A, B, C>()` — every listed type is the same key.
+    /// `#InjectableAlias<A, B, C>()` — every listed type is the same key.
     ///
     /// The macro's expansion is what proves the claim to the compiler; all the
     /// plugin needs is the list. Written without the trailing `()` the generic
@@ -504,7 +517,6 @@ final class SourceCollector: SyntaxVisitor {
         collectAlias(macroName: node.macroName.text,
                      arguments: node.genericArgumentClause,
                      syntax: Syntax(node))
-        collectImport(macroName: node.macroName.text, arguments: node.arguments)
         return .skipChildren
     }
 
@@ -512,44 +524,101 @@ final class SourceCollector: SyntaxVisitor {
         collectAlias(macroName: node.macroName.text,
                      arguments: node.genericArgumentClause,
                      syntax: Syntax(node))
-        collectImport(macroName: node.macroName.text, arguments: node.arguments)
         return .skipChildren
     }
 
-    /// `#ZerkImport(module: "Foundation")` — names a module the generated file
-    /// must import. The macro has already refused anything unreadable, so a
-    /// non-literal argument is simply absent here.
-    private func collectImport(macroName: String, arguments: LabeledExprListSyntax) {
-        guard macroName == "ZerkImport" else {
-            return
+    /// Every `import` in a file Zerk reads becomes an import of the file Zerk
+    /// writes.
+    ///
+    /// The generated file names types it did not declare — a key written
+    /// `@Injectable<URLSession>`, a provider parameter typed `Date`, an
+    /// `@injected` member's own signature — and reading syntax cannot tell which
+    /// module a name came from. Asking the developer to restate it was what
+    /// `#ZerkImport` did, and restating is the part that goes wrong: the failure
+    /// is a missing name inside a generated file, and it arrives every time
+    /// somebody touches a foreign type.
+    ///
+    /// Copying the imports instead is correct by construction rather than by
+    /// diligence. A declaration mentioning `Date` sits in a file that imports
+    /// `Foundation`, or that file would not compile — so the union over the
+    /// files Zerk reads can only ever be a *superset* of what the generated file
+    /// needs. It cannot under-import, which is the failure `#ZerkImport` had.
+    ///
+    /// Two things are deliberately not copied:
+    ///
+    /// - **`@testable`**, which the generated file has no business carrying: it
+    ///   belongs to a test target, and reproducing it in one that is not is
+    ///   either an error or a lie about what the module can see.
+    /// - **Access-level modifiers and other attributes.** A plain `import` is
+    ///   what the generated file needs; `internal import X` restates a boundary
+    ///   about *that* file, not about this one.
+    ///
+    /// The `#if` a file's import sits under travels with it, exactly as a
+    /// registration's does, so a debug-only module stays debug-only. See
+    /// ``moduleImportConditions``.
+    override func visit(_ node: ImportDeclSyntax) -> SyntaxVisitorContinueKind {
+        guard !node.attributes.hasAttribute(named: "testable") else {
+            return .skipChildren
         }
-        for argument in arguments {
-            guard let module = argument.moduleNameLiteral else {
-                continue
+        // The module is the first path component: `import A.B.C` is a submodule
+        // of `A`, and naming `A` is what puts `A.B.C`'s contents in scope.
+        guard let module = node.path.first?.name.text, module != "Zerk" else {
+            return .skipChildren
+        }
+        importsByFile[sourceFile, default: []].append((module, currentCondition))
+        return .skipChildren
+    }
+
+    /// The modules the generated file needs, and the guards they sit under.
+    ///
+    /// Narrower than "every import in every file Zerk read": only files that put
+    /// a name into the generated file which this module does not declare. A file
+    /// registering nothing but local types has already been seen by the compiler
+    /// in this module, so its imports buy the generated file nothing — and a
+    /// module imported for no reason is a name the generated file could trip
+    /// over that it never needed in scope.
+    ///
+    /// Erring towards inclusion in the one case that matters: a file that
+    /// registered something whose names went unaccounted for is included, since
+    /// a missing import is the failure automatic imports exist to remove, while
+    /// a surplus one is only untidy. See ``mentionedNamesByFile``.
+    func resolvedImports(declaredLocally: Set<String>)
+    -> (modules: Set<String>, conditions: [String: Set<CompilationCondition>]) {
+        var modules: Set<String> = []
+        var conditions: [String: Set<CompilationCondition>] = [:]
+
+        for (file, imports) in importsByFile {
+            guard filesWithDeclarations.contains(file) else { continue }
+            let names = mentionedNamesByFile[file]
+            let contributes = names.map { !$0.subtracting(declaredLocally).isEmpty } ?? true
+            guard contributes else { continue }
+            for (module, condition) in imports {
+                modules.insert(module)
+                conditions[module, default: []].insert(condition)
             }
-            importedModules.insert(module)
-            // Every ask is kept, and the emitter writes one guarded import per
-            // distinct guard. Collapsing them here is what a previous version
-            // did — two asks that were not *equal* widened the import to
-            // unconditional — and its defence was that "an unnecessary import is
-            // a warning at worst". That is false for exactly the module people
-            // guard an import for: a debug-only or platform-only module is not
-            // merely unnecessary in a Release build, it is absent, and naming it
-            // does not compile.
-            //
-            // It was also reachable by accident. `CompilationCondition` equality
-            // is structural over clauses whose identity is file-and-offset, so
-            // two files each writing `#if DEBUG` around the same `#ZerkImport`
-            // were unequal — and the second file silently dropped the guard the
-            // first had earned.
-            moduleImportConditions[module, default: []].insert(currentCondition)
         }
+        return (modules, conditions)
+    }
+
+    /// Every key spelling as it was written, from both places a key can come
+    /// from: a local declaration and an `@ImportedInjectable`.
+    ///
+    /// The only input to ``KeyAliases/clashingBareNames(among:modules:)``, which
+    /// is why it is one property here rather than an expression at each call
+    /// site. It was the latter, reading ``keyDisplayNames`` alone, and that
+    /// missed the case the clash rule was written for: two modules producing one
+    /// bare name are almost always both *foreign*, so neither reaches
+    /// `keyDisplayNames` and the two merged into a single key — reported as
+    /// `'Config' is imported more than once`, against two imports that name
+    /// different types.
+    var writtenKeySpellings: [String] {
+        Array(keyDisplayNames.keys) + importedInjectables.map(\.typeName)
     }
 
     private func collectAlias(macroName: String,
                               arguments: GenericArgumentClauseSyntax?,
                               syntax: Syntax) {
-        guard macroName == "ZerkAlias" else {
+        guard macroName == "InjectableAlias" else {
             return
         }
         // A generic argument may be a value rather than a type (SE-0453); only
@@ -1037,6 +1106,8 @@ final class SourceCollector: SyntaxVisitor {
             }
         }
 
+        // The record's own parameters reach the generated file too.
+        defer { note(parametersOf: types[types.count - 1]) }
         types.append(
             TypeRecord(
                 name: node.declaredName,
@@ -1400,6 +1471,29 @@ final class SourceCollector: SyntaxVisitor {
         }
     }
 
+    /// Every nominal name a record's parameters mention, noted for this file.
+    private func note(parametersOf record: TypeRecord) {
+        var names: Set<String> = []
+        for provider in record.defaultProviders + record.typedProviders.values.flatMap({ $0 }) {
+            for parameter in provider.parameters {
+                names.formUnion(parameter.typeNominalNames)
+            }
+        }
+        for initializer in record.initializers {
+            for parameter in initializer.parameters {
+                names.formUnion(parameter.typeNominalNames)
+            }
+        }
+        note(names)
+    }
+
+    /// Records that this file put `names` into something Zerk emits.
+    private func note(_ names: Set<String>) {
+        filesWithDeclarations.insert(sourceFile)
+        guard !names.isEmpty else { return }
+        mentionedNamesByFile[sourceFile, default: []].formUnion(names)
+    }
+
     /// Records a key's spelling and the types that spelling mentions, together.
     ///
     /// Together, and through one function, because they answer for each other:
@@ -1419,6 +1513,7 @@ final class SourceCollector: SyntaxVisitor {
     /// reaches the same specialization regardless.
     private func recordKey(display displayName: String, nominalNames: Set<String>, for key: String) {
         keyNominalNames[key, default: []].formUnion(nominalNames)
+        note(nominalNames)
 
         guard let existing = keyDisplayNames[key] else {
             keyDisplayNames[key] = displayName
@@ -1826,6 +1921,8 @@ final class SourceCollector: SyntaxVisitor {
             }
         }
 
+        // The record's own parameters reach the generated file too.
+        defer { note(parametersOf: types[types.count - 1]) }
         types.append(
             TypeRecord(
                 name: baseName,
@@ -2260,6 +2357,11 @@ final class SourceCollector: SyntaxVisitor {
         guard !hadIssue else {
             return
         }
+
+        // The generated overload reproduces the extended type and every
+        // unmarked parameter, so both put names into the generated file.
+        note(extendedTypeNominalNames)
+        note(Set(collected.flatMap { $0.parameter.typeNominalNames }))
 
         markedMembers.append(MarkedMemberRecord(
             typeName: typeName,

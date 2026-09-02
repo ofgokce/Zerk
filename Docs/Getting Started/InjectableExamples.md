@@ -275,8 +275,6 @@ A value is read from a declaration rather than built by a provider, and is match
 **and** name.
 
 ```swift
-#ZerkImport(module: "Foundation")
-
 @InjectableValue
 var timeout: TimeInterval { 30 }
 
@@ -342,7 +340,7 @@ never reads the original. The `.referenced` sweep did the opposite: `AppConstant
 read through on every access, and because the source is a `var`, the member is settable and
 writes back. `retries` is a `let`, so it stayed read-only. `buildStamp` is absent entirely:
 `@NonInjectable` took it out of the sweep. None of these emit an `inject()` — a value never
-wins a key. `#ZerkImport` is there because the generated file imports `Zerk` and nothing else,
+wins a key. The generated file gets `import Foundation` from this file's own import: Zerk copies the imports of every file it reads, which is how it can name `Date` at all.
 and `TimeInterval` comes from Foundation.
 
 ## A singleton
@@ -604,8 +602,6 @@ something from another module.
 declaration as its provider.
 
 ```swift
-#ZerkImport(module: "Foundation")
-
 @Injectable
 var urlSession: URLSession { URLSession(configuration: .default) }
 ```
@@ -643,8 +639,6 @@ such indirection, since `Container.session` is already unambiguous.
 When several factories belong together, hang the key on a type instead.
 
 ```swift
-#ZerkImport(module: "Foundation")
-
 @Injectable
 var configuration: URLSessionConfiguration { .default }
 

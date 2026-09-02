@@ -140,11 +140,11 @@ Everything Zerk generates for a conditional declaration:
 | `@InjectableValue` | Its member's extension and its interjection point |
 | `@Singleton` / `@Scoped` | Its slot in the generated storage namespace |
 | `@injected` parameter markers | The generated overload, and its `extension YourType` |
-| `#ZerkImport(module:)` | The `import` line, once per distinct guard. See below |
+| an `import` | The same `import` in the generated file, once per distinct guard. See below |
 
-A module may be asked for from several files, and every ask keeps its guard. Identical guards collapse to one `import`; different ones each get their own, so a module asked for under both `#if DEBUG` and `#if os(iOS)` is imported in either build. An *unconditional* ask subsumes the rest — it is already correct wherever they are — and collapses to a single bare `import`.
+A module may be imported by several files, and every one keeps its guard. Identical guards collapse to one `import`; different ones each get their own, so a module asked for under both `#if DEBUG` and `#if os(iOS)` is imported in either build. An *unconditional* ask subsumes the rest — it is already correct wherever they are — and collapses to a single bare `import`.
 
-Guards are not merged away, because the module people guard an import for is usually one that is not there in the other configuration: naming it is an error, not an unnecessary import.
+Guards are not merged away, because a module people guard an import for is usually one that is not there in the other configuration: naming it is an error, not an unnecessary import.
 
 A value can be swapped per configuration exactly as a provider can:
 

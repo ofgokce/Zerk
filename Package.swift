@@ -1,4 +1,4 @@
-// swift-tools-version:6.1
+// swift-tools-version:6.2
 
 import PackageDescription
 import CompilerPluginSupport
@@ -9,10 +9,6 @@ let package = Package(
     
     platforms: [
         .iOS(.v13),
-        // 13, not 14: the highest platform-gated API anywhere in the sources is
-        // `URL.appending(path:)`, used by the two plugin targets. A higher floor
-        // would exclude macOS 13 consumers for nothing, and the gap against
-        // `.iOS(.v13)` reads as though there were a reason.
         .macOS(.v13),
         .macCatalyst(.v13),
         .watchOS(.v6),
@@ -50,10 +46,6 @@ let package = Package(
         .target(
             name: "Zerk",
             dependencies: ["ZerkMacros"],
-            // The only target whose code reaches a consumer's app binary, so it
-            // is the only one that carries a privacy manifest. `.copy` rather
-            // than `.process`: the manifest has to arrive as a readable plist
-            // under its exact name for Xcode's privacy report to find it.
             resources: [
                 .copy("PrivacyInfo.xcprivacy")
             ],
@@ -132,6 +124,14 @@ let package = Package(
             path: "Sources/ZerkPlugin"
         ),
         .executableTarget(
+            name: "ZerkSettingsTool",
+            dependencies: ["CodegenToolkit"],
+            path: "Sources/ZerkSettingsTool",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
+        ),
+        .executableTarget(
             name: "ZerkGraphTool",
             dependencies: ["CodegenToolkit"],
             path: "Sources/ZerkGraphTool",
@@ -147,7 +147,7 @@ let package = Package(
                     description: "Zerk's command-line tools. Run 'swift package zerk help' for the list."
                 )
             ),
-            dependencies: ["ZerkCodegen", "ZerkGraphTool"],
+            dependencies: ["ZerkCodegen", "ZerkGraphTool", "ZerkSettingsTool"],
             path: "Sources/ZerkCLI"
         ),
         .testTarget(

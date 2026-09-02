@@ -32,6 +32,7 @@ Usage: swift package zerk <command> [options]
 
 Commands:
   graph     Export the resolved dependency graph for this package.
+  settings  Write ZerkSettings.json from an Xcode target's build settings.
   help      Show this message.
 
 Run 'swift package zerk <command> --help' for a command's options.
@@ -87,6 +88,65 @@ graph LR
 ```
 
 Mermaid renders in GitHub and most Markdown viewers, so it is the one to reach for in a PR. DOT is for `dot -Tpng`, `-Tsvg`, and anything else Graphviz can do.
+
+## `zerk settings`
+
+Reads an Xcode target's build settings and prints the `ZerkSettings.json` that matches them.
+
+```bash
+swift package zerk settings --project App.xcodeproj --target App
+```
+
+`ZerkSettings.json` exists because the build plugin cannot read build settings — the plugin API
+hands it sources and nothing else, and `XcodeTarget` vends `displayName`, `product`,
+`dependencies` and `inputFiles` with no settings among them. So the facts have to be restated,
+and restating them by hand is where they drift: the file says `"defaultActorIsolation":
+"nonisolated"` long after the target moved to `MainActor`, and Zerk then infers the wrong
+isolation for every provider. `xcodebuild -showBuildSettings` can read them, and this maps its
+answer:
+
+| Build setting | Key |
+|---|---|
+| `SWIFT_DEFAULT_ACTOR_ISOLATION` | `defaultActorIsolation` |
+| `SWIFT_VERSION` | `swiftVersion` |
+| `SWIFT_STRICT_CONCURRENCY` | `strictConcurrency` |
+| `SWIFT_UPCOMING_FEATURE_ISOLATED_DEFAULT_VALUES` | `isolatedDefaultValues` |
+
+A setting the target does not set is **absent** from xcodebuild's output rather than reported
+with a default, so its key is left out and Zerk's own default applies. That keeps the written
+file to what the target actually says.
+
+**`valueInjectionMethod` is never written.** It mirrors no build setting — it is Zerk's own
+default and yours to choose — so there is nothing to read it from. Re-running this will not
+overwrite your answer, and will not carry it over either; merge that key by hand.
+
+### Options
+
+| Option | |
+|---|---|
+| `--project <path>` | The `.xcodeproj` to read. Required outside Xcode; inside Xcode the open project is used |
+| `--target <name>` | Which target's settings. Required when the project has more than one |
+| `--output <path>` | Write to a file instead of stdout |
+
+Printing by default is deliberate: the file it replaces is one you may have edited, so the
+result is worth reading before adopting. Writing inside the package needs the permission flag,
+as [Writing a file](#writing-a-file) describes:
+
+```bash
+swift package --allow-writing-to-package-directory \
+  zerk settings --project App.xcodeproj --target App --output App/ZerkSettings.json
+```
+
+### It needs Xcode
+
+`xcodebuild` is the only thing that can resolve a target's build settings, so this command is
+macOS-only and works on an `.xcodeproj` rather than on a Swift package — a package has no such
+settings to read. Everything else Zerk does runs anywhere; write the file by hand there.
+
+Refused rather than guessed at: a `SWIFT_STRICT_CONCURRENCY` Zerk does not recognise, or an
+upcoming-feature flag that is neither `YES` nor `NO`, is an error naming the build setting. And
+whatever it writes is parsed back through Zerk's own loader before you see it, so the command
+cannot produce a file the next build rejects.
 
 ## It re-runs codegen
 

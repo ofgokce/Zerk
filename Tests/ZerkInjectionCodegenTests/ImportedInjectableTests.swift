@@ -20,7 +20,7 @@ struct ImportedInjectableTests {
         let source = """
         protocol Session {}
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func session() -> Session
         }
@@ -47,7 +47,7 @@ struct ImportedInjectableTests {
         let source = """
         protocol Session {}
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func session() -> Session
         }
@@ -63,7 +63,7 @@ struct ImportedInjectableTests {
         let source = """
         protocol Session {}
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func session() -> Session { Zerk<Session>.staging }
         }
@@ -87,7 +87,7 @@ struct ImportedInjectableTests {
         let source = """
         protocol Session {}
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func session(id: Int) -> Session { Zerk<Session>.seeded(id: id) }
         }
@@ -111,7 +111,7 @@ struct ImportedInjectableTests {
         let source = """
         protocol Session {}
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func session() async throws -> Session
         }
@@ -134,7 +134,7 @@ struct ImportedInjectableTests {
         let source = """
         protocol Session {}
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func session() -> Session
         }
@@ -161,7 +161,7 @@ struct ImportedInjectableTests {
         let source = """
         protocol Session {}
 
-        enum ZerkImports {
+        enum ImportedInjectables {
             @ImportedInjectable
             static func session() -> Session
 

@@ -36,8 +36,8 @@ Every attribute and freestanding macro Zerk vends, except the testing ones.
 | [`@Isolated`](Macros%20and%20Markers/Isolated.md) | Telling Zerk about isolation it cannot see |
 | [`@Injected`](Macros%20and%20Markers/Injected.md) | The property macro — every variant, `@InjectedDynamically`, and the one macro that generates code |
 | [Parameter markers](Macros%20and%20Markers/ParameterMarkers.md) | The four lowercase wrappers: `@injected`, `@autoinjected`, `@noninjected`, `@injectable` |
-| [Imported injectables](Macros%20and%20Markers/ImportedInjectables.md) | `@ImportedInjectable`, `@ImportedInjectableValue`, `#ZerkImport` — reaching another module's graph |
-| [Key aliases](Macros%20and%20Markers/ZerkAlias.md) | `@ZerkAlias` and `#ZerkAlias<A, B>()` — telling Zerk two names are one key |
+| [Imported injectables](Macros%20and%20Markers/ImportedInjectables.md) | `@ImportedInjectable`, `@ImportedInjectableValue` — reaching another module's graph |
+| [Key aliases](Macros%20and%20Markers/InjectableAlias.md) | `@InjectableAlias` and `#InjectableAlias<A, B>()` — telling Zerk two names are one key |
 
 ## Features
 
@@ -49,6 +49,7 @@ Topics that span several macros.
 | [Generics](Features/Generics.md) | The three ways to register a generic type, and what each can do |
 | [Concurrency](Features/Concurrency.md) | Isolation, effects, crossing a domain, and what Swift 6 needs from you |
 | [Conditional compilation](Features/ConditionalCompilation.md) | `#if` around registrations — carrying the guard into generated code, and per-configuration primaries |
+| [SwiftUI and `@Observable`](Features/SwiftUI.md) | `@ObservationIgnored`, property wrappers, and registering a view model |
 
 ## The plugin
 
@@ -109,4 +110,4 @@ How code generation works, and what it produces.
 
 ---
 
-[← Back to the README](../README.md)
+[Changelog](../CHANGELOG.md) · [← Back to the README](../README.md)

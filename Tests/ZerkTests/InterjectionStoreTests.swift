@@ -133,7 +133,7 @@ struct InterjectionScopeTests {
 
     @Test("alias groups fold without the scope being told")
     func aliasesFold() {
-        // A test target cannot know the module's @ZerkAlias declarations; the
+        // A test target cannot know the module's @InjectableAlias declarations; the
         // metatype settles it, because the two names are one type.
         #expect(Zerk<any IJServing>._$interjectionKey == Zerk<any IJPersisting>._$interjectionKey)
         #expect(Zerk<[String]>._$interjectionKey == Zerk<Array<String>>._$interjectionKey)

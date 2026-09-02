@@ -114,14 +114,33 @@ extension ZerkSettings {
             throw LoadFailure(message: "Could not read \(fileName).", path: path)
         }
 
-        let json = stripComments(from: raw)
+        var settings = try decode(json: stripComments(from: raw), path: path)
+        settings.sourcePath = path
+        return settings
+    }
+
+    /// Parses the file's text, comments already stripped.
+    ///
+    /// Split from ``load(contentsOfFile:)`` so that whatever *writes* a settings
+    /// file can read its own output back through the same parser — see
+    /// ``XcodeSettingsImport``. `path` only names the file in diagnostics, so a
+    /// caller holding text rather than a file passes what it has.
+    static func decode(json: String, path: String = fileName) throws -> ZerkSettings {
         guard let data = json.data(using: .utf8) else {
             throw LoadFailure(message: "\(fileName) is not valid UTF-8.", path: path)
         }
 
-        let object: Any
+        let payload: Payload
         do {
-            object = try JSONSerialization.jsonObject(with: data, options: [])
+            payload = try JSONDecoder().decode(Payload.self, from: data)
+        } catch let malformed as MalformedKey {
+            throw LoadFailure(message: malformed.message, path: path)
+        } catch DecodingError.typeMismatch(_, let context) where context.codingPath.isEmpty {
+            // Valid JSON of the wrong shape — an array, a string, a bare number
+            // at the top level. A mismatch *inside* the object is a key's
+            // problem, and `Payload` has already reported that one by name, so
+            // an empty coding path is what says the file itself is wrong.
+            throw LoadFailure(message: "\(fileName) must contain a JSON object.", path: path)
         } catch {
             throw LoadFailure(
                 message: "\(fileName) is not valid JSON: \(error.localizedDescription)",
@@ -129,34 +148,22 @@ extension ZerkSettings {
             )
         }
 
-        guard let dictionary = object as? [String: Any] else {
-            throw LoadFailure(message: "\(fileName) must contain a JSON object.", path: path)
-        }
-
-        // Typed like every other key below, and for a stronger reason than any
-        // of them: this is the key that decides whether the rest can be trusted
-        // to mean what they say. Written as `"version": "2"` it failed the cast
-        // and skipped the guard, so a settings file from a newer Zerk was read
-        // as if it were current.
-        if let version = dictionary["version"] {
-            guard !Self.isJSONBoolean(version), let number = version as? Int else {
-                throw LoadFailure(message: "'version' must be a number.", path: path)
-            }
-            guard number <= currentVersion else {
+        // Checked before anything else is read: this is the key that decides
+        // whether the rest can be trusted to mean what they say. Written as
+        // `"version": "2"` it used to fail a cast and skip the guard, so a
+        // settings file from a newer Zerk was read as if it were current.
+        if let version = payload.version {
+            guard version <= currentVersion else {
                 throw LoadFailure(
-                    message: "\(fileName) declares version \(number); this version of Zerk understands up to \(currentVersion).",
+                    message: "\(fileName) declares version \(version); this version of Zerk understands up to \(currentVersion).",
                     path: path
                 )
             }
         }
 
         var settings = ZerkSettings.default
-        settings.sourcePath = path
 
-        if let isolation = dictionary["defaultActorIsolation"] {
-            guard let text = isolation as? String else {
-                throw LoadFailure(message: "'defaultActorIsolation' must be a string.", path: path)
-            }
+        if let text = payload.defaultActorIsolation {
             switch text {
             case "nonisolated":
                 settings.defaultActorIsolation = .nonisolated
@@ -167,23 +174,11 @@ extension ZerkSettings {
             }
         }
 
-        if let version = dictionary["swiftVersion"] {
-            // A number is accepted because `"swiftVersion": 6` is the obvious
-            // thing to write; a boolean is not, and would otherwise arrive here
-            // as `1` and read as Swift 5.
-            if !Self.isJSONBoolean(version), let text = version as? String {
-                settings.swiftVersion = text
-            } else if !Self.isJSONBoolean(version), let number = version as? Int {
-                settings.swiftVersion = String(number)
-            } else {
-                throw LoadFailure(message: "'swiftVersion' must be a string.", path: path)
-            }
+        if let text = payload.swiftVersion {
+            settings.swiftVersion = text
         }
 
-        if let method = dictionary["valueInjectionMethod"] {
-            guard let text = method as? String else {
-                throw LoadFailure(message: "'valueInjectionMethod' must be a string.", path: path)
-            }
+        if let text = payload.valueInjectionMethod {
             guard let resolved = ValueInjectionMethod(rawValue: text) else {
                 throw LoadFailure(
                     message: "'valueInjectionMethod' must be \"copied\" or \"referenced\"; found \"\(text)\".",
@@ -193,10 +188,7 @@ extension ZerkSettings {
             settings.valueInjectionMethod = resolved
         }
 
-        if let concurrency = dictionary["strictConcurrency"] {
-            guard let text = concurrency as? String else {
-                throw LoadFailure(message: "'strictConcurrency' must be a string.", path: path)
-            }
+        if let text = payload.strictConcurrency {
             guard let level = StrictConcurrency(rawValue: text) else {
                 throw LoadFailure(
                     message: "'strictConcurrency' must be \"minimal\", \"targeted\", or \"complete\"; found \"\(text)\".",
@@ -206,34 +198,87 @@ extension ZerkSettings {
             settings.strictConcurrency = level
         }
 
-        if let feature = dictionary["isolatedDefaultValues"] {
-            guard Self.isJSONBoolean(feature), let flag = feature as? Bool else {
-                throw LoadFailure(message: "'isolatedDefaultValues' must be a boolean.", path: path)
-            }
+        if let flag = payload.isolatedDefaultValues {
             settings.isolatedDefaultValues = flag
         }
 
         return settings
     }
 
-    /// Whether a value `JSONSerialization` produced is a JSON **boolean**.
+    /// A key that is present and not the type it has to be. Carries only the
+    /// message, because `Decodable` has no idea which file it is reading;
+    /// ``load(contentsOfFile:)`` adds the path.
+    struct MalformedKey: Error {
+        let message: String
+    }
+
+    /// The settings file's shape, **decoded** rather than deserialized into
+    /// `Any` and cast.
     ///
-    /// Neither `is Bool` nor `is NSNumber` answers this. `JSONSerialization`
-    /// returns booleans as `__NSCFBoolean`, which bridges to both — measured,
-    /// not assumed: for `{"a": true, "b": 1}`, `a is Bool` and `b is Bool` are
-    /// both true, as are `a is NSNumber` and `b is NSNumber`, and `true as? Int`
-    /// is `1` while `1 as? Bool` is `true`. So the casts the type guards were
-    /// written as could not tell the two apart in either direction.
+    /// The casts this replaces could not tell a JSON boolean from a JSON number
+    /// in either direction — measured, not assumed: for `{"a": true, "b": 1}`,
+    /// `a is Bool` and `b is Bool` are both true, `a as? Int` is `1` and
+    /// `b as? Bool` is `true`. Distinguishing them needed
+    /// `CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID()`, since the
+    /// CoreFoundation type is the only thing that differed.
     ///
-    /// That was not cosmetic. It moved the SE-0411 capability gate *both* ways
+    /// That was not cosmetic — it moved the SE-0411 capability gate *both* ways
     /// on the same source: `"isolatedDefaultValues": 1` silently disabled a
     /// warning the target genuinely needed, and `"swiftVersion": true` read as
     /// Swift 5 and produced one it did not.
     ///
-    /// The CoreFoundation type is what actually differs, so that is what this
-    /// asks.
-    private static func isJSONBoolean(_ value: Any) -> Bool {
-        CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID()
+    /// `JSONDecoder` draws the distinction itself, in the language rather than
+    /// in the Objective-C runtime: `true` decodes as `Bool` and refuses `Int`,
+    /// `1` decodes as `Int` and refuses `Bool`. That deletes the CoreFoundation
+    /// call, which is also the one thing in Zerk that Darwin alone could answer
+    /// — `JSONSerialization` on Linux returns a plain `NSNumber` for a JSON
+    /// boolean, so the check would have compiled there and quietly said no.
+    ///
+    /// Unknown keys are ignored, as `Decodable` ignores them, so a file written
+    /// for a newer Zerk still loads.
+    private struct Payload: Decodable {
+        var version: Int?
+        var defaultActorIsolation: String?
+        var swiftVersion: String?
+        var valueInjectionMethod: String?
+        var strictConcurrency: String?
+        var isolatedDefaultValues: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case version
+            case defaultActorIsolation
+            case swiftVersion
+            case valueInjectionMethod
+            case strictConcurrency
+            case isolatedDefaultValues
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+
+            version = try container.zerkValue(Int.self, forKey: .version, mustBe: "a number")
+            defaultActorIsolation = try container.zerkValue(
+                String.self, forKey: .defaultActorIsolation, mustBe: "a string")
+            valueInjectionMethod = try container.zerkValue(
+                String.self, forKey: .valueInjectionMethod, mustBe: "a string")
+            strictConcurrency = try container.zerkValue(
+                String.self, forKey: .strictConcurrency, mustBe: "a string")
+            isolatedDefaultValues = try container.zerkValue(
+                Bool.self, forKey: .isolatedDefaultValues, mustBe: "a boolean")
+
+            // The one key with two spellings: a bare number is accepted because
+            // `"swiftVersion": 6` is the obvious thing to write. A boolean is
+            // not, and used to arrive here as `1` and read as Swift 5.
+            if container.contains(.swiftVersion) {
+                if let text = try? container.decode(String.self, forKey: .swiftVersion) {
+                    swiftVersion = text
+                } else if let number = try? container.decode(Int.self, forKey: .swiftVersion) {
+                    swiftVersion = String(number)
+                } else {
+                    throw MalformedKey(message: "'swiftVersion' must be a string.")
+                }
+            }
+        }
     }
 
     /// JSON has no comments, but the reference settings file documents itself
@@ -306,5 +351,24 @@ extension ZerkSettings {
         }
 
         return result
+    }
+}
+
+private extension KeyedDecodingContainer {
+
+    /// Decodes `key`, or reports that it is present and the wrong type.
+    ///
+    /// Absent is `nil` rather than an error, since every key is optional. Present
+    /// and undecodable is a `MalformedKey` naming the key and the type it has to
+    /// be, so the message reads the way the hand-written casts used to.
+    func zerkValue<T: Decodable>(_ type: T.Type,
+                                 forKey key: Key,
+                                 mustBe description: String) throws -> T? {
+        guard contains(key) else { return nil }
+        guard let value = try? decode(T.self, forKey: key) else {
+            throw ZerkSettings.MalformedKey(
+                message: "'\(key.stringValue)' must be \(description).")
+        }
+        return value
     }
 }

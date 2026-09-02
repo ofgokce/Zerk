@@ -1,9 +1,6 @@
 import Zerk
 import CrossCore
 
-// The generated file needs the module imported to name `ApiServicing`.
-#ZerkImport(module: "CrossCore")
-
 enum Imports {
     /// Answered by CrossCore — the edge the merger has to find.
     @ImportedInjectable
@@ -16,7 +13,7 @@ enum Imports {
 }
 
 /// Depends on the imported key, written module-qualified — one key only because
-/// `#ZerkImport` named the module.
+/// the file's own `import` named the module.
 @Injectable
 struct FeedViewModel {
     @InjectableProviding

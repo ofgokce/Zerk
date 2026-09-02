@@ -14,6 +14,20 @@ Zerk 2 is a ground-up replacement for the original runtime container:
 - Lifetimes are annotations rather than registration chains: transient by default, [`@Scoped`](../Macros%20and%20Markers/Scoped.md) for one instance per named scope, [`@Singleton`](../Macros%20and%20Markers/Singleton.md) for one per process.
 - Installation is Swift Package Manager only; CocoaPods-era runtime APIs and key-path property injection wrappers are no longer part of the public model.
 
+## Changes in 2.1
+
+Two things a 2.0 module has to be updated for. Both are compiler errors rather than silent
+behaviour changes, so the build tells you where.
+
+- **`#ZerkImport(module:)` is gone.** The generated file now takes its imports from the files it
+  reads — every module imported by a file that names a type from outside this one. Delete the
+  declarations; nothing replaces them. See
+  [Imported injectables](../Macros%20and%20Markers/ImportedInjectables.md).
+- **`@ZerkAlias` and `#ZerkAlias<A, B>()` are `@InjectableAlias` and `#InjectableAlias<A, B>()`.**
+  A rename only — the behaviour is unchanged. It leaves no macro with `Zerk` in its name, so the
+  whole set now reads the same way. See
+  [Key aliases](../Macros%20and%20Markers/InjectableAlias.md).
+
 ## Migrating a module
 
 For an app using Zerk 1.x, migrate one module at a time:
