@@ -124,6 +124,14 @@ let package = Package(
             path: "Sources/ZerkPlugin"
         ),
         .executableTarget(
+            name: "ZerkSettingsTool",
+            dependencies: ["CodegenToolkit"],
+            path: "Sources/ZerkSettingsTool",
+            swiftSettings: [
+                .swiftLanguageMode(.v5)
+            ]
+        ),
+        .executableTarget(
             name: "ZerkGraphTool",
             dependencies: ["CodegenToolkit"],
             path: "Sources/ZerkGraphTool",
@@ -139,7 +147,7 @@ let package = Package(
                     description: "Zerk's command-line tools. Run 'swift package zerk help' for the list."
                 )
             ),
-            dependencies: ["ZerkCodegen", "ZerkGraphTool"],
+            dependencies: ["ZerkCodegen", "ZerkGraphTool", "ZerkSettingsTool"],
             path: "Sources/ZerkCLI"
         ),
         .testTarget(

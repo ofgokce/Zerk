@@ -114,7 +114,18 @@ extension ZerkSettings {
             throw LoadFailure(message: "Could not read \(fileName).", path: path)
         }
 
-        let json = stripComments(from: raw)
+        var settings = try decode(json: stripComments(from: raw), path: path)
+        settings.sourcePath = path
+        return settings
+    }
+
+    /// Parses the file's text, comments already stripped.
+    ///
+    /// Split from ``load(contentsOfFile:)`` so that whatever *writes* a settings
+    /// file can read its own output back through the same parser — see
+    /// ``XcodeSettingsImport``. `path` only names the file in diagnostics, so a
+    /// caller holding text rather than a file passes what it has.
+    static func decode(json: String, path: String = fileName) throws -> ZerkSettings {
         guard let data = json.data(using: .utf8) else {
             throw LoadFailure(message: "\(fileName) is not valid UTF-8.", path: path)
         }
@@ -151,7 +162,6 @@ extension ZerkSettings {
         }
 
         var settings = ZerkSettings.default
-        settings.sourcePath = path
 
         if let text = payload.defaultActorIsolation {
             switch text {

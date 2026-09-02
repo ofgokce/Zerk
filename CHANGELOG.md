@@ -56,6 +56,15 @@ change, so the build says where. See [Changes in 2.1](Docs/Getting%20Started/Mig
   names the wrapper and the spelling that works —
   `@StateObject var model = Zerk<Key>.inject()`.
 
+### Added
+
+- **`swift package zerk settings`** — writes `ZerkSettings.json` from an Xcode target's build
+  settings instead of from memory. The plugin API cannot read build settings, which is why the
+  file exists at all; `xcodebuild -showBuildSettings` can, so this maps its answer onto the four
+  keys that mirror one and leaves `valueInjectionMethod`, which mirrors nothing, alone. A setting
+  the target does not set is left out, so Zerk's default applies. Needs Xcode. See
+  [`zerk settings`](Docs/Plugin/ZerkCLI.md#zerk-settings).
+
 ### Changed
 
 - **`ZerkSettings.json` is decoded rather than deserialized and cast.** The type guards used to
