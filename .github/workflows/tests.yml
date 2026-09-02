@@ -27,6 +27,9 @@ jobs:
   test:
     name: macOS · Xcode ${{ matrix.xcode }}
     runs-on: macos-15
+    # A hang should cost half an hour to find, not GitHub's 6-hour ceiling.
+    # Healthy runs are far inside this; raise it only with a reason.
+    timeout-minutes: 30
     strategy:
       # One leg failing is worth seeing on its own, so the other still runs.
       fail-fast: false
@@ -76,6 +79,7 @@ jobs:
       # previously resolved revision and hide it, and the only thing it would buy
       # is a few minutes of swift-syntax build time.
       - name: Build
+        timeout-minutes: 15
         run: swift build --build-tests
 
       # `ZERK_E2E` enables `CrossModulePackageTests`, which builds a nested
@@ -83,13 +87,24 @@ jobs:
       # because it is slow and writes a ~500MB build directory; CI is the place
       # it was written for.
       - name: Test
+        timeout-minutes: 10
         run: swift test
+
+      # Separate, and timed separately, because this is the expensive half and
+      # the half that has hung: it drives `swift package` against the nested
+      # fixture, which resolves and builds Zerk a second time and runs the
+      # plugin for real. Splitting it means the step name says where a hang is
+      # rather than leaving "Test" to cover both.
+      - name: Test (end to end)
+        timeout-minutes: 15
+        run: swift test --filter CrossModulePackageTests
         env:
           ZERK_E2E: "1"
 
   linux:
     name: Linux · Swift ${{ matrix.swift }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # The official image rather than a toolchain-installing action: it pins the
     # Swift version by tag and brings its own SDK, so nothing third-party sits
     # between the workflow and the compiler.
@@ -110,9 +125,20 @@ jobs:
         run: swift --version
 
       - name: Build
+        timeout-minutes: 15
         run: swift build --build-tests
 
       - name: Test
+        timeout-minutes: 10
         run: swift test
+
+      # Separate, and timed separately, because this is the expensive half and
+      # the half that has hung: it drives `swift package` against the nested
+      # fixture, which resolves and builds Zerk a second time and runs the
+      # plugin for real. Splitting it means the step name says where a hang is
+      # rather than leaving "Test" to cover both.
+      - name: Test (end to end)
+        timeout-minutes: 15
+        run: swift test --filter CrossModulePackageTests
         env:
           ZERK_E2E: "1"
