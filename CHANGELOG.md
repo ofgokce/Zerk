@@ -67,6 +67,10 @@ change, so the build says where. See [Changes in 2.1](Docs/Getting%20Started/Mig
 
 ### Changed
 
+- **`swift-tools-version` is 6.2**, up from 6.1. It was never the real floor: a Swift 6.2
+  toolchain has always been required, because interjection points are named with raw identifiers
+  (SE-0451) that land in the generated file your toolchain compiles. The manifest now says so, so
+  an older SwiftPM refuses it up front instead of failing later inside generated code.
 - **`ZerkSettings.json` is decoded rather than deserialized and cast.** The type guards used to
   read a `JSONSerialization` `Any`, where a JSON boolean and a JSON number are indistinguishable
   in both directions — `true as? Int` is `1` and `1 as? Bool` is `true` — so telling them apart

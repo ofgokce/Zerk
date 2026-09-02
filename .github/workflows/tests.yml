@@ -32,12 +32,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Swift 6.2, the toolchain floor — interjection points are named with
-          # raw identifiers (SE-0451), which land in the generated file the
-          # consuming toolchain compiles. `swift-tools-version: 6.1` in
-          # `Package.swift` is the manifest API level and a lower number; it is
-          # not the floor, and pinning CI to it would test a toolchain Zerk
-          # cannot actually run on.
+          # Swift 6.2, the toolchain floor `Package.swift` declares —
+          # interjection points are named with raw identifiers (SE-0451), which
+          # land in the generated file the consuming toolchain compiles.
           - xcode: "26.0.1"
           # A current toolchain, so a Swift release does not break the package
           # unnoticed between releases.
