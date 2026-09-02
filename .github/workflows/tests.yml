@@ -36,15 +36,36 @@ jobs:
           # interjection points are named with raw identifiers (SE-0451), which
           # land in the generated file the consuming toolchain compiles.
           - xcode: "26.0.1"
-          # A current toolchain, so a Swift release does not break the package
-          # unnoticed between releases.
-          - xcode: "26.3"
+          # Whatever the runner image ships newest, resolved at run time. Pinning
+          # this leg would mean it silently stops being "current" the moment a
+          # newer Xcode lands, which is the one thing it exists to notice.
+          - xcode: "latest"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Select Xcode ${{ matrix.xcode }}
-        run: sudo xcode-select --switch /Applications/Xcode_${{ matrix.xcode }}.app
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.xcode }}" = "latest" ]; then
+            # Sorted by version, not by name — `sort` alone puts 16.4 after
+            # 26.3 — and betas are excluded: `Xcode_26.4.0_beta.app` outsorts
+            # every release, so "latest" would quietly become "prerelease".
+            # `|| true` because `pipefail` makes a grep that matches nothing
+            # fail the whole substitution, and `set -e` would then end the step
+            # before the message below ever ran — a bare non-zero exit.
+            app=$(ls -d /Applications/Xcode_*.app 2>/dev/null \
+                  | grep -E '/Xcode_[0-9]+(\.[0-9]+)*\.app$' \
+                  | sort -V | tail -1) || true
+            if [ -z "$app" ]; then
+              echo "::error::no released Xcode found in /Applications" >&2
+              exit 1
+            fi
+          else
+            app=/Applications/Xcode_${{ matrix.xcode }}.app
+          fi
+          echo "Selected $app"
+          sudo xcode-select --switch "$app"
 
       - name: Report the toolchain
         run: swift --version
@@ -83,7 +104,7 @@ jobs:
         swift: ["6.2", "6.3"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Report the toolchain
         run: swift --version
