@@ -48,6 +48,11 @@ change, so the build says where. See [Changes in 2.1](Docs/Getting%20Started/Mig
 - **A type named after a module is no longer read as a module qualifier.** Declaring `Core`
   shadows the module everywhere in that module, so `Core.Serving` names that type's member;
   stripping the qualifier emitted an extension over a different type than the call site used.
+- **A cancelled caller no longer builds a second kept instance.** `ZerkAsyncBox`'s non-throwing
+  path let a cancelled caller build its own instance, which the box never publishes — correct on
+  an empty box, wrong while a build is in flight, where it produced a private second instance of
+  something kept while every other caller shared the first. A cancelled caller now builds its own
+  only when there is nothing to join.
 - **`@Injected` on a property of an `@Observable` type** reported `a global has no such moment`,
   naming storage the developer never wrote. It now names the problem and the fix: mark the
   property `@ObservationIgnored`, which leaves it stored.

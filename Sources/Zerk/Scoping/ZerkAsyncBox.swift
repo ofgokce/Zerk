@@ -153,16 +153,25 @@ public final class ZerkAsyncBox<Value>: @unchecked Sendable {
             if let value = readyValue() {
                 return value
             }
-            if Task.isCancelled {
+            // Cancelled *and* nothing to join: only then is building our own
+            // the right answer. A cancelled caller that breaks out while a
+            // build is in flight gets an instance the box never publishes,
+            // while every other caller shares the one that was already being
+            // built — two instances of something kept, from one cancellation.
+            // Joining costs nothing here: the in-flight task is not this
+            // caller's, so awaiting it is not a cancellation point that fails.
+            if Task.isCancelled, !isBuilding() {
                 break
             }
             if let value = try? await value({ () async throws -> Value in await build() }) {
                 return value
             }
         }
-        // Cancelled, or repeatedly overtaken. Either way this call still owes
-        // its caller a value, and its own build is the one thing that cannot
-        // fail to produce one.
+        // Cancelled with nothing in flight to join, or repeatedly overtaken.
+        // Either way this call still owes its caller a value, and its own build
+        // is the one thing that cannot fail to produce one. This is the only
+        // path that yields an instance the box does not publish, which is why
+        // reaching it takes both a cancellation and an empty box.
         return await build()
     }
 
@@ -184,6 +193,18 @@ public final class ZerkAsyncBox<Value>: @unchecked Sendable {
             state = .building(task)
             return .awaiting(task)
         }
+    }
+
+    /// Whether a build is in flight, for a caller deciding between joining one
+    /// and starting its own.
+    private func isBuilding() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if case .building = state {
+            return true
+        }
+        return false
     }
 
     /// Reads an already-published value without starting a build.
