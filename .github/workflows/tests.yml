@@ -2,16 +2,17 @@ name: Tests
 
 on:
   push:
-    # `master` and the version branches Zerk is developed on — work sits on a
-    # branch like `2.1.0` for a long time before its pull request exists, and
-    # that is exactly when the tests are worth running.
+    # `master` only. A version branch like `2.1.0` used to be listed here so
+    # that work had CI before its pull request existed — but once that pull
+    # request is open every push fires twice, once for the branch and once for
+    # the pull request, and the two run the same tests.
     #
-    # `*` and nothing else: it matches any run of characters except `/`, which
-    # is the one glob rule these filters document plainly. A branch named
-    # `fix.a.typo` matches too, and running the tests on it is no loss.
+    # The pull request's run is the one to keep: it tests `refs/pull/N/merge`,
+    # the branch *merged into* master, where the push run only tests the branch
+    # tip. Before opening one, `workflow_dispatch` below runs this by hand, and
+    # a draft pull request gets the automatic runs back.
     branches:
       - master
-      - "*.*.*"
   pull_request:
   workflow_dispatch:
 
