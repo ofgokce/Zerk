@@ -182,8 +182,8 @@
       <!-- Letter R -->
       <line x1="200" y1="0" x2="200" y2="200" stroke="currentColor" stroke-width="32"/>
       <path d="M 268,16 A 50,50 0 0,1 268,116" fill="none" stroke="currentColor" stroke-width="32"/>/>
-      <line x1="184" y1="16" x2="268" y2="16" stroke="currentColor" stroke-width="32"/>
-      <line x1="184" y1="116" x2="268" y2="116" stroke="currentColor" stroke-width="32"/>
+      <line x1="184" y1="16" x2="269" y2="16" stroke="currentColor" stroke-width="32"/>
+      <line x1="184" y1="116" x2="269" y2="116" stroke="currentColor" stroke-width="32"/>
       <path d="M 252 116 L 302 200 L 334 200 L 284 116 Z" fill="currentColor" stroke="none"/>
       <!-- Letter K -->
       <line x1="380" y1="0" x2="380" y2="200" stroke="currentColor" stroke-width="32"/>

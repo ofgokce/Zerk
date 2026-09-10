@@ -83,6 +83,18 @@ Comment stripping is string-aware: a `//` inside a JSON string literal — a URL
 
 Unknown keys are ignored, so a file written for a newer Zerk stays loadable. A malformed *known* key is an error rather than a silent fallback to the default, and the failure is reported against the file itself.
 
+## Generating it from Xcode
+
+Four of the keys mirror a build setting, and `swift package zerk settings` writes them from the
+target itself rather than from memory:
+
+```bash
+swift package zerk settings --project App.xcodeproj --target App
+```
+
+See [`zerk settings`](ZerkCLI.md#zerk-settings) for the mapping and the options. It needs Xcode,
+and it leaves `valueInjectionMethod` alone — that key mirrors nothing and is yours.
+
 ## What it cannot do
 
 The file governs how Zerk **reads** your source. It never governs what Zerk **writes** — every generated member is pinned with explicit isolation regardless.

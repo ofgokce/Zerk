@@ -131,12 +131,31 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
-        let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                  knownModules: collector.importedModules)
+        // Narrowed to the files that actually put a foreign name into the
+        // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        // Mirrors CodeGenerator: a bare name is read in the scope it was
+        // written in, before anything compares keys.
+        let scoped = NestedNameResolver(declaredAccessRanks: collector.declaredAccessRanks)
+            .resolved(types: collector.types,
+                      markedMembers: collector.markedMembers,
+                      injectedUses: collector.injectedUses)
+        let declaredLocally = Set(collector.declaredAccessRanks.keys)
+        let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
+        // Mirrors CodeGenerator: a module this one declares a namesake for is
+        // no longer a strippable qualifier, though it is still imported.
+        let strippableModules = resolvedImports.modules
+            .subtracting(declaredLocally.lazy.filter { !$0.contains(".") })
+        let aliases = KeyAliases(
+            declarations: collector.aliasDeclarations,
+            knownModules: strippableModules,
+            clashingBareNames: KeyAliases.clashingBareNames(
+                among: collector.writtenKeySpellings,
+                modules: strippableModules,
+                declaredLocally: declaredLocally))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
         // dropped before anything asks which provider backs their key.
-        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
+        let gate = GenericGate.admitted(rewriter.rewrite(types: scoped.types))
         let resolution = ProviderResolver(
             types: gate.types,
             aliases: aliases,
@@ -162,11 +181,11 @@ enum CompileFixture {
             declaredAccessRanks: collector.declaredAccessRanks,
             declaredGenericParameters: collector.declaredGenericParameters,
             keyNominalNames: rewriter.rewrite(keyNominalNames: collector.keyNominalNames),
-            injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
-            markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
+            injectedUses: rewriter.rewrite(injectedUses: scoped.injectedUses),
+            markedMembers: rewriter.rewrite(markedMembers: scoped.markedMembers),
             keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
-            importedModules: collector.importedModules,
-            moduleImportConditions: collector.moduleImportConditions,
+            importedModules: resolvedImports.modules,
+            moduleImportConditions: resolvedImports.conditions,
             primaryVariants: resolution.primaryVariants
         ).build()
     }
@@ -177,10 +196,29 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
-        let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                  knownModules: collector.importedModules)
+        // Narrowed to the files that actually put a foreign name into the
+        // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        // Mirrors CodeGenerator: a bare name is read in the scope it was
+        // written in, before anything compares keys.
+        let scoped = NestedNameResolver(declaredAccessRanks: collector.declaredAccessRanks)
+            .resolved(types: collector.types,
+                      markedMembers: collector.markedMembers,
+                      injectedUses: collector.injectedUses)
+        let declaredLocally = Set(collector.declaredAccessRanks.keys)
+        let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
+        // Mirrors CodeGenerator: a module this one declares a namesake for is
+        // no longer a strippable qualifier, though it is still imported.
+        let strippableModules = resolvedImports.modules
+            .subtracting(declaredLocally.lazy.filter { !$0.contains(".") })
+        let aliases = KeyAliases(
+            declarations: collector.aliasDeclarations,
+            knownModules: strippableModules,
+            clashingBareNames: KeyAliases.clashingBareNames(
+                among: collector.writtenKeySpellings,
+                modules: strippableModules,
+                declaredLocally: declaredLocally))
         let rewriter = AliasRewriter(aliases: aliases)
-        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
+        let gate = GenericGate.admitted(rewriter.rewrite(types: scoped.types))
         let resolution = ProviderResolver(
             types: gate.types,
             aliases: aliases,
@@ -218,12 +256,31 @@ enum CompileFixture {
         let collector = SourceCollector(settings: settings)
         collector.walk(Parser.parse(source: source))
 
-        let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                  knownModules: collector.importedModules)
+        // Narrowed to the files that actually put a foreign name into the
+        // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        // Mirrors CodeGenerator: a bare name is read in the scope it was
+        // written in, before anything compares keys.
+        let scoped = NestedNameResolver(declaredAccessRanks: collector.declaredAccessRanks)
+            .resolved(types: collector.types,
+                      markedMembers: collector.markedMembers,
+                      injectedUses: collector.injectedUses)
+        let declaredLocally = Set(collector.declaredAccessRanks.keys)
+        let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
+        // Mirrors CodeGenerator: a module this one declares a namesake for is
+        // no longer a strippable qualifier, though it is still imported.
+        let strippableModules = resolvedImports.modules
+            .subtracting(declaredLocally.lazy.filter { !$0.contains(".") })
+        let aliases = KeyAliases(
+            declarations: collector.aliasDeclarations,
+            knownModules: strippableModules,
+            clashingBareNames: KeyAliases.clashingBareNames(
+                among: collector.writtenKeySpellings,
+                modules: strippableModules,
+                declaredLocally: declaredLocally))
         let rewriter = AliasRewriter(aliases: aliases)
         // Mirrors CodeGenerator: registrations the emitter cannot spell are
         // dropped before anything asks which provider backs their key.
-        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
+        let gate = GenericGate.admitted(rewriter.rewrite(types: scoped.types))
         let resolution = ProviderResolver(
             types: gate.types,
             aliases: aliases,
@@ -249,11 +306,11 @@ enum CompileFixture {
             declaredAccessRanks: collector.declaredAccessRanks,
             declaredGenericParameters: collector.declaredGenericParameters,
             keyNominalNames: rewriter.rewrite(keyNominalNames: collector.keyNominalNames),
-            injectedUses: rewriter.rewrite(injectedUses: collector.injectedUses),
-            markedMembers: rewriter.rewrite(markedMembers: collector.markedMembers),
+            injectedUses: rewriter.rewrite(injectedUses: scoped.injectedUses),
+            markedMembers: rewriter.rewrite(markedMembers: scoped.markedMembers),
             keyDisplayNames: rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames),
-            importedModules: collector.importedModules,
-            moduleImportConditions: collector.moduleImportConditions,
+            importedModules: resolvedImports.modules,
+            moduleImportConditions: resolvedImports.conditions,
             primaryVariants: resolution.primaryVariants
         ).build()
 

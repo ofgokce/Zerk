@@ -41,10 +41,10 @@ final class Tagger: Tagging {
     }
 }
 
-/// `Archiving` is a second name for `Tagging`. Without `@ZerkAlias` the two
+/// `Archiving` is a second name for `Tagging`. Without `@InjectableAlias` the two
 /// would be separate keys and this consumer's dependency would bubble up to the
 /// caller instead of resolving.
-@ZerkAlias
+@InjectableAlias
 typealias Archiving = Tagging
 
 @Injectable
@@ -273,7 +273,7 @@ final class CaptionHolder {
 /// nothing resolves through it — the point here is that the attribute parses and
 /// expands, and that the getter type-checks against a member that exists. Its
 /// cross-module behaviour is covered by `ImportedInjectableValueTests`.
-private enum ZerkImports {
+private enum ImportedInjectables {
     @ImportedInjectableValue
     static var importedRetryLimit: Int { Zerk<Int>.retryLimit }
 }

@@ -1,5 +1,5 @@
 //
-//  ZerkAlias.swift
+//  InjectableAliasMacro.swift
 //  Zerk
 //
 //  Created by Ömer Faruk Gökce on 2.08.2026.
@@ -9,7 +9,7 @@
 /// new one.
 ///
 /// ```swift
-/// @ZerkAlias
+/// @InjectableAlias
 /// typealias Persisting = Storing
 /// ```
 ///
@@ -26,30 +26,30 @@
 /// substituting the parameters would need real type resolution, which the build
 /// plugin deliberately does not do. Alias a concrete instantiation instead.
 @attached(peer)
-public macro ZerkAlias() = #externalMacro(
+public macro InjectableAlias() = #externalMacro(
     module: "ZerkMacros",
-    type: "ZerkAliasMacro"
+    type: "InjectableAliasMacro"
 )
 
 /// Registers types as interchangeable when the `typealias` is not declared in
-/// this target — in another module, say, where `@ZerkAlias` cannot be attached.
+/// this target — in another module, say, where `@InjectableAlias` cannot be attached.
 ///
 /// ```swift
-/// #ZerkAlias<Storing, Persisting, Caching>
+/// #InjectableAlias<Storing, Persisting, Caching>
 /// ```
 ///
 /// Every listed type is treated as the same injection key. The expansion is a
 /// private, never-called function that pairs the types through a generic
 /// same-type parameter, so *the compiler* verifies the claim: listing types that
-/// are not actually interchangeable is a build error at the `#ZerkAlias` line
+/// are not actually interchangeable is a build error at the `#InjectableAlias` line
 /// rather than a mismatch discovered later. The check is invariant, so a
 /// subclass and its superclass are correctly rejected.
 // No `names:` clause: the expansion's only declaration is given a compiler-
 // unique name via `makeUniqueName`, which is exempt from being declared — and
 // `arbitrary` is rejected outright for a declaration macro at global scope,
-// which is exactly where #ZerkAlias is meant to be written.
+// which is exactly where #InjectableAlias is meant to be written.
 @freestanding(declaration)
-public macro ZerkAlias<each T>() = #externalMacro(
+public macro InjectableAlias<each T>() = #externalMacro(
     module: "ZerkMacros",
-    type: "ZerkAliasDeclarationMacro"
+    type: "InjectableAliasDeclarationMacro"
 )

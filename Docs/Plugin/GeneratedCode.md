@@ -4,6 +4,29 @@ An annotated tour of the file `ZerkPlugin` writes. Every listing below is real
 codegen output — the fixture on the left was run through `ZerkCodegen` and the
 result pasted verbatim.
 
+## Nested names are qualified for you
+
+Swift looks a bare type name up innermost-first, and the generated file lives at file scope, so
+the two disagree for anything nested. Zerk resolves the name the way Swift would and emits the
+qualified spelling:
+
+```swift
+@Injectable<Feed>
+struct LiveFeed: Feed {
+    struct Config {}
+
+    @InjectableProviding
+    init(config: Config) {}          // Config here is LiveFeed.Config
+}
+```
+
+```swift
+nonisolated static func liveFeed(config: LiveFeed.Config) -> Feed
+```
+
+Only the *base* of a dotted spelling moves, since that is the part Swift looks up: `Config.Key`
+becomes `LiveFeed.Config.Key`. Writing the qualified name yourself reaches the same place.
+
 ## Where the file is
 
 One file per target: `Zerk.generated.swift`, inside the plugin's
@@ -39,8 +62,6 @@ rather than about the code.
 ```swift
 import Zerk
 
-#ZerkImport(module: "Foundation")
-
 @Injectable
 struct Stamp {
     @InjectableProviding
@@ -58,9 +79,9 @@ import Foundation
 
 The generated file imports `Zerk` and nothing else by default — the plugin reads
 syntax and cannot tell which module a name came from, so it cannot infer that
-`Date` needs `Foundation`. Everything after `import Zerk` was asked for by
-[`#ZerkImport`](../Macros%20and%20Markers/ImportedInjectables.md), sorted;
-`Zerk` stays first because it is the one import that is never optional.
+`Date` needs `Foundation`. Everything after `import Zerk` was copied from the imports of the files Zerk
+read, sorted; `Zerk` stays first because it is the one import that is never
+optional.
 
 ## The re-declared `macro Injected` overloads
 
@@ -737,7 +758,7 @@ nonisolated private func _$zerk_ref_baseURL() -> String { baseURL }
 The file is assembled in a fixed order, and everything within each part is
 sorted:
 
-1. Header comment, `import Zerk`, then any `#ZerkImport` modules.
+1. Header comment, `import Zerk`, then the modules the read files imported.
 2. The `macro Injected` declarations.
 3. `extension Zerk<Key>` for each injectable value, by value name.
 4. File-scope thunks — value references and global `@Injectable` declarations.

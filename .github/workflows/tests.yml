@@ -1,0 +1,145 @@
+name: Tests
+
+on:
+  push:
+    # `master` only. A version branch like `2.1.0` used to be listed here so
+    # that work had CI before its pull request existed — but once that pull
+    # request is open every push fires twice, once for the branch and once for
+    # the pull request, and the two run the same tests.
+    #
+    # The pull request's run is the one to keep: it tests `refs/pull/N/merge`,
+    # the branch *merged into* master, where the push run only tests the branch
+    # tip. Before opening one, `workflow_dispatch` below runs this by hand, and
+    # a draft pull request gets the automatic runs back.
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a branch makes the run already in flight redundant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: macOS · Xcode ${{ matrix.xcode }}
+    runs-on: macos-15
+    # A hang should cost half an hour to find, not GitHub's 6-hour ceiling.
+    # Healthy runs are far inside this; raise it only with a reason.
+    timeout-minutes: 30
+    strategy:
+      # One leg failing is worth seeing on its own, so the other still runs.
+      fail-fast: false
+      matrix:
+        include:
+          # Swift 6.2, the toolchain floor `Package.swift` declares —
+          # interjection points are named with raw identifiers (SE-0451), which
+          # land in the generated file the consuming toolchain compiles.
+          - xcode: "26.0.1"
+          # Whatever the runner image ships newest, resolved at run time. Pinning
+          # this leg would mean it silently stops being "current" the moment a
+          # newer Xcode lands, which is the one thing it exists to notice.
+          - xcode: "latest"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode ${{ matrix.xcode }}
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.xcode }}" = "latest" ]; then
+            # Sorted by version, not by name — `sort` alone puts 16.4 after
+            # 26.3 — and betas are excluded: `Xcode_26.4.0_beta.app` outsorts
+            # every release, so "latest" would quietly become "prerelease".
+            # `|| true` because `pipefail` makes a grep that matches nothing
+            # fail the whole substitution, and `set -e` would then end the step
+            # before the message below ever ran — a bare non-zero exit.
+            app=$(ls -d /Applications/Xcode_*.app 2>/dev/null \
+                  | grep -E '/Xcode_[0-9]+(\.[0-9]+)*\.app$' \
+                  | sort -V | tail -1) || true
+            if [ -z "$app" ]; then
+              echo "::error::no released Xcode found in /Applications" >&2
+              exit 1
+            fi
+          else
+            app=/Applications/Xcode_${{ matrix.xcode }}.app
+          fi
+          echo "Selected $app"
+          sudo xcode-select --switch "$app"
+
+      - name: Report the toolchain
+        run: swift --version
+
+      # Deliberately uncached. `Package.resolved` is not committed, so the
+      # swift-syntax range floats and each run resolves it afresh — which is the
+      # drift this workflow exists to catch. A `.build` cache would restore the
+      # previously resolved revision and hide it, and the only thing it would buy
+      # is a few minutes of swift-syntax build time.
+      - name: Build
+        timeout-minutes: 15
+        run: swift build --build-tests
+
+      # `ZERK_E2E` enables `CrossModulePackageTests`, which builds a nested
+      # package and runs the real plugin over it. It is skipped by default
+      # because it is slow and writes a ~500MB build directory; CI is the place
+      # it was written for.
+      - name: Test
+        timeout-minutes: 10
+        run: swift test
+
+      # Separate, and timed separately, because this is the expensive half and
+      # the half that has hung: it drives `swift package` against the nested
+      # fixture, which resolves and builds Zerk a second time and runs the
+      # plugin for real. Splitting it means the step name says where a hang is
+      # rather than leaving "Test" to cover both.
+      - name: Test (end to end)
+        timeout-minutes: 15
+        run: swift test --filter CrossModulePackageTests
+        env:
+          ZERK_E2E: "1"
+
+  linux:
+    name: Linux · Swift ${{ matrix.swift }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The official image rather than a toolchain-installing action: it pins the
+    # Swift version by tag and brings its own SDK, so nothing third-party sits
+    # between the workflow and the compiler.
+    container: swift:${{ matrix.swift }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The same floor and current pair as macOS. `platforms:` in the manifest
+        # only constrains Apple deployment targets — it does not exclude Linux,
+        # and nothing in the sources is Darwin-only now that `ZerkSettings`
+        # decodes its JSON rather than type-casting it.
+        swift: ["6.2", "6.3"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Report the toolchain
+        run: swift --version
+
+      - name: Build
+        timeout-minutes: 15
+        run: swift build --build-tests
+
+      - name: Test
+        timeout-minutes: 10
+        run: swift test
+
+      # Separate, and timed separately, because this is the expensive half and
+      # the half that has hung: it drives `swift package` against the nested
+      # fixture, which resolves and builds Zerk a second time and runs the
+      # plugin for real. Splitting it means the step name says where a hang is
+      # rather than leaving "Test" to cover both.
+      - name: Test (end to end)
+        timeout-minutes: 15
+        run: swift test --filter CrossModulePackageTests
+        env:
+          ZERK_E2E: "1"

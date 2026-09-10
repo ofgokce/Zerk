@@ -105,7 +105,7 @@ struct ZerkTests {
         #expect(consumer.suffix == "supplied-by-caller")
     }
 
-    @Test("a @ZerkAlias key resolves from the underlying key's provider")
+    @Test("a @InjectableAlias key resolves from the underlying key's provider")
     func aliasedKeyResolves() {
         // `Archiving` is a typealias of `Tagging`; nothing is registered under
         // it, so this only resolves because the keys were merged.

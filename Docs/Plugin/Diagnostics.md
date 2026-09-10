@@ -93,16 +93,14 @@ One failure Zerk cannot report lands in generated code instead: under `SWIFT_DEF
 | `@ImportedInjectableValue` written as an assignment rather than a getter | It reads the other module's value on every resolution, so it needs a getter: `static var apiKey: String { Zerk<String>.apiKey }` |
 | An `@ImportedInjectableValue` getter that is not a single `Zerk` expression | Same reason as `@ImportedInjectable` — it is inlined, so it cannot contain other logic |
 | `@ImportedInjectableValue` with no member named, or with no explicit type | Name the member; there is no primary value for a key to fall back on |
-| `#ZerkImport` with no module names | `#ZerkImport(module: "Foundation")` — at least one |
-| `#ZerkImport` given anything but plain string literals | Zerk reads these from source and cannot evaluate an expression |
 
 ## Key aliases
 
 | What triggers it | The fix |
 |---|---|
-| `@ZerkAlias` on something that is not a `typealias` | It relates two spellings of one key; only a typealias states that |
-| `@ZerkAlias` on a generic typealias | Zerk matches keys by spelling rather than resolving them — alias a concrete instantiation instead |
-| `#ZerkAlias` with fewer than two distinct types | It needs at least two types to relate, written `#ZerkAlias<A, B>()` — every listed type must be a distinct key |
+| `@InjectableAlias` on something that is not a `typealias` | It relates two spellings of one key; only a typealias states that |
+| `@InjectableAlias` on a generic typealias | Zerk matches keys by spelling rather than resolving them — alias a concrete instantiation instead |
+| `#InjectableAlias` with fewer than two distinct types | It needs at least two types to relate, written `#InjectableAlias<A, B>()` — every listed type must be a distinct key |
 
 ## Parameter markers
 
@@ -172,6 +170,19 @@ The Swift 5 diagnostic names the three settings it read out of `ZerkSettings.jso
 | An `@injected` member that is `private` or `fileprivate` | The generated overload lives in a separate file and cannot call it |
 | `@Injectable(primary:)` or `(public:)` given anything but a `true`/`false` literal | Zerk reads this from source and cannot evaluate an expression |
 | `@InjectableProviding` on something other than an initializer or a `static` function, or on a function with no return type | The return type is the key |
+
+## Storage a property does not have
+
+`@Injected` initializes a property's storage at the moment its enclosing value is initialized, so
+it needs the property to be stored and to belong to an instance. Each of these says which of
+those is missing. See [SwiftUI and `@Observable`](../Features/SwiftUI.md).
+
+| What triggers it | The fix |
+|---|---|
+| `@Injected` on a `static` or `class` property | There is no instance initialization to hook — write `static let x = Zerk<Key>.inject()`, or use `@InjectedDynamically` |
+| `@Injected` on a property at file scope | Likewise — write `let x = Zerk<Key>.inject()`, or use `@InjectedDynamically` |
+| `@Injected` on a property of an `@Observable` type | `@Observable` rewrites it into a computed property; mark it `@ObservationIgnored`, which leaves it stored |
+| `@Injected` alongside a property wrapper — `@State`, `@StateObject`, `@ObservedObject`, `@Published`, `@Bindable` | The wrapper owns the storage; hand it the value instead — `@StateObject var model = Zerk<Key>.inject()` |
 
 ## The one diagnostic that is not Zerk's
 

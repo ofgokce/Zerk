@@ -142,6 +142,25 @@ struct ZerkSettingsTests {
         ]
     }
 
+    /// The two whole-file failures, which no test pinned while the parser was
+    /// hand-rolled — and which the decoder can only tell apart by the coding
+    /// path, since both arrive as `DecodingError`.
+    @Test("a file that is not JSON and a file that is not an object read differently")
+    func wholeFileFailuresAreDistinguished() throws {
+        let notJSON = #expect(throws: ZerkSettings.LoadFailure.self) {
+            try ZerkSettings.load(contentsOfFile: write("{ this is not json"))
+        }
+        #expect(notJSON?.message.contains("is not valid JSON") == true)
+
+        for shape in ["[1, 2]", #""a string""#, "42"] {
+            let notObject = #expect(throws: ZerkSettings.LoadFailure.self) {
+                try ZerkSettings.load(contentsOfFile: write(shape))
+            }
+            #expect(notObject?.message.contains("must contain a JSON object") == true,
+                    "\(shape): \(notObject?.message ?? "no failure")")
+        }
+    }
+
     @Test("each key accepts its own type and nothing that merely bridges to it",
           arguments: Shape.all)
     func typeGuardsHold(shape: Shape) throws {

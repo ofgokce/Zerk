@@ -14,7 +14,7 @@
 /// for every `String` parameter in the module.
 ///
 /// ```swift
-/// private enum ZerkImports {
+/// private enum ImportedInjectables {
 ///     @ImportedInjectableValue
 ///     static var baseURL: String { Zerk<String>.baseURL }
 ///

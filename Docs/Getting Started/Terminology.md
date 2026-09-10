@@ -16,7 +16,7 @@ allows — `[T]`/`Array<T>`, `[K: V]`/`Dictionary<K, V>`, `T?`/`T!`/`Optional<T>
 canonicalization nests, so `[String]?` and `Optional<Array<String>>` agree. What needs
 real type resolution stays distinct: module qualification (`ModuleA.Service` vs
 `Service`), and any `typealias` you have not marked with
-[`@ZerkAlias`](../Macros%20and%20Markers/ZerkAlias.md).
+[`@InjectableAlias`](../Macros%20and%20Markers/InjectableAlias.md).
 
 ### Injectable (a type)
 

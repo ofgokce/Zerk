@@ -16,7 +16,7 @@ struct ParameterRecord: Equatable {
     /// `var` so a bubbled requirement can be renamed when its name would repeat.
     var name: String
     var typeKey: String
-    let typeName: String
+    var typeName: String
     /// `@autoinjected` — the developer asked Zerk to resolve this one.
     ///
     /// A provider with any marked parameter resolves *only* those; see

@@ -156,3 +156,22 @@ public extension AttributeListSyntax {
         return nil
     }
 }
+
+public extension AttributeListSyntax {
+    /// The first property wrapper here that Zerk knows by name, or `nil`.
+    ///
+    /// Reads ``wrappedValueAttributes``, so there is one list of "this is a
+    /// property wrapper whose wrapped value is what you see" rather than two
+    /// that can drift. Curated and incomplete for the reason that list gives —
+    /// syntax cannot tell a wrapper from any other `@Name` — so this reports a
+    /// wrapper it recognises and stays quiet about one it does not.
+    var firstWrappedValueAttributeName: String? {
+        for element in self {
+            guard case .attribute(let attribute) = element else { continue }
+            if Self.wrappedValueAttributes.contains(attribute.name) {
+                return attribute.name
+            }
+        }
+        return nil
+    }
+}

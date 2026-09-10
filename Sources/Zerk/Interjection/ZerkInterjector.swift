@@ -22,7 +22,7 @@ import Foundation
 /// 2. **by key** — every member of a key at once, for `#Interject<Key>`.
 ///
 /// A key path is the identity rather than an encoded name, which settles two
-/// problems no string could. `@ZerkAlias` groups fold on their own, because
+/// problems no string could. `@InjectableAlias` groups fold on their own, because
 /// `Zerk<Persisting>` and `Zerk<Storing>` are one specialization. And a mismatch
 /// between what a test names and what the plugin emitted is a *compile* error at
 /// the interjection — `type 'Zerk<…>' has no member 'seeded(seed: Int)'` —

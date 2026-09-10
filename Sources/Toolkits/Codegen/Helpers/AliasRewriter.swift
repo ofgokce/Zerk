@@ -30,7 +30,7 @@ struct AliasRewriter {
     /// out on ``rewrite(parameter:)``: this pass is about keys and nothing else,
     /// and re-listing the fields is what silently drops whatever gets added to
     /// `TypeRecord` next. Pinned by
-    /// `ZerkAliasTests."the rewriting pass carries every TypeRecord field it does not rewrite"`.
+    /// `InjectableAliasTests."the rewriting pass carries every TypeRecord field it does not rewrite"`.
     func rewrite(types: [TypeRecord]) -> [TypeRecord] {
         return types.map { type in
             var rewritten = type

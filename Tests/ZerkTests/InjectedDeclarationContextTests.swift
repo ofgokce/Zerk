@@ -108,6 +108,78 @@ struct InjectedDeclarationContextTests {
 
     // MARK: - Harness
 
+    // MARK: - @Observable
+
+    /// `@Observable` rewrites a stored property into a computed one, which
+    /// `@Injected` cannot initialize. Refused on the developer's own
+    /// declaration, before an init accessor naming a computed property is
+    /// generated and the compiler reports that against code nobody wrote.
+    @Test("an observed property is refused where it was written")
+    func anObservedPropertyIsRefused() throws {
+        let (info, diagnostics) = try expand(
+            Context(name: "@Observable class",
+                    declaration: "@Injected var serving: Serving",
+                    enclosing: "@Observable final class Model {}",
+                    isAccepted: false))
+
+        #expect(info == nil)
+        #expect(diagnostics.count == 1)
+        #expect(diagnostics.first?.message.contains("cannot resolve an observed property") == true)
+        #expect(diagnostics.first?.message.contains("@ObservationIgnored") == true)
+    }
+
+    /// The supported spelling, which must not trip the refusal above — the
+    /// attribute identifying `@Observable`'s own copy of this macro is the same
+    /// one the developer writes to opt out.
+    @Test("an @ObservationIgnored property is accepted")
+    func anObservationIgnoredPropertyIsAccepted() throws {
+        let (info, diagnostics) = try expand(
+            Context(name: "@Observable class, ignored",
+                    declaration: "@ObservationIgnored @Injected var serving: Serving",
+                    enclosing: "@Observable final class Model {}",
+                    isAccepted: true))
+
+        #expect(diagnostics.isEmpty)
+        #expect(info != nil)
+    }
+
+    /// `@ObservationTracked` copies this macro onto the backing storage it
+    /// generates, which expands with no lexical context. Read as file scope,
+    /// that produced "a global has no such moment" for a class property, naming
+    /// storage the developer never wrote.
+    @Test("@Observable's copy is not mistaken for a global")
+    func theObservableCopyIsNotAGlobal() throws {
+        let (info, diagnostics) = try expand(
+            Context(name: "generated backing storage",
+                    declaration: "@Injected @ObservationIgnored private var _serving: Serving",
+                    enclosing: nil,
+                    isAccepted: false))
+
+        #expect(info == nil)
+        #expect(diagnostics.count == 1)
+        #expect(diagnostics.first?.message.contains("cannot resolve an observed property") == true)
+        #expect(diagnostics.first?.message.contains("a global has no such moment") == false)
+    }
+
+    // MARK: - Property wrappers
+
+    /// A property wrapper owns its storage, so there is none here for this
+    /// macro to initialize. Without this the compiler reports "init accessor
+    /// cannot refer to property" against a macro expansion, naming neither the
+    /// wrapper nor Zerk.
+    @Test("a wrapped property names the wrapper and the spelling that works")
+    func aWrappedPropertyIsRefused() throws {
+        let (info, diagnostics) = try expand(
+            Context(name: "@StateObject",
+                    declaration: "@StateObject @Injected var model: Model",
+                    enclosing: "struct FeedView {}",
+                    isAccepted: false))
+
+        #expect(info == nil)
+        #expect(diagnostics.first?.message.contains("@StateObject owns storage of its own") == true)
+        #expect(diagnostics.first?.message.contains("= Zerk<Key>.inject()") == true)
+    }
+
     private func expand(_ context: Context,
                         macroName: String = "@Injected",
                         requiresInstanceStorage: Bool = true) throws

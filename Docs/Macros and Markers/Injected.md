@@ -9,6 +9,14 @@ it can reach, the chains it cannot resolve at all, and
 marker and a different thing entirely — see [Parameter markers](ParameterMarkers.md). The
 case difference is deliberate, so the two never collide.
 
+## SwiftUI and `@Observable`
+
+`@Injected` initializes a property's storage, so it needs the property to actually be stored.
+Inside `@Observable`, mark the dependency `@ObservationIgnored`; a property wrapper such as
+`@StateObject` owns its own storage, so hand it the value instead —
+`@StateObject var model = Zerk<FeedModel>.inject()`. Both are refused by name if written the
+other way. See [SwiftUI and `@Observable`](../Features/SwiftUI.md).
+
 ## The one Zerk macro that generates code
 
 `@Injectable`, `@InjectableProviding`, `@Singleton`, and `@Isolated` expand to *nothing* —

@@ -204,6 +204,45 @@ struct AsyncKeptInstanceTests {
         #expect(await task.value == first)
     }
 
+    /// The other half of the one above: cancelled with a build already in
+    /// flight, where starting our own would hand this caller an instance the box
+    /// never publishes while everyone else shares the one being built.
+    ///
+    /// This is what made `coldRaceBuildsOnce` flaky rather than wrong — a single
+    /// caller taking the cancelled branch mid-race is enough to build twice, and
+    /// a 50-way race on a loaded machine is where that happens.
+    @Test("a cancelled caller joins a build already in flight")
+    func cancelledCallerJoinsInFlightBuild() async {
+        let box = ZerkAsyncBox<Int>()
+        AsyncBuildLog.shared.reset()
+
+        let starter = Task {
+            await box.value {
+                AsyncBuildLog.shared.record("cancelled-race")
+                try? await Task.sleep(for: .milliseconds(60))
+                return 1
+            }
+        }
+        // Long enough that the build above is genuinely in flight when the
+        // cancelled caller arrives, which is the case under test.
+        try? await Task.sleep(for: .milliseconds(15))
+
+        let cancelled = Task {
+            await box.value {
+                AsyncBuildLog.shared.record("cancelled-race")
+                try? await Task.sleep(for: .milliseconds(60))
+                return 2
+            }
+        }
+        cancelled.cancel()
+
+        let shared = await starter.value
+        let joined = await cancelled.value
+
+        #expect(joined == shared)
+        #expect(AsyncBuildLog.shared.count("cancelled-race") == 1)
+    }
+
     @Test("a cancelled cold caller does not start an abandoned build")
     func cancelledColdCallerDoesNotStartAbandonedBuild() async {
         let box = ZerkAsyncBox<Int>()

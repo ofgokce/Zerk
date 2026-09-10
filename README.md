@@ -4,11 +4,10 @@
 </picture>
 
 # 
-
-[![Swift Package Manager](https://img.shields.io/badge/Swift%20Package%20Manager-compatible-brightgreen.svg?style=flat)](https://github.com/apple/swift-package-manager)
-[![Swift Version](https://img.shields.io/badge/Swift-6.2-F16D39.svg?style=flat)](https://developer.apple.com/swift)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Platforms](https://img.shields.io/badge/platforms-iOS%2013%2B%20%7C%20macOS%2013%2B%20%7C%20macCatalyst%2013%2B%20%7C%20watchOS%206%2B%20%7C%20tvOS%2013%2B%20%7C%20visionOS%201%2B-lightgrey.svg)](#requirements)
+[![Swift Version](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fofgokce%2FZerk%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/ofgokce/Zerk)
+[![Platform](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fofgokce%2FZerk%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/ofgokce/Zerk)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tests](https://github.com/ofgokce/Zerk/actions/workflows/tests.yml/badge.svg)](https://github.com/ofgokce/Zerk/actions/workflows/tests.yml)
 
 Zerk is a compile-time dependency injection framework for Swift. Instead of a runtime container, it combines Swift macros with a build-tool plugin that scans your module's source, resolves the dependency graph during the build, and generates plain static factory code on a `Zerk<Key>` namespace. There is nothing to register at runtime, resolution failures are build errors with file/line locations, and injected code is ordinary Swift you can step through.
 
@@ -18,13 +17,13 @@ Generic types are registered like any other: `@Injectable struct Cache<E>` makes
 
 ## 📖 Documentation
 
-**[See full documentation](Docs/TableOfContents.md)**
+**[See full documentation](Docs/TableOfContents.md)** · **[Changelog](CHANGELOG.md)**
 
 | | |
 |---|---|
 | **[Getting started](Docs/TableOfContents.md#getting-started)** | [Installation](Docs/Getting%20Started/Installation.md) · [Quick start](Docs/Getting%20Started/QuickStart.md) · [Terminology](Docs/Getting%20Started/Terminology.md) · [Declaring examples](Docs/Getting%20Started/InjectableExamples.md) · [Consuming examples](Docs/Getting%20Started/InjectedExamples.md) · [Migration from 1.x](Docs/Getting%20Started/Migration.md) |
-| **[Macros and markers](Docs/TableOfContents.md#macros-and-markers)** | [`@Injectable`](Docs/Macros%20and%20Markers/Injectable.md) · [`@InjectableProviding`](Docs/Macros%20and%20Markers/InjectableProviding.md) · [`@InjectableValue`](Docs/Macros%20and%20Markers/InjectableValue.md) · [`@Singleton`](Docs/Macros%20and%20Markers/Singleton.md) · [`@Scoped`](Docs/Macros%20and%20Markers/Scoped.md) · [`@Isolated`](Docs/Macros%20and%20Markers/Isolated.md) · [`@Injected`](Docs/Macros%20and%20Markers/Injected.md) · [Parameter markers](Docs/Macros%20and%20Markers/ParameterMarkers.md) · [Imported injectables](Docs/Macros%20and%20Markers/ImportedInjectables.md) · [Key aliases](Docs/Macros%20and%20Markers/ZerkAlias.md) |
-| **[Features](Docs/TableOfContents.md#features)** | [Foreign types](Docs/Features/ForeignTypes.md) · [Generics](Docs/Features/Generics.md) · [Concurrency](Docs/Features/Concurrency.md) |
+| **[Macros and markers](Docs/TableOfContents.md#macros-and-markers)** | [`@Injectable`](Docs/Macros%20and%20Markers/Injectable.md) · [`@InjectableProviding`](Docs/Macros%20and%20Markers/InjectableProviding.md) · [`@InjectableValue`](Docs/Macros%20and%20Markers/InjectableValue.md) · [`@Singleton`](Docs/Macros%20and%20Markers/Singleton.md) · [`@Scoped`](Docs/Macros%20and%20Markers/Scoped.md) · [`@Isolated`](Docs/Macros%20and%20Markers/Isolated.md) · [`@Injected`](Docs/Macros%20and%20Markers/Injected.md) · [Parameter markers](Docs/Macros%20and%20Markers/ParameterMarkers.md) · [Imported injectables](Docs/Macros%20and%20Markers/ImportedInjectables.md) · [Key aliases](Docs/Macros%20and%20Markers/InjectableAlias.md) |
+| **[Features](Docs/TableOfContents.md#features)** | [Foreign types](Docs/Features/ForeignTypes.md) · [Generics](Docs/Features/Generics.md) · [Concurrency](Docs/Features/Concurrency.md) · [SwiftUI and `@Observable`](Docs/Features/SwiftUI.md) |
 | **[The plugin](Docs/TableOfContents.md#the-plugin)** | [How it works](Docs/Plugin/HowItWorks.md) · [Generated code](Docs/Plugin/GeneratedCode.md) · [Settings](Docs/Plugin/Settings.md) · [Diagnostics](Docs/Plugin/Diagnostics.md) · [Graph artifact](Docs/Plugin/GraphArtifact.md) · [`ZerkCLI`](Docs/Plugin/ZerkCLI.md) · [Limitations](Docs/Plugin/Limitations.md) |
 | **[Testing](Docs/TableOfContents.md#testing)** | [Interjection](Docs/Testing/Interjection.md) · [Scopes](Docs/Testing/Scopes.md) · [Examples](Docs/Testing/Examples.md) |
 
@@ -167,9 +166,12 @@ See [How it works](Docs/Plugin/HowItWorks.md) and [Limitations](Docs/Plugin/Limi
 
 ## Requirements
 
-- Swift 6.2 **toolchain** (`swift-tools-version: 6.1`); the runtime, the macros and the macro toolkit build in `.v6` language mode, the codegen half in `.v5`
+- Swift 6.2 **toolchain** (`swift-tools-version: 6.2`); the runtime, the macros and the macro toolkit build in `.v6` language mode, the codegen half in `.v5`
 - swift-syntax 602.x
 - Platforms: iOS 13+, macOS 13+, watchOS 6+, tvOS 13+, visionOS 1+, Mac Catalyst 13+
+- Linux, with no deployment target of its own to state. Nothing Zerk uses is Apple-only outside a
+  `#if canImport` guard, and CI builds and tests it there. The one exception is
+  `swift package zerk settings`, which reads Xcode build settings and so needs Xcode
 
 6.2 is the floor because interjection points are named with raw identifiers (SE-0451). Your *language mode* is a separate question — a target with `SWIFT_VERSION = 5` under a Swift 6 toolchain is fully supported, with one construct needing an opt-in. See [Installation](Docs/Getting%20Started/Installation.md#consuming-targets-in-swift-5-language-mode).
 

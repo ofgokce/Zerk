@@ -49,9 +49,9 @@ struct GeneratorOutputBuilder {
     /// Injectable key -> the spelling to emit for it, from `SourceCollector`.
     /// Absent keys are emitted as themselves.
     var keyDisplayNames: [String: String] = [:]
-    /// Modules `#ZerkImport` asked for. The generated file imports `Zerk` and
-    /// nothing else by default, since the plugin cannot tell which module a name
-    /// came from.
+    /// Modules the read files imported, copied across because the plugin cannot
+    /// tell which module a name came from and the generated file has to name
+    /// them anyway.
     var importedModules: Set<String> = []
     /// Modules asked for inside a `#if`, so the emitted `import` can carry the
     /// same guard. Absent means unconditional. See ``importLines(for:)``.

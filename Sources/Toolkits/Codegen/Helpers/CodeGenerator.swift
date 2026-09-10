@@ -85,18 +85,48 @@ public struct CodeGenerator {
             collector.walk(tree, path: path)
         }
 
+        // Before aliases and before resolution, because both compare keys and
+        // this decides what a key *is*. After the walk, never during it: a
+        // nested type declared below its own use is still the one Swift picks,
+        // so it can only be answered once the whole module is known.
+        let scoped = NestedNameResolver(declaredAccessRanks: collector.declaredAccessRanks)
+            .resolved(types: collector.types,
+                      markedMembers: collector.markedMembers,
+                      injectedUses: collector.injectedUses)
+
         // Alias groups merge keys before anything compares them, so resolution
         // and generation are alias-aware without knowing aliases exist.
+        // Narrowed to the files that actually put a foreign name into the
+        // generated file; see `SourceCollector.resolvedImports(declaredLocally:)`.
+        let declaredLocally = Set(collector.declaredAccessRanks.keys)
+        let resolvedImports = collector.resolvedImports(declaredLocally: declaredLocally)
+        // A qualifier names a module only until this module declares a type of
+        // that name. Swift then resolves the bare word to the type — module
+        // wide, from any file, whether or not that file declares it — so
+        // `Core.Serving` names a *member* and stripping it would rename a local
+        // type to something else entirely. The import itself still has to be
+        // emitted, so this narrows only what may be stripped, not what is
+        // imported.
+        let strippableModules = resolvedImports.modules
+            .subtracting(declaredLocally.lazy.filter { !$0.contains(".") })
+        // Computed from the keys as written, before anything is canonicalized:
+        // two modules producing one bare name must not be merged into a single
+        // key, and the written spelling is the only place that is visible.
+        let clashingBareNames = KeyAliases.clashingBareNames(
+            among: collector.writtenKeySpellings,
+            modules: strippableModules,
+            declaredLocally: declaredLocally)
         let aliases = KeyAliases(declarations: collector.aliasDeclarations,
-                                  knownModules: collector.importedModules)
+                                  knownModules: strippableModules,
+                                  clashingBareNames: clashingBareNames)
         let rewriter = AliasRewriter(aliases: aliases)
         let keyDisplayNames = rewriter.rewrite(keyDisplayNames: collector.keyDisplayNames)
         let keyNominalNames = rewriter.rewrite(keyNominalNames: collector.keyNominalNames)
-        let gate = GenericGate.admitted(rewriter.rewrite(types: collector.types))
+        let gate = GenericGate.admitted(rewriter.rewrite(types: scoped.types))
         let types = gate.types
         let localValues = rewriter.rewrite(values: collector.values)
-        let injectedUses = rewriter.rewrite(injectedUses: collector.injectedUses)
-        let markedMembers = rewriter.rewrite(markedMembers: collector.markedMembers)
+        let injectedUses = rewriter.rewrite(injectedUses: scoped.injectedUses)
+        let markedMembers = rewriter.rewrite(markedMembers: scoped.markedMembers)
 
         let resolution = ProviderResolver(types: types, aliases: aliases, keyDisplayNames: keyDisplayNames).resolve()
 
@@ -138,8 +168,8 @@ public struct CodeGenerator {
             injectedUses: injectedUses,
             markedMembers: markedMembers,
             keyDisplayNames: keyDisplayNames,
-            importedModules: collector.importedModules,
-            moduleImportConditions: collector.moduleImportConditions,
+            importedModules: resolvedImports.modules,
+            moduleImportConditions: resolvedImports.conditions,
             primaryVariants: resolution.primaryVariants
         ).build()
 

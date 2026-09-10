@@ -16,7 +16,7 @@ import SharedToolkit
 struct ProviderResolver {
 
     let types: [TypeRecord]
-    /// Keys merged by `@ZerkAlias` / `#ZerkAlias`. Records already arrive
+    /// Keys merged by `@InjectableAlias` / `#InjectableAlias`. Records already arrive
     /// rewritten to representatives, so this is consulted only to *explain* a
     /// collision the developer did not literally write.
     var aliases: KeyAliases = .empty
@@ -488,7 +488,7 @@ private extension ProviderResolver {
             return ""
         }
         let list = others.map { "'\($0)'" }.joined(separator: ", ")
-        return " '\(key)' and \(list) are the same type (registered via @ZerkAlias), so those declarations claim one key."
+        return " '\(key)' and \(list) are the same type (registered via @InjectableAlias), so those declarations claim one key."
     }
 
     /// Order-preserving deduplication, so diagnostics list competing types in

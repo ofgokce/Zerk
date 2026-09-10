@@ -10,9 +10,9 @@ import Testing
 /// so a dependency written with the module name silently bubbled up to the
 /// caller instead of resolving.
 ///
-/// The qualifier is dropped for exactly the modules `#ZerkImport` names, which
-/// is also the set the generated file imports. That is what makes the short
-/// spelling safe to emit.
+/// The qualifier is dropped for exactly the modules the file imports, which is
+/// also the set the generated file imports — Zerk copies them across. That is
+/// what makes the short spelling safe to emit.
 @Suite("Module-qualified keys")
 struct ModuleQualifiedKeyTests {
 
@@ -46,7 +46,7 @@ struct ModuleQualifiedKeyTests {
 
     // MARK: - Swift is implicit
 
-    @Test("Swift needs no #ZerkImport, because it needs no import at all")
+    @Test("Swift needs no import at all, so it never has to be declared")
     func swiftIsImplicit() {
         // Declared nothing, imported nothing.
         let aliases = KeyAliases(declarations: [])
@@ -116,7 +116,7 @@ struct ModuleQualifiedKeyTests {
     // MARK: - Through the pipeline
 
     private static let source = """
-    #ZerkImport(module: "Core")
+    import Core
 
     @Injectable
     struct Consumer {
@@ -160,10 +160,9 @@ struct ModuleQualifiedKeyTests {
         #expect(dependency?.key == "ApiServicing")
     }
 
-    @Test("without the #ZerkImport the qualifier stands, and the dependency does not resolve")
+    @Test("without the import the qualifier stands, and the dependency does not resolve")
     func withoutTheImportNothingIsStripped() {
-        let source = Self.source.replacingOccurrences(
-            of: "#ZerkImport(module: \"Core\")", with: "")
+        let source = Self.source.replacingOccurrences(of: "import Core", with: "")
         let output = CompileFixture.generate(source: source)
 
         // Deliberate: an unimported prefix may be a nested type, and stripping
@@ -176,7 +175,7 @@ struct ModuleQualifiedKeyTests {
     @Test("registering under a qualified key is reached by the unqualified one")
     func qualifiedRegistrationMatchesUnqualifiedUse() {
         let result = CompileFixture.generateWithResolution(source: """
-        #ZerkImport(module: "Core")
+        import Core
 
         @Injectable<Core.Serving>
         struct Live: Core.Serving {

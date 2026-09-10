@@ -27,7 +27,15 @@ import Testing
 @Suite(
     "Cross-module package (end to end)",
     .enabled(if: ProcessInfo.processInfo.environment["ZERK_E2E"] != nil,
-             "set ZERK_E2E=1 to run; builds a nested package")
+             "set ZERK_E2E=1 to run; builds a nested package"),
+    // Every test here runs `swift package` in the *same* fixture directory, and
+    // SwiftPM takes an exclusive lock on that package's `.build`. Run in
+    // parallel they do not fail — they queue, printing "Another instance of
+    // SwiftPM is already running … waiting until that process has finished",
+    // each holding a test thread while it waits. Serialized, they queue in the
+    // test runner instead, which is the same work without several processes
+    // contending for one lock.
+    .serialized
 )
 struct CrossModulePackageTests {
 

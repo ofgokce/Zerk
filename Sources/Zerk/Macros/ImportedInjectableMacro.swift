@@ -13,7 +13,7 @@
 /// isolation. This states all of that, in a form the compiler checks.
 ///
 /// ```swift
-/// enum ZerkImports {
+/// enum ImportedInjectables {
 ///     @ImportedInjectable
 ///     static func session(baseURL: URL) -> Session
 ///

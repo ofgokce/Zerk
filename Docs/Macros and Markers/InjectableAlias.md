@@ -1,21 +1,21 @@
 # Key aliases
 
 Zerk matches dependencies by the spelling of a type, so two names for one type are two keys until
-you say otherwise. This page covers both ways of saying it — `@ZerkAlias` on a typealias you
-declare, `#ZerkAlias<A, B>()` for types you cannot annotate — and what merging changes in the
+you say otherwise. This page covers both ways of saying it — `@InjectableAlias` on a typealias you
+declare, `#InjectableAlias<A, B>()` for types you cannot annotate — and what merging changes in the
 generated file.
 
 ## What they do
 
-**`@ZerkAlias` / `#ZerkAlias<A, B, …>()`** — tells Zerk that two names are one key. Zerk matches
+**`@InjectableAlias` / `#InjectableAlias<A, B, …>()`** — tells Zerk that two names are one key. Zerk matches
 by spelling, so without this a provider registered as `Storing` will not satisfy a parameter
 written `Persisting`:
 
 ```swift
-@ZerkAlias
+@InjectableAlias
 typealias Persisting = Storing        // the typealias is in this target
 
-#ZerkAlias<Storing, Caching>()        // it is not — list the types instead
+#InjectableAlias<Storing, Caching>()        // it is not — list the types instead
 ```
 
 An unmarked typealias merges nothing. Given a provider registered as `Storing` and a consumer
@@ -47,7 +47,7 @@ Marking the typealias resolves it instead — the parameter keeps its own spelli
 that fills it goes through the merged key:
 
 ```swift
-@ZerkAlias
+@InjectableAlias
 typealias Persisting = Storing
 ```
 
@@ -74,7 +74,7 @@ With the alias understood, both registrations land in one extension and the prim
 `inject()`:
 
 ```swift
-@ZerkAlias
+@InjectableAlias
 typealias Persisting = Storing
 
 @Injectable<Storing>(primary: true)
@@ -118,31 +118,31 @@ than leaving you to find it:
 
 ```
 error: Multiple types are injectable under 'Storing' (FileStore, MemoryStore) and none is
-primary. 'Storing' and 'Persisting' are the same type (registered via @ZerkAlias), so those
+primary. 'Storing' and 'Persisting' are the same type (registered via @InjectableAlias), so those
 declarations claim one key. Mark one with @Injectable(primary: true).
 ```
 
 ## Transitivity and the representative
 
 Equivalence is transitive, and the group is represented by the underlying type where there is one
-(`@ZerkAlias typealias Names = [String]` emits `Zerk<Array<String>>`), otherwise by the
+(`@InjectableAlias typealias Names = [String]` emits `Zerk<Array<String>>`), otherwise by the
 alphabetically first name.
 
 `A = B` and `B = C` therefore make one group of three, however the two forms are mixed. Election
 prefers a spelling that is nobody's alias — a typealias's left-hand side is by construction a name
 for something else — and is alphabetical among the remaining candidates, so a group merging a
-`#ZerkAlias` list of peers with a marked typealias can elect a peer rather than the typealias's
+`#InjectableAlias` list of peers with a marked typealias can elect a peer rather than the typealias's
 right-hand side.
 
 The representative decides which extension is emitted, not how a key may be written. An
 existential spelling survives the merge — `@Injectable<any Persisting>` emits
 `extension Zerk<any Storing>` — because every member of the group denotes the same type.
 
-## `#ZerkAlias<A, B, …>()`
+## `#InjectableAlias<A, B, …>()`
 
 The freestanding form expands to a private, never-called function that pairs the listed types
 through a generic same-type parameter, so **the compiler** checks the claim — listing types that
-are not interchangeable is a build error at the `#ZerkAlias` line. The check is invariant, so a
+are not interchangeable is a build error at the `#InjectableAlias` line. The check is invariant, so a
 subclass and its superclass are correctly rejected. The trailing `()` is required: written bare,
 Swift does not hand the generic arguments to the macro.
 
@@ -156,7 +156,7 @@ private func zerk_alias_check() {
 ```
 
 The plugin takes the listing on trust when it builds the key graph, which is why the generated
-code has to be what checks it: a wrong `#ZerkAlias` would otherwise silently merge two unrelated
+code has to be what checks it: a wrong `#InjectableAlias` would otherwise silently merge two unrelated
 keys and misroute every dependency of both. Every listed type must also be a distinct key —
 listing one twice, or listing `[String]` and `Array<String>`, is a no-op you probably did not
 intend and is refused.
@@ -167,7 +167,7 @@ Generic typealiases are rejected — substituting their parameters would need re
 Alias a concrete instantiation instead.
 
 ```
-error: @ZerkAlias does not support generic typealiases. 'Pair' has type parameters, and Zerk
+error: @InjectableAlias does not support generic typealiases. 'Pair' has type parameters, and Zerk
 matches keys by spelling rather than resolving them. Alias a concrete instantiation instead,
 e.g. typealias IntPair = Pair<Int>.
 ```
@@ -179,13 +179,13 @@ than merging something meaningless.
 
 | what you wrote | error |
 |---|---|
-| `@ZerkAlias` on something other than a typealias | `@ZerkAlias can only be applied to a typealias.` |
-| `@ZerkAlias` on a generic typealias | `@ZerkAlias does not support generic typealiases. 'Pair' has type parameters, and Zerk matches keys by spelling rather than resolving them. Alias a concrete instantiation instead, e.g. typealias IntPair = Pair<Int>.` |
-| `#ZerkAlias<A>()`, or `#ZerkAlias<A, B>` without the trailing `()` | `#ZerkAlias needs at least two types to relate, written as #ZerkAlias<A, B>() — the trailing '()' is required, without it Swift does not pass the types to the macro.` |
-| the same type listed twice | `#ZerkAlias lists 'Storing' twice. Every listed type must be a distinct key.` |
-| two spellings that are already one key | `#ZerkAlias lists '[String]' and 'Array<String>', which are already one key. Every listed type must be a distinct key.` |
-| two types under one aliased key, none primary | `Multiple types are injectable under 'Storing' (FileStore, MemoryStore) and none is primary. 'Storing' and 'Persisting' are the same type (registered via @ZerkAlias), so those declarations claim one key. Mark one with @Injectable(primary: true).` |
-| types that are not interchangeable | the compiler's own, at the `#ZerkAlias` line |
+| `@InjectableAlias` on something other than a typealias | `@InjectableAlias can only be applied to a typealias.` |
+| `@InjectableAlias` on a generic typealias | `@InjectableAlias does not support generic typealiases. 'Pair' has type parameters, and Zerk matches keys by spelling rather than resolving them. Alias a concrete instantiation instead, e.g. typealias IntPair = Pair<Int>.` |
+| `#InjectableAlias<A>()`, or `#InjectableAlias<A, B>` without the trailing `()` | `#InjectableAlias needs at least two types to relate, written as #InjectableAlias<A, B>() — the trailing '()' is required, without it Swift does not pass the types to the macro.` |
+| the same type listed twice | `#InjectableAlias lists 'Storing' twice. Every listed type must be a distinct key.` |
+| two spellings that are already one key | `#InjectableAlias lists '[String]' and 'Array<String>', which are already one key. Every listed type must be a distinct key.` |
+| two types under one aliased key, none primary | `Multiple types are injectable under 'Storing' (FileStore, MemoryStore) and none is primary. 'Storing' and 'Persisting' are the same type (registered via @InjectableAlias), so those declarations claim one key. Mark one with @Injectable(primary: true).` |
+| types that are not interchangeable | the compiler's own, at the `#InjectableAlias` line |
 
 ---
 
